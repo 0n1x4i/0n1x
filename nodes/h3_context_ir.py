@@ -39,57 +39,59 @@ import numpy as np
 import requests
 from PIL import Image
 
+from .onyx_h3_guides import GUIDE_BASE_TEXT, GUIDE_REF_TEXT
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Official guides
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Both files are needed, not one. guides/README.md in ComfyUI-MiniMaxH3-Prompt-
-# Writer states they are vendored verbatim from MiniMaxAI/MiniMax-H3 at revision
-# bfc8ed0353f5a9733be73e6b2c98ec0948195b86, and the reference guide opens by
-# saying its shot, camera, speaker and dialogue formats are "shared with" the
-# base guide. Loading only the reference guide therefore leaves the compiler
-# without the formats it is told to reuse.
-_GUIDE_BASE = "VIDEO_PROMPT_WRITING_GUIDE_base_en.md"
-_GUIDE_REF = "VIDEO_PROMPT_WRITING_GUIDE_ref_en.md"
-
-_DEFAULT_GUIDE_FOLDER = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "ComfyUI-MiniMaxH3-Prompt-Writer-main", "guides",
-)
-
-_guide_cache = {}
+# Both guides are needed, not one: the reference guide opens by saying its shot,
+# camera, speaker and dialogue formats are "shared with" the base guide. Using
+# only the reference guide would leave the compiler without the formats it is
+# told to reuse.
+#
+# Embedded verbatim in onyx_h3_guides.py (vendored from MiniMaxAI/MiniMax-H3 at
+# revision bfc8ed0353f5a9733be73e6b2c98ec0948195b86) rather than read from a
+# separate ComfyUI-MiniMaxH3-Prompt-Writer install on disk: every user of this
+# pack gets them automatically, with nothing to clone or point a path at.
+_GUIDES_TEXT = GUIDE_BASE_TEXT + "\n\n" + GUIDE_REF_TEXT
 
 
-def _load_guides(folder: str) -> str:
-    """Concatenate both official guides, verbatim, base first."""
-    folder = (folder or "").strip() or _DEFAULT_GUIDE_FOLDER
-    key = os.path.abspath(folder)
-    if key in _guide_cache:
-        return _guide_cache[key]
+def _load_guides(folder: str = "") -> str:
+    """Both official guides, verbatim, base first.
+
+    `folder` only matters for the rare case of testing a locally edited guide:
+    leave it empty (the default) and the guides built into the pack are used,
+    no disk access at all. Point it at a folder holding
+    VIDEO_PROMPT_WRITING_GUIDE_base_en.md and VIDEO_PROMPT_WRITING_GUIDE_ref_en.md
+    to override them for this run.
+    """
+    folder = (folder or "").strip()
+    if not folder:
+        return _GUIDES_TEXT
 
     if not os.path.isdir(folder):
         raise RuntimeError(
-            f"[H3 Context-IR] Guide folder not found: {folder}\n"
-            f"-> Point 'guide_folder' at the 'guides' directory of "
-            f"ComfyUI-MiniMaxH3-Prompt-Writer."
+            f"[H3 Context-IR] guide_folder override not found: {folder}\n"
+            f"-> Leave 'guide_folder' empty to use the guides built into the pack, "
+            f"or point it at a real folder to override them."
         )
 
     chunks = []
-    for name in (_GUIDE_BASE, _GUIDE_REF):
+    for name in ("VIDEO_PROMPT_WRITING_GUIDE_base_en.md", "VIDEO_PROMPT_WRITING_GUIDE_ref_en.md"):
         path = os.path.join(folder, name)
         if not os.path.isfile(path):
             raise RuntimeError(
-                f"[H3 Context-IR] Missing guide: {path}\n"
-                f"-> Both {_GUIDE_BASE} and {_GUIDE_REF} are required; the reference "
-                f"guide reuses the formats defined in the base guide."
+                f"[H3 Context-IR] Missing guide in override folder: {path}\n"
+                f"-> Both files are required, or leave 'guide_folder' empty to use "
+                f"the guides built into the pack."
             )
         with open(path, "r", encoding="utf-8") as fh:
             chunks.append(fh.read())
 
     text = "\n\n".join(chunks)
-    _guide_cache[key] = text
-    print(f"📖 [H3 Context-IR] Guides loaded from {folder} ({len(text)} chars)")
+    print(f"📖 [H3 Context-IR] Guides overridden from {folder} ({len(text)} chars)")
     return text
 
 
@@ -1182,10 +1184,13 @@ class OnyxH3ContextIR:
                 # laisser partir un modele Grok vers l'endpoint Google.
                 "model": (_MODELS + _GROK_MODELS, {"default": "gemini-3.6-flash"}),
                 "guide_folder": ("STRING", {
-                    "default": _DEFAULT_GUIDE_FOLDER, "multiline": False,
-                    "tooltip": "Folder holding the two official MiniMax guides. Both are "
-                               "loaded verbatim: the reference guide reuses the shot, camera "
-                               "and dialogue formats defined in the base guide.",
+                    "default": "", "multiline": False,
+                    "tooltip": "Leave empty (default): the two official MiniMax guides are "
+                               "built into the pack, nothing to link or install.\n"
+                               "Only fill this in to override them with a locally edited "
+                               "copy — point it at a folder holding "
+                               "VIDEO_PROMPT_WRITING_GUIDE_base_en.md and "
+                               "VIDEO_PROMPT_WRITING_GUIDE_ref_en.md.",
                 }),
                 "max_tokens": ("INT", {"default": 8192, "min": 512, "max": 65536, "step": 512}),
             },
@@ -1365,7 +1370,7 @@ class OnyxH3ContextIR:
     )
 
     def run(self, intent, duration_seconds, aspect_ratio, target_model,
-            provider, model, guide_folder, max_tokens,
+            provider, model, guide_folder="", max_tokens=8192,
             image_1=None, image_1_role=ROLE_REFERENCE,
             image_2=None, image_2_role=ROLE_REFERENCE,
             image_3=None, image_4=None,

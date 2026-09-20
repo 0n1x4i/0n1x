@@ -67,15 +67,6 @@ _GROK_MODELS = [
     "grok-4.20-0309-reasoning",
 ]
 
-_DEFAULT_CAPTION_INSTRUCTION = (
-    "Describe this image in detail for AI image training. "
-    "Include the subject's appearance, clothing, pose, expression, hair, "
-    "background environment, lighting, colors, camera angle, and overall mood. "
-    "Output ONLY the caption as a single paragraph. No bullet points, no headers, no labels. "
-    "Do not start with 'This image shows' or 'The image depicts'. "
-    "Just describe what is in the image directly."
-)
-
 _SDXL_CAPTION_INSTRUCTION = """You are generating a single caption for an SDXL LoRA training image of a recurring subject. Another mechanism prepends the subject's trigger word to your output, so DO NOT include any name, "she", "the woman", "the person", or any subject reference at the start.
 
 WHAT TO EXCLUDE (never describe these):
@@ -103,7 +94,7 @@ wearing a black microfiber spaghetti-strap sports bra with a scoop neckline and 
 
 wearing a hot pink ribbed knit sports bra with thin double-cord straps and light-wash distressed denim shorts. Seated on a weathered brown wooden deck with horizontal slats. Intense direct side-angle sunlight casts sharp diagonal shadows across the deck. High-angle overhead selfie."""
 
-_CAPTION_MODES = ["non sdxl", "sdxl", "sdxl-caption-json"]
+_CAPTION_MODES = ["sdxl"]
 
 
 def rename_folder(directory, trigger):
@@ -170,9 +161,7 @@ try:
     @PromptServer.instance.routes.get("/lora_caption/get_prompts")
     async def _lora_caption_get_prompts(request):
         return web.json_response({
-            "non sdxl":            _DEFAULT_CAPTION_INSTRUCTION,
-            "sdxl":                _SDXL_CAPTION_INSTRUCTION,
-            "sdxl-caption-json": "",
+            "sdxl": _SDXL_CAPTION_INSTRUCTION,
         })
 
     @PromptServer.instance.routes.post("/lora_caption/rename_files")
@@ -384,11 +373,10 @@ class OnyxLoraCaptionGeneratorNode:
                 "provider": (_PROVIDERS, {"default": "gemini"}),
                 "trigger_word": ("STRING", {"default": "", "multiline": False}),
                 "mode": (_CAPTION_MODES, {
-                    "default": "non sdxl",
+                    "default": "sdxl",
                     "tooltip": (
                         "sdxl: caption style for SDXL person LoRA training "
-                        "(no face/hair/identity, focus on outfit/scene/lighting/framing). "
-                        "non sdxl: generic detailed caption (default)."
+                        "(no face/hair/identity, focus on outfit/scene/lighting/framing)."
                     ),
                 }),
             },
@@ -427,7 +415,7 @@ class OnyxLoraCaptionGeneratorNode:
         return float("nan")
 
     def process_folder(self, input_folder, api_key, provider, trigger_word,
-                       mode="non sdxl",
+                       mode="sdxl",
                        gemini_model="gemini-3.6-flash",
                        vertex_json_folder="", keep_original_names=True,
                        grok_model="grok-4-1-fast-non-reasoning",
@@ -440,13 +428,6 @@ class OnyxLoraCaptionGeneratorNode:
         directory = os.path.join(folder_paths.get_input_directory(), input_folder)
         if not os.path.isdir(directory):
             raise RuntimeError(f"Lora Caption Generator: '{directory}' is not a valid directory.")
-
-        # sdxl-caption-json: skip all API calls and renames, just pack captions.json
-        # from existing <image>/<image_basename>.txt pairs already in the folder.
-        if mode == "sdxl-caption-json":
-            logging.info("Lora Caption Generator: mode=sdxl-caption-json — packing captions.json from existing pairs in %s", directory)
-            self._write_captions_json(directory)
-            return {}
 
         vertex_files = []
         if provider == "vertex":
@@ -483,12 +464,7 @@ class OnyxLoraCaptionGeneratorNode:
         total = len(image_files)
         logging.info("Lora Caption Generator: processing %d images in %s", total, directory)
 
-        if caption_instruction.strip():
-            instruction = caption_instruction.strip()
-        elif mode == "sdxl":
-            instruction = _SDXL_CAPTION_INSTRUCTION
-        else:
-            instruction = _DEFAULT_CAPTION_INSTRUCTION
+        instruction = caption_instruction.strip() or _SDXL_CAPTION_INSTRUCTION
         logging.info("Lora Caption Generator: mode=%s instruction_len=%d", mode, len(instruction))
 
         # Phase 1. Le passage par des noms temporaires n'existe que pour le
