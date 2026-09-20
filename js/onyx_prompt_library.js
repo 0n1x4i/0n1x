@@ -100,6 +100,8 @@ function styleOnce() {
 .apl-warn{color:#ffb4a2;font-size:11px;flex:0 0 auto;max-width:40%}
 .apl-head input{flex:1;background:#040f14;border:1px solid #082a33;border-radius:6px;
   color:#eee;padding:7px 10px;font:13px sans-serif}
+.apl-head select{background:#040f14;border:1px solid #082a33;border-radius:6px;
+  color:#eee;padding:7px 10px;font:13px sans-serif;flex:0 0 auto}
 .apl-head button{background:#082a33;border:1px solid #22b8d4;color:#5fd8ef;
   border-radius:6px;padding:7px 14px;cursor:pointer;font:13px sans-serif}
 /* min-height:0 est ce qui manquait. Un enfant flex a min-height:auto par
@@ -186,6 +188,10 @@ async function openGallery(node) {
     <h3>Prompt library</h3>
     <span class="apl-warn"></span>
     <input placeholder="search — name, tag or prompt text" />
+    <select class="apl-sort" title="Sort by acquisition date">
+      <option value="new">Newest first</option>
+      <option value="old">Oldest first</option>
+    </select>
     <button data-close>Close</button>
   </div>
   <div class="apl-grid"></div>
@@ -197,6 +203,11 @@ async function openGallery(node) {
     const status = back.querySelector(".apl-status");
     if (!probe.ok) back.querySelector(".apl-warn").textContent = "⚠ thumbnails: " + probe.note;
     const search = back.querySelector("input");
+    const sortSel = back.querySelector(".apl-sort");
+    // Retenu d'une ouverture a l'autre : re-choisir "oldest" a chaque fois
+    // serait agacant pour quelqu'un qui trie ses tout premiers prompts une
+    // fois pour toutes.
+    try { sortSel.value = localStorage.getItem("onyx_pl_sort") || "new"; } catch (_) {}
     // Declare avant close(), qui le capture : `let` n'est pas hisse, et une
     // declaration plus bas ne tient que tant que close n'est pas appele plus tot.
     let sentinelObserver = null;
@@ -236,6 +247,13 @@ async function openGallery(node) {
             || e.name.toLowerCase().includes(q)
             || e.prompt.toLowerCase().includes(q)
             || (e.tags || []).some(t => t.toLowerCase().includes(q)));
+
+        // Tri explicite par date d'acquisition plutot que de compter sur
+        // l'ordre du fichier : chaque entree porte deja "created" depuis la
+        // toute premiere version du node, donc ca trie correctement aussi les
+        // prompts enregistres avant ce changement, sans rien migrer.
+        const oldest = sortSel.value === "old";
+        shown.sort((a, b) => oldest ? a.created - b.created : b.created - a.created);
 
         grid.innerHTML = "";
         if (!shown.length) {
@@ -355,6 +373,10 @@ async function openGallery(node) {
     // l'evenement comme premier argument, qui vaut vrai par hasard. Ca marche,
     // et personne ne comprend pourquoi en relisant.
     search.addEventListener("input", () => render(true));
+    sortSel.addEventListener("change", () => {
+        try { localStorage.setItem("onyx_pl_sort", sortSel.value); } catch (_) {}
+        render(true);
+    });
     render();
     search.focus();
 }

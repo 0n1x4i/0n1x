@@ -6,12 +6,13 @@
  */
 import { app } from "../../scripts/app.js";
 // ─── Constantes mode vidéo ─────────────────────────────────────────────────
-const VIDEO_MODELS         = ["Veo 3.1 Lite", "Veo 3.1", "Veo 3.1 Fast", "Kling 3.0", "Kling 2.6", "Kling 3.0 Motion Control", "Seedance 2.0", "Seedance 2.5", "Omni Flash"];
+const VIDEO_MODELS         = ["Veo 3.1 Lite", "Veo 3.1", "Veo 3.1 Fast", "Kling 3.0", "Kling 2.6", "Kling 3.0 Motion Control", "Seedance 2.0", "Seedance 2.5", "Omni Flash", "Wan 3.0"];
 const IMAGE_MODELS_DEFAULT = ["Nano Banana Pro", "Nano Banana 2", "Seedream 4.5", "Seedream 5 Pro", "GPT Image 2.0", "GPT Image 2.5 Flare", "GPT Image 2.5 Sunburst"];
 const VIDEO_ASPECT_RATIOS  = ["16:9", "9:16"];
 const IMAGE_ASPECT_RATIOS  = ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
 const VIDEO_RESOLUTIONS    = ["480p", "720p", "1080p", "4K"];
 const KLING30_MODELS       = ["Kling 3.0"];
+const WAN3_MODELS          = ["Wan 3.0"];
 const IMAGE_RESOLUTIONS    = ["1K", "2K", "4K"];
 const SEEDANCE_MODELS      = ["Seedance 2.0", "Seedance 2.5"];
 // La 2.5 double la longueur d'un seul passage et monte au 4K sur WaveSpeed.
@@ -175,6 +176,7 @@ const DURATION_CONSTRAINTS = {
     "Seedance 2.0":              { min: 4,  max: 15, step: 1, tooltip: "⚠️ Seedance 2.0 : image-to-video uniquement." },
     "Seedance 2.5":              { min: 4,  max: 30, step: 1, tooltip: "Seedance 2.5 : jusqu'à 30 s en un seul passage (contre 15 s en 2.0)." },
     "Omni Flash":                { min: 1,  max: 60, step: 1, tooltip: "ℹ️ Omni Flash: duration is not an API parameter — it is ignored. Steer it from the prompt instead (\"After 3 seconds…\", \"[0-3s] … [3-6s] …\")." },
+    "Wan 3.0":                   { min: 2,  max: 15, step: 1, tooltip: "⚠️ This pack caps Wan 3.0 at 15s (the API allows up to 30)." },
     _veo:                        { min: 4,  max: 8,  step: 1, tooltip: "" },
 };
 function getDurationConstraint(model) {
@@ -270,6 +272,7 @@ function setupVideoResolutionSync(node) {
         const isSeedance = SEEDANCE_MODELS.includes(model);
         const isOmni     = OMNI_MODELS.includes(model);
         const isKling30  = KLING30_MODELS.includes(model);
+        const isWan3     = WAN3_MODELS.includes(model);
 
         let allowedRes, defaultRes;
         if (isOmni) {
@@ -300,6 +303,10 @@ function setupVideoResolutionSync(node) {
             }
         } else if (isKling30) {
             allowedRes = ["720p", "1080p", "4K"];
+            defaultRes = "1080p";
+        } else if (isWan3) {
+            // Aligne avec _WAN3_RESOLUTIONS cote Python : pas de 4K sur Wan 3.0.
+            allowedRes = ["480p", "720p", "1080p"];
             defaultRes = "1080p";
         } else {
             allowedRes = ["720p", "1080p"];
