@@ -196,11 +196,14 @@ class OnyxSaveVideoNoMetadata:
         src = _resolve(video, video_path)
 
         if src is None:
-            raise ValueError(
-                f"{tag} no video connected.\n"
-                f"-> Connect the AIO node's `video` output to `video_path`, or an "
-                f"AB_VIDEO source to `video`.\n"
-                f"   `images` is the wrong output here: it would have to be re-encoded.")
+            # Pas une erreur : l'AIO node en amont renvoie systematiquement une
+            # valeur sur sa sortie `video`, meme en mode image ("" ou
+            # "(not saved)") — c'est la meme sortie qui contiendrait le mp4 si
+            # le node etait en mode video. Sans ce garde-fou, brancher ce node
+            # de sauvegarde faisait echouer TOUT le graphe des qu'une simple
+            # image etait generee, meme quand personne ne voulait de video.
+            print(f"ℹ️  {tag} no video to save (the upstream node ran in image mode) — skipped.")
+            return ("(no video)", "(no video)")
         if not os.path.isfile(src):
             raise FileNotFoundError(
                 f"{tag} the file no longer exists:\n   {src}\n"

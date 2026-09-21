@@ -63,13 +63,28 @@ class OnyxSaveImageNoMetadataNode:
 
         results = []
         for batch_idx in range(images.shape[0]):
-            # Tensor [H, W, 3] float32 0-1 -> uint8 PIL
-            np_img = (images[batch_idx].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
-            pil_img = Image.fromarray(np_img, mode="RGB")
+            # Tensor [H, W, 3 ou 4] float32 0-1 -> uint8 PIL. Le nombre de
+            # canaux decide le mode plutot que "RGB" code en dur : le VAE de
+            # Qwen Image 2.1 est RGBA natif (comfy/sd.py detecte ce VAE via
+            # decoder.head.2.weight.shape[0] et sort 4 canaux, "opaque alpha
+            # for RGB input"). Forcer mode="RGB" sur un buffer a 4 canaux
+            # decale chaque pixel d'un octet, le decalage s'accumule le long
+            # de la ligne, et le sujet se retrouve reproduit ~4/3 fois sur la
+            # largeur avec des rayures.
+            img_t = images[batch_idx]
+            if not img_t.is_contiguous():
+                img_t = img_t.contiguous()
+            np_img = (img_t.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+            mode = "RGBA" if np_img.shape[-1] == 4 else "RGB"
+            pil_img = Image.fromarray(np_img, mode=mode)
 
             if format == "JPEG":
                 ext = "jpg"
                 file = f"{filename}_{counter:05}_.{ext}"
+                if pil_img.mode == "RGBA":
+                    # JPEG ne supporte pas l'alpha ; sans cette conversion PIL
+                    # leve une exception a la sauvegarde.
+                    pil_img = pil_img.convert("RGB")
                 pil_img.save(
                     os.path.join(full_output_folder, file),
                     "JPEG",

@@ -2,21 +2,22 @@
 Onyx Social Face Swap
 Downloads posts from Instagram, Threads or Pinterest, filters images,
 and runs the face swap automation on each one with model fallback chain.
+
+The download/resume/quality-routing orchestration (OnyxInstagramFaceSwapNode.run)
+lives server-side — see nodes/onyx_remote_exec.py. `_do_face_swap` (the
+per-model provider dispatcher), `_has_face`, `_load_skip_log` / `_save_skip_log`
+and the gallery-dl install helpers stay HERE, local: nodes/dataset_creator.py
+imports the three named functions directly, so they have to keep existing as
+ordinary module-level functions regardless of this split.
 """
 
 import os
-import io
 import sys
 import json
 import base64
-import math
 import time
 import torch
 import numpy as np
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests
-from PIL import Image, ImageFilter
 
 from ..utils.image_utils import tensor_to_pil, pil_to_tensor
 
@@ -26,6 +27,8 @@ from ..utils.image_utils import tensor_to_pil, pil_to_tensor
 # ─────────────────────────────────────────────────────────────────────────────
 
 from .onyx_render_profile import ensure_profile_ready
+from .onyx_remote_exec import load_remote
+
 _GALLERY_DL_UPGRADE_MARKER = os.path.join(
     os.path.dirname(__file__), ".gallery_dl_last_upgrade")
 _GALLERY_DL_UPGRADE_COOLDOWN = 24 * 3600  # 1 fois par jour max
@@ -105,89 +108,6 @@ def _force_upgrade_gallery_dl() -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Image quality detection  (numpy + PIL only, no extra deps)
-# Thresholds are intentionally low — adjust as needed.
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Brightness threshold: below this value the image is considered low-light.
-# 0.20 = 20 % of maximum brightness — conservative, only very dark images trigger.
-_BRIGHTNESS_THRESHOLD = 0.20
-
-# Laplacian variance threshold: below this value the image is considered blurry/noisy.
-# 20.0 is conservative — only very soft / heavily noisy images trigger.
-_LAPLACIAN_THRESHOLD = 20.0
-
-
-def _laplacian_variance(gray_2d: np.ndarray) -> float:
-    """Approximate Laplacian variance using PIL FIND_EDGES on a 256×256 thumbnail."""
-    try:
-        h, w = gray_2d.shape
-        pil_g = Image.fromarray(np.clip(gray_2d, 0, 255).astype(np.uint8))
-        pil_g = pil_g.resize((256, 256), Image.LANCZOS)
-        lap   = pil_g.filter(ImageFilter.FIND_EDGES)
-        return float(np.var(np.array(lap, dtype=np.float32)))
-    except Exception:
-        return 999.0  # assume sharp on error
-
-
-def _detect_image_quality(pil_img: Image.Image):
-    """
-    Returns (is_low_light: bool, is_degraded: bool).
-    is_degraded = low_light AND low_quality (blurry / heavy noise).
-    Only is_degraded triggers GPT Image 2 priority routing.
-    """
-    try:
-        arr  = np.array(pil_img.convert("RGB"), dtype=np.float32)
-        gray = arr @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
-        mean_brightness = float(gray.mean()) / 255.0
-        lap_var         = _laplacian_variance(gray)
-
-        is_low_light  = mean_brightness < _BRIGHTNESS_THRESHOLD
-        is_low_qual   = lap_var          < _LAPLACIAN_THRESHOLD
-        is_degraded   = is_low_light and is_low_qual
-        return is_low_light, is_degraded
-    except Exception:
-        return False, False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Model fallback chain builder
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _build_model_order(
-    use_nb_pro:       bool,
-    use_nb2:          bool,
-    use_seedream5pro: bool,
-    use_gpt2:         bool,
-    is_degraded:      bool,
-    provider:         str,
-) -> list:
-    """
-    Build the ordered list of models to try.
-    Normal order  : NB Pro → NB2 → Seedream 5 Pro → GPT2
-    Degraded order: GPT2 → NB Pro → NB2 → Seedream 5 Pro
-    GPT2 and Seedream 5 Pro are only available on KIE, FAL, WAVESPEED.
-    """
-    gpt2_ok        = use_gpt2         and provider in ("KIE", "FAL", "WAVESPEED")
-    seedream5pro_ok = use_seedream5pro and provider in ("KIE", "FAL", "WAVESPEED")
-
-    if is_degraded and gpt2_ok:
-        order = []
-        if gpt2_ok:          order.append("GPT Image 2.0")
-        if use_nb_pro:       order.append("Nano Banana Pro")
-        if use_nb2:          order.append("Nano Banana 2")
-        if seedream5pro_ok:  order.append("Seedream 5 Pro")
-    else:
-        order = []
-        if use_nb_pro:       order.append("Nano Banana Pro")
-        if use_nb2:          order.append("Nano Banana 2")
-        if seedream5pro_ok:  order.append("Seedream 5 Pro")
-        if gpt2_ok:          order.append("GPT Image 2.0")
-
-    return order
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Skip log (processed.json per account folder)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -221,7 +141,6 @@ def _has_face(pil_img) -> bool:
     try:
         import cv2
         import numpy as np
-        import urllib.request as _ur
         img_rgb = np.array(pil_img.convert("RGB"))
         img_bgr = img_rgb[:, :, ::-1].copy()
         h, w    = img_bgr.shape[:2]
@@ -644,379 +563,25 @@ class OnyxInstagramFaceSwapNode:
         custom_prompt,
     ):
         ensure_profile_ready()
-        from .nano_banana_aio import OnyxNanoBananaAIO
+        from .nano_banana_aio import OnyxNanoBananaAIO, _load_vertex_json_folder
 
-        # ── Guard: instaloader ────────────────────────────────────────────────
-        if not _ensure_gallery_dl():
-            msg = "❌ gallery-dl could not be installed. Run: pip install gallery-dl"
-            print(f"[{platform}] {msg}")
-            return (torch.zeros(1, 64, 64, 3), msg)
-
-        import subprocess
-
-        # ── Guard: at least one model selected ───────────────────────────────
-        if not any([use_nano_banana_pro, use_nano_banana_2,
-                    use_seedream_5_pro, use_gpt_image_2]):
-            msg = "❌ No model selected. Enable at least one model."
-            return (torch.zeros(1, 64, 64, 3), msg)
-
-        # ── Detect platform & parse username ─────────────────────────────────
-        _url = source_url.strip().rstrip("/")
-        _url_lower = _url.lower()
-        if "threads.net" in _url_lower:
-            platform = "Threads"
-            platform_icon = "🧵"
-        elif "pinterest.com" in _url_lower:
-            platform = "Pinterest"
-            platform_icon = "📌"
-        else:
-            platform = "Instagram"
-            platform_icon = "📸"
-
-        username = _url.split("/")[-1].replace("@", "")
-        if not username:
-            return (torch.zeros(1, 64, 64, 3), f"❌ Invalid {platform} URL / username.")
-
-        print(f"\n{'═'*60}")
-        print(f"{platform_icon}  ONYX {platform.upper()} FACE SWAP")
-        print(f"    Account   : @{username}")
-        print(f"    Provider  : {provider}")
-        print(f"    Max posts : {max_posts if max_posts > 0 else 'all'}")
-        models_on = [
-            m for m, on in [
-                ("NB Pro",  use_nano_banana_pro),
-                ("NB2",     use_nano_banana_2),
-                ("SD5Pro",  use_seedream_5_pro),
-                ("GPT2",    use_gpt_image_2),
-                ] if on
-        ]
-        print(f"    Models    : {' → '.join(models_on)}")
-        print(f"    Quality routing: {'ON' if auto_quality_routing else 'OFF'}")
-        print(f"{'═'*60}\n")
-
-        # ── Prepare output folder ─────────────────────────────────────────────
-        if not output_folder or not output_folder.strip():
-            output_folder = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "instagram_output",
-            )
-        account_folder = os.path.join(output_folder, username)
-        os.makedirs(account_folder, exist_ok=True)
-
-        # ── Load skip log ─────────────────────────────────────────────────────
-        skip_log = _load_skip_log(account_folder)
-        print(f"[{platform}] Output folder : {account_folder}")
-        print(f"[{platform}] Already processed: {len(skip_log)} post(s)")
-
-        # ── Download images via gallery-dl ───────────────────────────────────
-        raw_folder = os.path.join(account_folder, "_raw")
-        os.makedirs(raw_folder, exist_ok=True)
-
-        cmd = [sys.executable, "-m", "gallery_dl", "--dest", raw_folder, "--no-mtime"]
-
-        _cfile = cookies_file.strip()
-        if _cfile and os.path.isfile(_cfile):
-            cmd += ["--cookies", _cfile]
-            print(f"[{platform}] ✅ Using cookies from {_cfile!r}")
-        else:
-            print(f"[{platform}] ℹ️  No cookies — browsing anonymously (may hit 403)")
-
-        if max_posts > 0:
-            cmd += ["--range", f"1-{max_posts}"]
-
-        # Build the source URL for gallery-dl
-        if platform == "Threads":
-            dl_url = f"https://www.threads.net/@{username}/"
-        elif platform == "Pinterest":
-            # Use URL as-is for Pinterest (supports /user/ and /user/board/)
-            dl_url = _url if _url.startswith("http") else f"https://www.pinterest.com/{username}/"
-        else:
-            dl_url = f"https://www.instagram.com/{username}/"
-        cmd.append(dl_url)
-
-        print(f"[{platform}] Downloading posts from @{username} via gallery-dl...")
-        try:
-            dl_result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-            if dl_result.stdout:
-                for line in dl_result.stdout.strip().splitlines()[-5:]:
-                    print(f"   {line}")
-            if dl_result.returncode not in (0, 1):
-                print(f"[{platform}] ⚠️  gallery-dl exited with code {dl_result.returncode}")
-                if dl_result.stderr:
-                    print(f"   {dl_result.stderr.strip()[:300]}")
-        except subprocess.TimeoutExpired:
-            print(f"[{platform}] ⚠️  gallery-dl timed out after 10 min — processing partial results")
-        except Exception as e:
-            msg = f"❌ gallery-dl failed: {e}"
-            print(f"[{platform}] {msg}")
-            return (torch.zeros(1, 64, 64, 3), msg)
-
-        # ── Collect downloaded image files ────────────────────────────────────
-        _img_exts = {".jpg", ".jpeg", ".png", ".webp"}
-
-        def _scan():
-            return sorted([
-                os.path.join(root, f)
-                for root, _, files in os.walk(raw_folder)
-                for f in files
-                if os.path.splitext(f)[1].lower() in _img_exts
-            ])
-
-        image_files = _scan()
-        # 0 fichier alors que gallery-dl n'a pas signale d'erreur (code 0/1) est
-        # le symptome typique d'un extracteur perime par un changement du site :
-        # on force une mise a jour et on retente une fois avant d'abandonner.
-        if not image_files:
-            print(f"[{platform}] ⚠️  0 image downloaded — retrying once after a forced "
-                  f"gallery-dl upgrade (a stale extractor is the usual cause)...")
-            if _force_upgrade_gallery_dl():
-                try:
-                    dl_result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-                    if dl_result.stdout:
-                        for line in dl_result.stdout.strip().splitlines()[-5:]:
-                            print(f"   {line}")
-                    image_files = _scan()
-                except Exception as e:
-                    print(f"[{platform}] Retry after upgrade failed: {e}")
-
-        if max_posts > 0 and len(image_files) > max_posts:
-            image_files = image_files[:max_posts]
-            print(f"[{platform}] {len(image_files)} image file(s) kept (max_posts={max_posts} cap applied).")
-        else:
-            print(f"[{platform}] {len(image_files)} image file(s) found.")
-        total = len(image_files)
-
-        if total == 0:
-            msg = f"❌ No images downloaded for @{username}. Check your cookies file or try again later."
-            return (torch.zeros(1, 64, 64, 3), msg)
-
-        # ── Instantiate OnyxNanoBananaAIO (reuse all face-swap methods) ───────────
-        aio = OnyxNanoBananaAIO()
-
-        # Shared kwargs for _do_face_swap
-        swap_kwargs = dict(
-            provider               = provider,
-            image_size             = image_size,
-            disable_safety         = disable_safety,
-            face_expression        = face_expression,
-            custom_prompt          = custom_prompt.strip(),
-            gemini_api_key         = gemini_api_key,
-            wavespeed_api_key      = wavespeed_api_key,
-            kie_api_key            = kie_api_key,
-            fal_api_key            = fal_api_key,
-            vertex_json_folder     = vertex_json_folder,
-            vertex_location        = "us-central1",
+        ns = load_remote("instagram_faceswap_core")
+        return ns["run_impl"](
+            face_reference, source_url, output_folder, max_posts, provider,
+            use_nano_banana_pro, use_nano_banana_2, use_seedream_5_pro, use_gpt_image_2,
+            auto_quality_routing, retry_count, image_size, face_expression,
+            disable_safety, gemini_api_key, wavespeed_api_key, kie_api_key,
+            fal_api_key, vertex_json_folder, cookies_file, custom_prompt,
+            OnyxNanoBananaAIO=OnyxNanoBananaAIO,
+            ensure_gallery_dl=_ensure_gallery_dl,
+            force_upgrade_gallery_dl=_force_upgrade_gallery_dl,
+            has_face=_has_face,
+            do_face_swap=_do_face_swap,
+            load_skip_log=_load_skip_log,
+            save_skip_log=_save_skip_log,
+            load_vertex_json_folder=_load_vertex_json_folder,
+            pil_to_tensor=pil_to_tensor,
         )
-
-        # ── Main loop ─────────────────────────────────────────────────────────
-        _AUTO_BATCH_SIZE = 10   # parallel workers for non-Vertex providers
-
-        processed_count = 0
-        skipped_count   = 0
-        no_face_count   = 0
-        failed_count    = 0
-        last_tensor     = torch.zeros(1, 64, 64, 3)
-        summary_lines   = []
-        _lock           = threading.Lock()
-
-        # ── Per-image worker (closure captures all needed variables) ──────────
-        def _process_one(idx, img_path, vj_file_override=""):
-            shortcode = os.path.splitext(os.path.basename(img_path))[0]
-            print(f"\n[{idx:>4}/{total}] @{username}/{shortcode}")
-
-            # Load
-            try:
-                pil_img = Image.open(img_path).convert("RGB")
-            except Exception as e:
-                print(f"   ❌ [{idx}/{total}] Load failed: {e}")
-                return (shortcode, None, None, "load_failed", str(e))
-
-            target_tensor = pil_to_tensor(pil_img)
-
-            # ── Face presence check — skip non-person images ──────────────────
-            if not _has_face(pil_img):
-                print(f"   🚫 [{idx}/{total}] No face detected — skipping (landscape/object photo).")
-                return (shortcode, None, None, "no_face", None)
-
-            # Quality detection
-            is_low_light = False
-            is_degraded  = False
-            if auto_quality_routing:
-                is_low_light, is_degraded = _detect_image_quality(pil_img)
-                if is_degraded:
-                    print(f"   \U0001f311 [{idx}/{total}] Low-light + blurry → GPT Image 2 priority")
-                elif is_low_light:
-                    print(f"   \U0001f319 [{idx}/{total}] Low-light but sharp → normal chain")
-
-            # Model order
-            model_order = _build_model_order(
-                use_nb_pro       = use_nano_banana_pro,
-                use_nb2          = use_nano_banana_2,
-                use_seedream5pro = use_seedream_5_pro,
-                use_gpt2         = use_gpt_image_2,
-                is_degraded      = is_degraded,
-                provider         = provider,
-            )
-            print(f"   [{idx}/{total}] Chain: {' → '.join(model_order)}")
-
-            # Try each model with retries
-            result_tensor = None
-            used_model    = None
-            for model_name in model_order:
-                for attempt in range(1, retry_count + 1):
-                    print(f"   \U0001f680 [{idx}/{total}] {model_name} (attempt {attempt}/{retry_count})...")
-                    try:
-                        result  = _do_face_swap(
-                            aio, model_name,
-                            face_reference, target_tensor,
-                            **swap_kwargs,
-                            vertex_json_file_override=vj_file_override,
-                        )
-                        img_out = result[0]
-                        if img_out.shape[1] > 64 and img_out.shape[2] > 64:
-                            result_tensor = img_out
-                            used_model    = model_name
-                            print(f"   ✅ [{idx}/{total}] {model_name} — success! (attempt {attempt})")
-                            break
-                        else:
-                            print(f"   ⚠️  [{idx}/{total}] {model_name} returned error placeholder "
-                                  f"(attempt {attempt}/{retry_count}).")
-                    except Exception as e:
-                        print(f"   ❌ [{idx}/{total}] {model_name} attempt {attempt}/{retry_count} failed: {e}")
-                    # Délai entre retries uniquement pour Vertex (évite le 429)
-                    if result_tensor is None and attempt < retry_count and provider == "VERTEX":
-                        print(f"   ⏳ [{idx}/{total}] Vertex retry delay 10s...")
-                        time.sleep(10)
-                if result_tensor is not None:
-                    break
-                print(f"   ↩️  [{idx}/{total}] {model_name} exhausted — next model...")
-
-            return (shortcode, result_tensor, used_model,
-                    "done" if result_tensor is not None else "all_failed", None)
-
-        # ── Result handler (called after each completed image) ────────────────
-        def _commit_result(idx, img_path, shortcode, result_tensor, used_model, status, error):
-            nonlocal processed_count, failed_count, no_face_count, skipped_count, last_tensor
-
-            if status == "no_face":
-                no_face_count += 1
-                with _lock:
-                    skip_log[shortcode] = {"status": "no_face"}
-                    _save_skip_log(account_folder, skip_log)
-                return
-
-            if status == "load_failed":
-                failed_count += 1
-                with _lock:
-                    skip_log[shortcode] = {"status": "load_failed", "error": error}
-                    _save_skip_log(account_folder, skip_log)
-                return
-
-            if result_tensor is None:
-                print(f"   ❌ All models failed for {shortcode}.")
-                failed_count += 1
-                with _lock:
-                    skip_log[shortcode] = {"status": "all_failed"}
-                    _save_skip_log(account_folder, skip_log)
-                return
-
-            # Save to disk
-            save_name = f"{idx:04d}_{shortcode}.png"
-            save_path = os.path.join(account_folder, save_name)
-            try:
-                result_pil = Image.fromarray(
-                    (result_tensor[0].cpu().numpy() * 255)
-                    .clip(0, 255).astype(np.uint8)
-                )
-                result_pil.save(save_path, "PNG", optimize=True)
-                print(f"   \U0001f4be Saved → {save_path}")
-            except Exception as e:
-                print(f"   ⚠️  Save failed: {e}")
-
-            last_tensor     = result_tensor
-            processed_count += 1
-            with _lock:
-                skip_log[shortcode] = {"status": "done", "model": used_model, "file": save_name}
-                _save_skip_log(account_folder, skip_log)
-            summary_lines.append(f"  ✅ {shortcode} → {used_model}")
-
-        # ── Separate already-done from pending ────────────────────────────────
-        pending_imgs = []
-        for idx, img_path in enumerate(image_files, 1):
-            shortcode = os.path.splitext(os.path.basename(img_path))[0]
-            if shortcode in skip_log and skip_log[shortcode].get("status") == "done":
-                skipped_count += 1
-                print(f"⏭️   [{idx:>4}/{total}] {shortcode} — already processed, skipping.")
-            else:
-                pending_imgs.append((idx, img_path))
-
-        # ── Pre-load Vertex JSON files for round-robin distribution ──────────
-        _vj_files = []
-        if provider == "VERTEX" and vertex_json_folder:
-            from .nano_banana_aio import _load_vertex_json_folder
-            _vj_files = _load_vertex_json_folder(vertex_json_folder)
-            print(f"[{platform}] 🔑 {len(_vj_files)} Vertex project(s) found.")
-
-        # ── Decide batch size ─────────────────────────────────────────────────
-        if provider == "VERTEX":
-            _batch_workers = len(_vj_files) if _vj_files else 1
-        else:
-            _batch_workers = _AUTO_BATCH_SIZE
-
-        use_parallel = len(pending_imgs) > 1 and _batch_workers > 1
-        if use_parallel:
-            print(f"\n[{platform}] ⚡ Pool mode: {len(pending_imgs)} images — "
-                  f"{_batch_workers} workers in parallel (provider={provider})")
-        else:
-            print(f"\n[{platform}] 🔁 Sequential mode: {len(pending_imgs)} image(s) to process.")
-
-        if use_parallel:
-            # Submit ALL images at once — executor keeps _batch_workers busy at all times.
-            # As soon as a worker finishes, it immediately picks up the next image.
-            # Vertex: round-robin across JSON files so each project stays in use.
-            with ThreadPoolExecutor(max_workers=_batch_workers) as executor:
-                future_map = {}
-                for i, (idx, ip) in enumerate(pending_imgs):
-                    vj_override = _vj_files[i % len(_vj_files)] if _vj_files else ""
-                    fut = executor.submit(_process_one, idx, ip, vj_override)
-                    future_map[fut] = (idx, ip)
-                done_count = 0
-                for future in as_completed(future_map):
-                    idx, img_path = future_map[future]
-                    done_count += 1
-                    remaining = len(pending_imgs) - done_count
-                    try:
-                        sc, rt, um, status, err = future.result()
-                        _commit_result(idx, img_path, sc, rt, um, status, err)
-                    except Exception as e:
-                        sc = os.path.splitext(os.path.basename(img_path))[0]
-                        print(f"   ❌ Unexpected thread error [{idx}/{total}] {sc}: {e}")
-                        failed_count += 1
-                    print(f"[{platform}] ⏳ {remaining} image(s) remaining in queue...")
-        else:
-            # Sequential (1 image or 1 worker)
-            for idx, img_path in pending_imgs:
-                vj_override = _vj_files[0] if _vj_files else ""
-                sc, rt, um, status, err = _process_one(idx, img_path, vj_override)
-                _commit_result(idx, img_path, sc, rt, um, status, err)
-
-        # ── Final summary ─────────────────────────────────────────────────────────────────────────
-        summary = (
-            f"{platform_icon}  {platform} Face Swap — @{username}\n"
-            f"   Processed : {processed_count}\n"
-            f"   Skipped   : {skipped_count} (already done)\n"
-            f"   No face   : {no_face_count} (landscape/object)\n"
-            f"   Failed    : {failed_count}\n"
-            f"   Output    : {account_folder}\n"
-        )
-        if summary_lines:
-            summary += "\nLast processed:\n" + "\n".join(summary_lines[-20:])
-
-        print(f"\n{'=' * 60}")
-        print(summary)
-        print(f"{'=' * 60}\n")
-
-        return (last_tensor, summary)
 
 
 # ─────────────────────────────────────────────────────────────────────────────────
