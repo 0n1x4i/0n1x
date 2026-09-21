@@ -10,16 +10,16 @@ The original node (speed_sampler.py in the source repo) used ComfyUI's newer
 io.ComfyNode/Schema API. This is a straight port to the classic INPUT_TYPES /
 RETURN_TYPES / FUNCTION style used everywhere else in this pack, so it registers the
 same way as every other Onyx node. The framework-agnostic math itself
-(speed_hd_core.py / speed_hd_spectral_utils.py) is otherwise unchanged.
+(speed_hd_core.py / speed_hd_spectral_utils.py) is otherwise unchanged and stays local
+— it is third-party MIT code with its own attribution file, not something this pack
+needs to protect.
+
+get_sampler()'s own body — building the KSAMPLER and its extra_options — is fetched
+server-side at runtime; see nodes/onyx_remote_exec.py.
 """
 from __future__ import annotations
 
 from typing import List
-
-import torch
-
-import comfy.samplers
-import comfy.k_diffusion.sampling as kds
 
 from .speed_hd_core import (
     _PRESETS,
@@ -27,37 +27,10 @@ from .speed_hd_core import (
     _parse_sigmas,
     sample_speed_core,
 )
-
-
 from .onyx_render_profile import ensure_profile_ready
-@torch.no_grad()
-def sample_speed_hd(
-    model, x, sigmas, extra_args=None, callback=None, disable=None,
-    *,
-    transform: str = "dct",
-    base_sampler: str = "euler",
-    mode: str = "delta_optimal",
-    scales: List[float] = None,
-    delta: float = 0.01,
-    spectrum_A: float = 203.615097,
-    spectrum_beta: float = 1.915461,
-    manual_sigmas: List[float] = None,
-    seed: int = 0,
-):
-    """Comfy-compatible ``sample_*`` function — resolves the base solver from
-    comfy.k_diffusion.sampling, then delegates the segmented spectral-expansion
-    sampling to sample_speed_core."""
-    sampler_fn = getattr(kds, f"sample_{base_sampler}", None)
-    if sampler_fn is None:
-        raise ValueError(f"[Onyx Speed HD] Unknown base sampler {base_sampler!r}.")
+from .onyx_remote_exec import load_remote
 
-    return sample_speed_core(
-        sampler_fn, model, x, sigmas,
-        extra_args=extra_args, callback=callback, disable=disable,
-        transform=transform, mode=mode, scales=scales, delta=delta,
-        spectrum_A=spectrum_A, spectrum_beta=spectrum_beta,
-        manual_sigmas=manual_sigmas, seed=seed,
-    )
+import comfy.k_diffusion.sampling as kds
 
 
 def _list_samplers() -> List[str]:
@@ -150,30 +123,15 @@ class OnyxSpeedHDSampler:
         manual_sigmas, spectrum_A, spectrum_beta, seed,
     ):
         ensure_profile_ready()
-        preset = _PRESETS.get(model_preset)
-        if preset is not None:
-            A, beta = preset["A"], preset["beta"]
-        else:
-            A, beta = float(spectrum_A), float(spectrum_beta)
-
-        parsed_scales = _parse_scales(scales)
-        parsed_sigmas = _parse_sigmas(manual_sigmas) if mode == "manual" else []
-
-        sampler = comfy.samplers.KSAMPLER(
-            sample_speed_hd,
-            extra_options={
-                "transform": transform,
-                "base_sampler": base_sampler,
-                "mode": mode,
-                "scales": parsed_scales,
-                "delta": float(delta),
-                "spectrum_A": A,
-                "spectrum_beta": beta,
-                "manual_sigmas": parsed_sigmas,
-                "seed": int(seed),
-            },
+        ns = load_remote("onyx_speed_hd_sampler_core")
+        return ns["get_sampler_impl"](
+            base_sampler, transform, mode, model_preset, scales, delta,
+            manual_sigmas, spectrum_A, spectrum_beta, seed,
+            PRESETS=_PRESETS,
+            parse_scales=_parse_scales,
+            parse_sigmas=_parse_sigmas,
+            sample_speed_core=sample_speed_core,
         )
-        return (sampler,)
 
 
 NODE_CLASS_MAPPINGS = {

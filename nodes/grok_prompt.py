@@ -6,17 +6,17 @@ Calls the xAI Grok API directly (api.x.ai) - no OpenRouter middleman.
 Get your API key at: https://console.x.ai
 Same image+text message format as OnyxGeminiPromptNode._call_grok() in gemini_prompt.py,
 kept consistent so both nodes talk to the API the same way.
+
+The actual API call (message building, request, usage logging) lives server-side
+— see nodes/onyx_remote_exec.py. This file keeps the ComfyUI scaffolding
+(INPUT_TYPES, model list, the presets REST routes) local.
 """
 
-import base64
-import io
 import json
 import os
 import logging
 
-import numpy as np
-import requests
-from PIL import Image
+from .onyx_remote_exec import load_remote
 
 
 # Vision-capable models (support image input) first, text-only models after.
@@ -32,35 +32,6 @@ _GROK_MODELS = [
     "grok-3-mini",
     "grok-3-mini-fast",
 ]
-
-_XAI_URL = "https://api.x.ai/v1/chat/completions"
-
-# Taille exacte du tenseur que l'Onyx Image Batch Loader renvoie quand sa
-# liste est vide : torch.zeros((1, 64, 64, 3)). Ce n'est pas une image, c'est un
-# bouchon — mais rien dans le type IMAGE de ComfyUI ne permet de le distinguer
-# d'une vraie image en aval.
-_PLACEHOLDER_SIDE = 64
-
-
-def _is_placeholder_frame(frame) -> bool:
-    """True si la frame est le carre noir 64x64 d'un Batch Loader vide.
-
-    Envoyer ce bouchon a un modele vision coute des tokens image pour faire
-    analyser du vide, et brouille la reponse : le modele decrit consciencieusement
-    un rectangle noir. Le test porte sur la taille ET le contenu — une vraie image
-    64x64 entierement noire serait aussi refusee, mais elle n'a de toute facon
-    aucune valeur comme reference visuelle.
-    """
-    try:
-        h, w = int(frame.shape[0]), int(frame.shape[1])
-        if h != _PLACEHOLDER_SIDE or w != _PLACEHOLDER_SIDE:
-            return False
-        # Tolerance sous 1/255 : le tenseur est en float, une valeur strictement
-        # nulle n'est pas garantie apres un passage par un autre node.
-        return float(frame.max()) < (1.0 / 255.0)
-    except Exception:
-        return False
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Presets — meme mecanique que OnyxNanoBananaAIO : un JSON a cote du node, deux
@@ -141,19 +112,6 @@ try:
                 return web.json_response({"success": False, "error": str(e)}, status=500)
 except Exception:
     logging.warning("Onyx Grok: could not register preset routes (server not available)")
-
-
-def _apply_trigger(text: str, trigger: str) -> str:
-    """Replace the TRIGGER placeholder with the user's trigger word.
-
-    Same convention as the Dataset Creator's CAPTIONS files, so a prompt written
-    for one can be pasted into the other. Case-sensitive on purpose:
-    a prompt that legitimately contains the word "trigger" in a sentence must
-    not be mangled.
-    """
-    if not text:
-        return text
-    return text.replace("TRIGGER", trigger) if trigger else text
 
 
 class OnyxGrokPromptNode:
@@ -244,140 +202,9 @@ class OnyxGrokPromptNode:
         max_tokens=1024,
         trigger_word="",
     ):
-        # Cache key across executions
         ensure_profile_ready()
-        key = api_key.strip()
-        if key:
-            OnyxGrokPromptNode._cached_api_key = key
-        else:
-            key = OnyxGrokPromptNode._cached_api_key
-
-        if not key:
-            raise RuntimeError(
-                "[Onyx Grok] API key is required. Get yours at https://console.x.ai"
-            )
-
-        trigger = (trigger_word or "").strip()
-        prompt = _apply_trigger(prompt or "", trigger)
-
-        if not prompt.strip():
-            raise RuntimeError("[Onyx Grok] Prompt cannot be empty.")
-
-        if not trigger and "TRIGGER" in prompt:
-            print("⚠️  [Onyx Grok] The prompt contains TRIGGER but trigger_word is empty — "
-                  "the placeholder is sent to the model as the literal word.")
-
-        # Build the user message content — a list of image_url parts (one per
-        # image in the batch) followed by the text part, same shape as
-        # OnyxGeminiPromptNode._call_grok() in gemini_prompt.py.
-        user_content = []
-        _sent, _skipped = 0, 0
-        if image is not None:
-            for i in range(image.shape[0]):
-                frame = image[i]
-                if _is_placeholder_frame(frame):
-                    _skipped += 1
-                    continue
-                img_np = (255.0 * frame.cpu().numpy()).clip(0, 255).astype(np.uint8)
-                pil = Image.fromarray(img_np)
-                buf = io.BytesIO()
-                pil.save(buf, format="PNG")
-                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-                user_content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{b64}"},
-                })
-                _sent += 1
-
-        if _skipped:
-            print(
-                f"⚠️  [Onyx Grok] {_skipped} image(s) placeholder ignoree(s) "
-                f"(64x64 noire — Batch Loader vide). Vision non facturee pour rien."
-            )
-        if _skipped and _sent == 0:
-            print(
-                "ℹ️  [Onyx Grok] Aucune image reelle → requete texte seule. "
-                "Un modele vision n'est pas necessaire ici."
-            )
-
-        user_content.append({"type": "text", "text": prompt.strip()})
-
-        messages = [{"role": "user", "content": user_content}]
-
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_completion_tokens": max_tokens,
-        }
-        headers = {
-            "Authorization": "Bearer " + key,
-            "Content-Type": "application/json",
-        }
-
-        OnyxGrokPromptNode._api_call_count += 1
-        # _sent, pas image.shape[0] : c'est le nombre d'images REELLEMENT dans le
-        # payload. Compter le tenseur d'entree afficherait "images=1" alors qu'un
-        # placeholder vient d'etre ecarte — exactement le genre de log qui fait
-        # chercher une facture vision inexistante.
-        print(
-            f"🛰️  [Onyx Grok] API CALL #{OnyxGrokPromptNode._api_call_count} "
-            f"(depuis le demarrage de ComfyUI) — model={model} | images envoyees={_sent} | "
-            f"temp={temperature:.2f} | max_tokens={max_tokens}"
-            + (f" | trigger='{trigger}'" if trigger else "")
+        ns = load_remote("grok_prompt_core")
+        return ns["generate_impl"](
+            OnyxGrokPromptNode, prompt, model, image, api_key,
+            temperature, max_tokens, trigger_word,
         )
-        logging.info(
-            "[Onyx Grok] Calling %s (model=%s, images=%d, temp=%.2f, max_tokens=%d)",
-            _XAI_URL, model, _sent, temperature, max_tokens,
-        )
-
-        try:
-            resp = requests.post(_XAI_URL, json=payload, headers=headers, timeout=180)
-            # resp.history contient les reponses intermediaires suivies par
-            # requests. Non vide = la requete a ete rejouee apres une
-            # redirection, et le corps a donc ete envoye plus d'une fois — ce qui
-            # se verrait comme plusieurs requetes cote fournisseur pour un seul
-            # appel du node. C'est la seule facon depuis ici de distinguer
-            # "le node a appele 2 fois" de "un appel a produit 2 requetes HTTP".
-            if resp.history:
-                _hops = " → ".join(f"{r.status_code} {r.url}" for r in resp.history)
-                print(
-                    f"⚠️  [Onyx Grok] {len(resp.history)} redirection(s) suivie(s) : {_hops}\n"
-                    f"   Le corps de la requete a ete renvoye a chaque saut."
-                )
-            resp.raise_for_status()
-            data = resp.json()
-
-            # Ce que le fournisseur dit avoir consomme, a comparer directement
-            # avec son dashboard. Un ecart entre ces chiffres et la facture
-            # signifie que le surplus vient d'ailleurs que de ce node.
-            _u = data.get("usage") or {}
-            if _u:
-                print(
-                    f"📊 [Onyx Grok] usage rapporte par xAI — "
-                    f"prompt={_u.get('prompt_tokens', '?')} | "
-                    f"completion={_u.get('completion_tokens', '?')} | "
-                    f"total={_u.get('total_tokens', '?')}"
-                )
-        except requests.exceptions.HTTPError as e:
-            msg = "[Onyx Grok] API error " + str(e.response.status_code)
-            try:
-                body = e.response.json()
-                if "error" in body:
-                    msg += " - " + str(body["error"])
-            except Exception:
-                msg += " - " + e.response.text[:300]
-            raise RuntimeError(msg)
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError("[Onyx Grok] Request error: " + str(e))
-
-        choices = data.get("choices", [])
-        if not choices:
-            raise RuntimeError("[Onyx Grok] Empty response - no choices returned.")
-
-        text = choices[0].get("message", {}).get("content", "").strip()
-        if not text:
-            raise RuntimeError("[Onyx Grok] Empty content returned by API.")
-
-        logging.info("[Onyx Grok] Done - %d chars returned.", len(text))
-        return (text,)
