@@ -402,7 +402,7 @@ class OnyxH3ContextIR:
 
         guides_text = _load_guides(guide_folder)
 
-        ns = load_remote("h3_context_ir_core")
+        ns = load_remote("h3_context_ir_core", extra_globals={"__file__": __file__})
         return ns["run_impl"](
             OnyxH3ContextIR._grounding_cache, guides_text,
             intent, duration_seconds, aspect_ratio, target_model,
