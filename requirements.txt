@@ -28,6 +28,8 @@ PyWavelets           # speed_hd_spectral_utils.py — wavelet pass
 imageio              # onyx_image_batch_loader.py — video decode fallback
 fal-client           # nano_banana_aio.py — Fal provider
 gallery-dl           # instagram_faceswap.py — media fetching
+transformers>=4.57.0 # krea2_carousel/local_vlm.py — Qwen3-VL local pose analysis (needs >=4.57)
+accelerate>=1.1.0    # krea2_carousel/local_vlm.py — device_map loading of the local VLM
 
 # NOT a dependency, listed here so nobody adds it back:
 #   `google` on PyPI is "Python bindings to the Google search engine", last

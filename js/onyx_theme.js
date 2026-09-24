@@ -16,6 +16,10 @@ const ALL_NODES = [
     "Onyx_Renoise",
     "Onyx_Camera_Look",
     "Onyx_Apply_LUT",
+    "Onyx_Clarity",
+    "Onyx_Dehaze",
+    "Onyx_Match_Levels",
+    "Onyx_Skin_Tone",
     "OnyxInstagramFaceSwapNode",
     "OnyxDatasetCreatorNode",
     "OnyxImageBatchLoader",
@@ -41,6 +45,12 @@ const ALL_NODES = [
     "OnyxVideoChainCommit",
     "OnyxTemporalMaskSmooth",
     "OnyxSessionNode",
+    // Krea2 Carousel (porte NodoForgeLab2) — l'UI DOM est translucide pour laisser voir les particules
+    "OnyxVisualPromptDirector",
+    "OnyxPoseCarouselDirector",
+    "OnyxTextCarouselDirector",
+    "OnyxKrea2CarouselDirector",
+    "OnyxKrea2PoseListPrep",
 ];
  
 function applyFireTheme(node) {

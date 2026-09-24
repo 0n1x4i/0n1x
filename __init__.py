@@ -124,6 +124,36 @@ except Exception as _e:
     Onyx_Apply_LUT = None
     print(f"[Onyx] ❌ Apply LUT failed: {_e}")
 
+try:
+    _cd_mod = _load_pp("Onyx_Clarity_Dehaze.py", "Onyx_Clarity_Dehaze_mod")
+    Onyx_Clarity      = _cd_mod.Onyx_Clarity
+    Onyx_Dehaze       = _cd_mod.Onyx_Dehaze
+    Onyx_Match_Levels = _cd_mod.Onyx_Match_Levels
+    print("[Onyx] ✅ Clarity / Dehaze / Match Levels chargés")
+except Exception as _e:
+    Onyx_Clarity = Onyx_Dehaze = Onyx_Match_Levels = None
+    print(f"[Onyx] ❌ Clarity/Dehaze failed: {_e}")
+
+try:
+    _st_mod = _load_pp("Onyx_Skin_Tone.py", "Onyx_Skin_Tone_mod")
+    Onyx_Skin_Tone = _st_mod.Onyx_Skin_Tone
+    print("[Onyx] ✅ Skin Tone Line chargé")
+except Exception as _e:
+    Onyx_Skin_Tone = None
+    print(f"[Onyx] ❌ Skin Tone failed: {_e}")
+
+# Krea2 Carousel (porte V1 du pack NodoForgeLab2 Beta v2.3) — 5 nodes + routes /onyx/nf/*.
+# Charge dans un try : si transformers/huggingface_hub manquent, le reste d'Onyx demarre quand meme.
+try:
+    from .nodes.krea2_carousel import (
+        NODE_CLASS_MAPPINGS as _K2C_NODES,
+        NODE_DISPLAY_NAME_MAPPINGS as _K2C_NAMES,
+    )
+    print(f"[Onyx] ✅ Krea2 Carousel chargé ({len(_K2C_NODES)} nodes)")
+except Exception as _e:
+    _K2C_NODES, _K2C_NAMES = {}, {}
+    print(f"[Onyx] ❌ Krea2 Carousel failed: {_e}")
+
 WEB_DIRECTORY = "./js"
 
 NODE_CLASS_MAPPINGS["OnyxNanoBananaAIO"] = OnyxNanoBananaAIO
@@ -172,6 +202,10 @@ NODE_CLASS_MAPPINGS["OnyxSessionNode"] = OnyxSessionNode
 if Onyx_Renoise:     NODE_CLASS_MAPPINGS["Onyx_Renoise"]     = Onyx_Renoise
 if Onyx_Camera_Look: NODE_CLASS_MAPPINGS["Onyx_Camera_Look"] = Onyx_Camera_Look
 if Onyx_Apply_LUT:   NODE_CLASS_MAPPINGS["Onyx_Apply_LUT"]   = Onyx_Apply_LUT
+if Onyx_Clarity:      NODE_CLASS_MAPPINGS["Onyx_Clarity"]      = Onyx_Clarity
+if Onyx_Dehaze:       NODE_CLASS_MAPPINGS["Onyx_Dehaze"]       = Onyx_Dehaze
+if Onyx_Match_Levels: NODE_CLASS_MAPPINGS["Onyx_Match_Levels"] = Onyx_Match_Levels
+if Onyx_Skin_Tone:    NODE_CLASS_MAPPINGS["Onyx_Skin_Tone"]    = Onyx_Skin_Tone
 
 NODE_DISPLAY_NAME_MAPPINGS["OnyxNanoBananaAIO"] = "Onyx Image and Video Edit AIO"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxGeminiPromptNode"] = "Onyx Prompt Generator"
@@ -219,5 +253,12 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxSessionNode"] = "Onyx Session"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Renoise"]     = "Onyx Renoise"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Camera_Look"] = "📷 Onyx Camera Look"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Apply_LUT"]   = "🎨 Onyx Apply LUT"
+NODE_DISPLAY_NAME_MAPPINGS["Onyx_Clarity"]      = "✨ Onyx Clarity"
+NODE_DISPLAY_NAME_MAPPINGS["Onyx_Dehaze"]       = "🌫️ Onyx Dehaze"
+NODE_DISPLAY_NAME_MAPPINGS["Onyx_Match_Levels"] = "🎚️ Onyx Match Levels (vs pre-refine)"
+NODE_DISPLAY_NAME_MAPPINGS["Onyx_Skin_Tone"]    = "🧑 Onyx Skin Tone Line"
+
+NODE_CLASS_MAPPINGS.update(_K2C_NODES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_K2C_NAMES)
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
