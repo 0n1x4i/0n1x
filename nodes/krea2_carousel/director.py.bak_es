@@ -104,7 +104,7 @@ AUTO_REFERENCE_MAP = {
 
 MAP_PRESETS = {
     "Manual": None,
-    "Identity 1 / Scene 2": {
+    "Identidad 1 / Escena 2": {
         "subject": "Image 1",
         "face_identity": "Image 1",
         "body_proportions": "Image 1",
@@ -118,7 +118,7 @@ MAP_PRESETS = {
         "mood_style": "Image 2",
         "materials": "Image 1",
     },
-    "Outfit from 3": {
+    "Ropa en 3": {
         "subject": "Image 1",
         "face_identity": "Image 1",
         "body_proportions": "Image 1",
@@ -146,7 +146,7 @@ MAP_PRESETS = {
         "mood_style": "Image 2",
         "materials": "Image 1",
     },
-    "Style only from 2": {
+    "Solo estilo de 2": {
         "subject": "Image 1",
         "face_identity": "Image 1",
         "body_proportions": "Image 1",
@@ -162,7 +162,7 @@ MAP_PRESETS = {
     },
 }
 
-# Targets that do NOT use a negative prompt (e.g. Krea 2 Turbo).
+# Destinos que NO usan prompt negativo (p. ej. Krea 2 Turbo).
 TARGETS_WITHOUT_NEGATIVE = {"Krea 2"}
 
 CONTENT_INSTRUCTIONS = {
@@ -178,7 +178,7 @@ CONTENT_INSTRUCTIONS = {
 
 PROMPT_LANGUAGES = {
     "English": "Write the final generator prompt in English.",
-    "Spanish": "Write the final generator prompt in Spanish.",
+    "Español": "Write the final generator prompt in Spanish.",
     "Auto": "Use the language of the user's request.",
 }
 
@@ -208,12 +208,12 @@ DEFAULT_STATE = {
     },
     "reference_map": {key: "Auto" for key, _ in REFERENCE_KEYS},
     "map_preset": "Manual",
-    "intention_preset": "Identity + scene + outfit",
+    "intention_preset": "Identidad + escena + ropa",
     "content_mode": "SFW",
     "prompt_language": "English",
     "trigger_phrase": "vixmodel",
-    "run_mode": "Prompt only",
-    "denoise_hint": "0.72–0.80 (outfit); lower to 0.65 if the pose is lost",
+    "run_mode": "Solo prompt",
+    "denoise_hint": "0.72–0.80 (ropa); baja a 0.65 si se pierde la pose",
     "prompt_length": "Detailed",
     "workflow_rules": "",
     "custom_director_behavior": "",
@@ -327,39 +327,15 @@ def _boolean(value, default=False):
     return default
 
 
-# Old Spanish option values from workflows saved before the English
-# translation. Mapped on load so those workflows keep their presets instead of
-# silently falling back to defaults.
-LEGACY_VALUES = {
-    "Identidad + escena + ropa": "Identity + scene + outfit",
-    "Identidad + escena": "Identity + scene",
-    "Identidad 1 / Escena 2": "Identity 1 / Scene 2",
-    "Solo cambiar ropa": "Outfit change only",
-    "Solo estilo de 2": "Style only from 2",
-    "Ropa en 3": "Outfit from 3",
-    "Close-up cara": "Face close-up",
-    "Solo prompt": "Prompt only",
-    "Cola completa": "Full queue",
-    "Español": "Spanish",
-    "0.72–0.80 (ropa); baja a 0.65 si se pierde la pose":
-        "0.72–0.80 (outfit); lower to 0.65 if the pose is lost",
-}
-
-
 def _read_state(raw):
     if len(raw or "") > 256_000:
-        raise ValueError("[Onyx Director] The internal state exceeds the allowed size.")
+        raise ValueError("[Onyx Director] El estado interno supera el límite permitido.")
     try:
         incoming = json.loads(raw or "{}")
     except json.JSONDecodeError as exc:
-        raise ValueError("[Onyx Director] The node's internal state is not valid JSON.") from exc
+        raise ValueError("[Onyx Director] El estado interno del nodo no es JSON válido.") from exc
     if not isinstance(incoming, dict):
-        raise ValueError("[Onyx Director] The internal state must be a JSON object.")
-
-    for key in ("intention_preset", "map_preset", "run_mode", "prompt_language", "denoise_hint"):
-        value = incoming.get(key)
-        if isinstance(value, str) and value in LEGACY_VALUES:
-            incoming[key] = LEGACY_VALUES[value]
+        raise ValueError("[Onyx Director] El estado interno debe ser un objeto JSON.")
 
     state = dict(DEFAULT_STATE)
     state.update(incoming)
@@ -397,7 +373,7 @@ def _read_state(raw):
     state["lock_generated_prompt"] = _boolean(state.get("lock_generated_prompt"), False)
     state["map_preset"] = _choice(state.get("map_preset"), list(MAP_PRESETS), "Manual")
     state["content_mode"] = _choice(state.get("content_mode"), ["SFW", "NSFW"], "SFW")
-    state["run_mode"] = _choice(state.get("run_mode"), ["Prompt only", "Full queue"], "Prompt only")
+    state["run_mode"] = _choice(state.get("run_mode"), ["Solo prompt", "Cola completa"], "Solo prompt")
     state["request"] = _bounded_text(state.get("request"), 12_000)
     state["model_id"] = _bounded_text(state.get("model_id"), 300, local_vlm.DEFAULT_MODEL)
     state["endpoint"] = _bounded_text(state.get("endpoint"), 500, DEFAULT_STATE["endpoint"])
@@ -418,10 +394,10 @@ def _tensor_to_pil(image, max_edge):
     if image is None:
         return None
     if getattr(image, "ndim", None) != 4 or image.shape[0] < 1 or image.shape[-1] < 3:
-        raise ValueError("[Onyx Director] Each reference must be a valid ComfyUI IMAGE.")
+        raise ValueError("[Onyx Director] Cada referencia debe ser una IMAGE válida de ComfyUI.")
     if image.shape[0] != 1:
         raise ValueError(
-            "[Onyx Director] Each input accepts a single image, not a batch."
+            "[Onyx Director] Cada entrada admite una sola imagen, no un batch."
         )
     array = image[0, :, :, :3].detach().cpu().float().numpy()
     array = np.clip(array * 255.0, 0, 255).astype(np.uint8)
@@ -445,15 +421,15 @@ def _local_endpoint(value, default):
         endpoint = "http://" + endpoint
     parsed = urlparse(endpoint)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ValueError("[Onyx Director] Invalid local endpoint.")
+        raise ValueError("[Onyx Director] Endpoint local no válido.")
     if parsed.hostname.lower() not in ("localhost", "127.0.0.1", "::1"):
         raise ValueError(
-            "[Onyx Director] For security, Ollama/llama.cpp only accept localhost."
+            "[Onyx Director] Por seguridad, Ollama/llama.cpp solo aceptan localhost."
         )
     if parsed.username or parsed.password:
-        raise ValueError("[Onyx Director] The local endpoint must not include credentials.")
+        raise ValueError("[Onyx Director] El endpoint local no debe incluir credenciales.")
     if parsed.query or parsed.fragment:
-        raise ValueError("[Onyx Director] The local endpoint does not accept a query or fragment.")
+        raise ValueError("[Onyx Director] El endpoint local no admite query ni fragmento.")
     return endpoint.rstrip("/")
 
 
@@ -488,13 +464,13 @@ def _resolve_reference_map(state, has_image_1, has_image_2, has_image_3=False):
             else:
                 route = "Text only"
         if route == "Image 1" and not has_image_1:
-            raise ValueError(f"[Onyx Director] {key} is assigned to Image 1, but it is not connected.")
+            raise ValueError(f"[Onyx Director] {key} está asignado a Image 1, pero no está conectada.")
         if route == "Image 2" and not has_image_2:
-            raise ValueError(f"[Onyx Director] {key} is assigned to Image 2, but it is not connected.")
+            raise ValueError(f"[Onyx Director] {key} está asignado a Image 2, pero no está conectada.")
         if route == "Image 3" and not has_image_3:
-            raise ValueError(f"[Onyx Director] {key} is assigned to Image 3 (outfit), but it is not connected.")
+            raise ValueError(f"[Onyx Director] {key} está asignado a Image 3 (ropa), pero no está conectada.")
         if route == "Blend" and not (has_image_1 and has_image_2):
-            raise ValueError(f"[Onyx Director] {key}=Blend needs Image 1 and Image 2.")
+            raise ValueError(f"[Onyx Director] {key}=Blend necesita Image 1 e Image 2.")
         resolved[key] = route
     return resolved
 
@@ -504,7 +480,7 @@ def _preflight(state, has_image_1, has_image_2, has_image_3):
     errors = []
     warnings = []
     if state.get("lock_generated_prompt") and not (state.get("generated_prompt") or "").strip():
-        errors.append("Lock is on but the generated prompt is empty.")
+        errors.append("Bloquear está activo pero el prompt generado está vacío.")
     has_locked_prompt = bool(
         state.get("lock_generated_prompt") and (state.get("generated_prompt") or "").strip()
     )
@@ -513,11 +489,11 @@ def _preflight(state, has_image_1, has_image_2, has_image_3):
         and not (state.get("request") or "").strip()
         and not (has_image_1 or has_image_2 or has_image_3)
     ):
-        errors.append("Write what you want or connect at least one image.")
+        errors.append("Escribe qué quieres o conecta al menos una imagen.")
     runtime = state.get("runtime") or ""
     model_id = (state.get("model_id") or "").strip()
     if runtime in ("Ollama", "llama.cpp") and not model_id and runtime == "Ollama":
-        errors.append("The Ollama model name is missing.")
+        errors.append("Falta el nombre del modelo de Ollama.")
     if runtime in ("Ollama", "llama.cpp"):
         try:
             _local_endpoint(state.get("endpoint"), "http://127.0.0.1:11434" if runtime == "Ollama" else "http://127.0.0.1:8080")
@@ -526,12 +502,12 @@ def _preflight(state, has_image_1, has_image_2, has_image_3):
     # Soft check: map asks for Image 3 outfit without image 3
     outfit_route = (state.get("reference_map") or {}).get("outfit", "Auto")
     if outfit_route in ("Image 3", "Auto") and not has_image_3 and outfit_route == "Image 3":
-        errors.append("The map asks Image 3 for the outfit, but IMAGE 3 is not connected.")
+        errors.append("El mapa pide Image 3 para ropa, pero IMAGEN 3 no está conectada.")
     if has_image_3 and outfit_route == "Auto":
-        warnings.append("IMAGE 3 connected: Auto will take the outfit from 3.")
-    status = "Ready" if not errors else "Blocked"
+        warnings.append("IMAGEN 3 conectada: Auto tomará la ropa de la 3.")
+    status = "Listo" if not errors else "Bloqueado"
     if warnings and not errors:
-        status = "Ready · " + warnings[0]
+        status = "Listo · " + warnings[0]
     return status, errors, warnings
 
 
@@ -647,13 +623,13 @@ def _clean_prompt(text):
     if len(text) >= 2 and text[0] == text[-1] and text[0] in ('"', "'"):
         text = text[1:-1].strip()
     if not text:
-        raise RuntimeError("[Onyx Director] The model returned an empty prompt.")
+        raise RuntimeError("[Onyx Director] El modelo devolvió un prompt vacío.")
     return text
 
 
 def _ollama_generate(endpoint, model_id, system_prompt, user_prompt, image_items, state):
     if not model_id:
-        raise ValueError("[Onyx Director] Enter the Ollama model name.")
+        raise ValueError("[Onyx Director] Escribe el nombre del modelo de Ollama.")
     base = _local_endpoint(endpoint, "http://127.0.0.1:11434")
     url = base if base.endswith("/api/chat") else base + "/api/chat"
     labels = [label for label, _ in image_items]
@@ -680,15 +656,15 @@ def _ollama_generate(endpoint, model_id, system_prompt, user_prompt, image_items
         )
     except requests.RequestException as exc:
         raise ValueError(
-            f"[Onyx Director] Could not connect to Ollama at {base}. "
-            "Start Ollama and check the endpoint."
+            f"[Onyx Director] No se pudo conectar con Ollama en {base}. "
+            "Inicia Ollama y comprueba el endpoint."
         ) from exc
     if response.status_code != 200:
         raise ValueError(f"[Onyx Director] Ollama {response.status_code}: {response.text[:400]}")
     try:
         result = response.json()
     except ValueError as exc:
-        raise ValueError("[Onyx Director] Ollama returned an invalid response.") from exc
+        raise ValueError("[Onyx Director] Ollama devolvió una respuesta no válida.") from exc
     if result.get("error"):
         raise ValueError("[Onyx Director] Ollama: " + str(result["error"]))
     return (result.get("message") or {}).get("content", "")
@@ -729,8 +705,8 @@ def _llamacpp_generate(endpoint, model_id, system_prompt, user_prompt, image_ite
         )
     except requests.RequestException as exc:
         raise ValueError(
-            f"[Onyx Director] Could not connect to llama.cpp at {base}. "
-            "Start the multimodal server and check the endpoint."
+            f"[Onyx Director] No se pudo conectar con llama.cpp en {base}. "
+            "Inicia el servidor multimodal y comprueba el endpoint."
         ) from exc
     if response.status_code != 200:
         raise ValueError(f"[Onyx Director] llama.cpp {response.status_code}: {response.text[:400]}")
@@ -738,13 +714,13 @@ def _llamacpp_generate(endpoint, model_id, system_prompt, user_prompt, image_ite
         result = response.json()
         content = result["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise ValueError("[Onyx Director] llama.cpp returned an invalid response.") from exc
+        raise ValueError("[Onyx Director] llama.cpp devolvió una respuesta no válida.") from exc
     if isinstance(content, list):
         content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
     return content
 
 def _negative_for_target(target, prompt):
-    """Return a conservative negative only when the target supports it."""
+    """Devuelve un negativo conservador solo cuando el destino lo admite."""
     if target in TARGETS_WITHOUT_NEGATIVE:
         return ""
     return (
@@ -765,14 +741,14 @@ def generate_directed_prompt(state, pil_1=None, pil_2=None, pil_3=None):
         prompt = (state.get("generated_prompt") or "").strip()
         if not prompt:
             raise ValueError(
-                "[Onyx Director] LOCK is on, but GENERATED PROMPT is empty."
+                "[Onyx Director] LOCK está activo, pero GENERATED PROMPT está vacío."
             )
         resolved = _resolve_reference_map(state, has_1, has_2, has_3)
         return {
             "prompt": prompt,
             "resolved_map": resolved,
             "negative_prompt": _negative_for_target(state["target"], prompt),
-            "status": "Prompt locked",
+            "status": "Prompt bloqueado",
         }
 
     resolved = _resolve_reference_map(state, has_1, has_2, has_3)
@@ -823,8 +799,8 @@ class OnyxVisualPromptDirector:
     SEARCH_ALIASES = ["onyx director", "nodoforge", "nodeforge", "visual prompt", "prompt director", "krea prompt", "qwen vl"]
     EXPERIMENTAL = True
     DESCRIPTION = (
-        "Generates a prompt with a local VLM. Routes identity, pose, camera, light, "
-        "outfit (IMAGE 3) and scene across up to three references without mixing attributes."
+        "Genera un prompt mediante un VLM local. Enruta identidad, pose, cámara, luz, "
+        "ropa (IMAGEN 3) y escena entre hasta tres referencias sin mezclar atributos."
     )
     CATEGORY = "Onyx/Krea2 Carousel"
     FUNCTION = "execute"
@@ -837,21 +813,21 @@ class OnyxVisualPromptDirector:
             "required": {
                 "director_state": ("STRING", {
                     "default": DEFAULT_STATE_JSON, "socketless": True, "advanced": True,
-                    "tooltip": "Serialized state managed by the node UI.",
+                    "tooltip": "Estado serializado administrado por la interfaz del nodo.",
                 }),
             },
             "optional": {
                 "image_1": ("IMAGE", {
-                    "display_name": "IMAGE 1",
-                    "tooltip": "Main reference (identity / subject). The map decides the attributes.",
+                    "display_name": "IMAGEN 1",
+                    "tooltip": "Referencia principal (identidad / sujeto). El mapa decide los atributos.",
                 }),
                 "image_2": ("IMAGE", {
-                    "display_name": "IMAGE 2",
-                    "tooltip": "Second reference (scene / pose / style depending on the map).",
+                    "display_name": "IMAGEN 2",
+                    "tooltip": "Segunda referencia (escena / pose / estilo según el mapa).",
                 }),
                 "image_3": ("IMAGE", {
-                    "display_name": "IMAGE 3 (outfit)",
-                    "tooltip": "Outfit / clothing reference. In Auto, outfit and materials come from here when connected.",
+                    "display_name": "IMAGEN 3 (ropa)",
+                    "tooltip": "Referencia de ropa / outfit. En Auto, outfit y materials salen de aquí si está conectada.",
                 }),
             },
         }

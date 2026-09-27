@@ -155,13 +155,13 @@ def read_carousel_state(value):
         try:
             incoming = json.loads(value or "{}")
         except json.JSONDecodeError as exc:
-            raise ValueError(f"[Onyx Carousel] carousel_state contains invalid JSON: {exc}") from exc
+            raise ValueError(f"[Onyx Carousel] carousel_state contiene JSON inválido: {exc}") from exc
     elif isinstance(value, dict):
         incoming = value
     else:
         incoming = {}
     if not isinstance(incoming, dict):
-        raise ValueError("[Onyx Carousel] carousel_state must be a JSON object.")
+        raise ValueError("[Onyx Carousel] carousel_state debe ser un objeto JSON.")
 
     source_version = _integer(incoming.get("version"), 1, 1, 99)
     state = deepcopy(DEFAULT_STATE)
@@ -255,49 +255,49 @@ def validate_carousel(state, has_master, pose_presence):
     errors, warnings = [], []
     pose_presence = tuple(bool(item) for item in pose_presence[:MAX_SLIDES])
     if state["slide_index"] > state["slide_count"]:
-        errors.append(f"The selected slide ({state['slide_index']}) exceeds slide_count ({state['slide_count']}).")
+        errors.append(f"El slide seleccionado ({state['slide_index']}) supera slide_count ({state['slide_count']}).")
     if len(state["slides"]) < state["slide_count"]:
-        errors.append("The manifest contains fewer slides than slide_count.")
+        errors.append("El manifiesto contiene menos slides que slide_count.")
     if not has_master:
-        errors.append("Master Image 1 is missing.")
+        errors.append("Falta Master Image 1.")
     selected = state["slide_index"] - 1
     required_indices = range(state["slide_count"]) if state["require_all_pose_references"] else (selected,)
     for index in required_indices:
         if index >= len(pose_presence) or not pose_presence[index]:
             errors.append(
-                f"Pose Reference {index + 1} is missing; it is active within a carousel of "
+                f"Falta Pose Reference {index + 1}; está activa dentro de un carousel de "
                 f"{state['slide_count']} slide(s)."
             )
     if state["target"] != "FLUX.2 Klein 9B":
         warnings.append(
-            f"The target {state['target']!r} is reserved for future compatibility; "
-            "this version was validated for FLUX.2 Klein 9B."
+            f"El target {state['target']!r} está reservado para compatibilidad futura; "
+            "esta versión fue validada para FLUX.2 Klein 9B."
         )
     if not state["global_lock"]:
-        errors.append("global_lock is empty.")
+        errors.append("global_lock está vacío.")
 
     for slide in state["slides"][:state["slide_count"]]:
         allowed = {_attribute_key(value) for value in slide["allowed_changes"]}
         forbidden = sorted(value for value in allowed if value != "pose")
         if forbidden:
-            warnings.append(f"Slide {slide['index']}: only the pose may change; these will be ignored: {', '.join(forbidden)}.")
+            warnings.append(f"Slide {slide['index']}: sólo pose puede cambiar; se ignorarán: {', '.join(forbidden)}.")
         locked = {_attribute_key(value) for value in slide["locked_attributes"]}
         missing_locks = [key for key in LOCK_KEYS if key not in locked]
         if missing_locks:
             warnings.append(
-                f"Slide {slide['index']}: local locks are missing ({', '.join(missing_locks[:8])}); "
-                "the global manifest still takes priority."
+                f"Slide {slide['index']}: faltan bloqueos locales ({', '.join(missing_locks[:8])}); "
+                "el manifiesto global seguirá teniendo prioridad."
             )
         conflicts = _directive_conflicts(" ".join((slide.get("prompt_delta", ""), slide.get("purpose", ""))))
         if conflicts:
             warnings.append(
-                f"Slide {slide['index']}: the direction contradicts locked attributes: {', '.join(conflicts)}. "
-                "The master image lock takes priority."
+                f"Slide {slide['index']}: la dirección contradice atributos bloqueados: {', '.join(conflicts)}. "
+                "El bloqueo de la imagen maestra tiene prioridad."
             )
         if not slide["prompt_delta"]:
-            warnings.append(f"Slide {slide['index']}: prompt_delta is empty; the pose-only contract will be used.")
+            warnings.append(f"Slide {slide['index']}: prompt_delta está vacío; se usará el contrato pose-only.")
     if state["lock_generated_prompt"] and str(state["slide_index"]) not in state["locked_prompts"]:
-        errors.append(f"LOCK is on, but there is no locked prompt for slide {state['slide_index']}.")
+        errors.append(f"LOCK está activo, pero no existe un prompt bloqueado para el slide {state['slide_index']}.")
     return errors, warnings
 
 
@@ -336,7 +336,7 @@ def build_master_prompt(state, base_prompt=""):
 
 def build_slide_prompt(state, slide_index, master_prompt=None):
     if slide_index < 1 or slide_index > state["slide_count"]:
-        raise ValueError(f"[Onyx Carousel] slide_index {slide_index} is out of range.")
+        raise ValueError(f"[Onyx Carousel] slide_index {slide_index} fuera de rango.")
     slide = state["slides"][slide_index - 1]
     master_prompt = master_prompt or build_master_prompt(state)
     details = [
@@ -458,8 +458,8 @@ class OnyxPoseCarouselDirector:
     SEARCH_ALIASES = ["carousel director", "pose carousel", "flux2 carousel", "klein carousel"]
     EXPERIMENTAL = True
     DESCRIPTION = (
-        "Generates one to four slides and selects only the active pose guides. "
-        "The master image keeps everything except the pose; this is not a face swap."
+        "Genera de uno a cuatro slides y selecciona únicamente las guías de pose activas. "
+        "La imagen maestra conserva todo salvo la pose; no es face swap."
     )
     CATEGORY = "Onyx/Krea2 Carousel"
     FUNCTION = "execute"
@@ -475,7 +475,7 @@ class OnyxPoseCarouselDirector:
             "required": {
                 "carousel_state": ("STRING", {
                     "default": DEFAULT_STATE_JSON, "socketless": True, "advanced": True,
-                    "tooltip": "Serialized state managed by the Carousel Director UI.",
+                    "tooltip": "Estado serializado administrado por la interfaz del Carousel Director.",
                 }),
             },
             "optional": {

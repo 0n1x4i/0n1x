@@ -1,4 +1,4 @@
-"""Private HTTP routes of the Onyx Krea2 Carousel module (port of NodoForgeLab2 Beta)."""
+"""Rutas HTTP privadas del modulo Onyx Krea2 Carousel (porte de NodoForgeLab2 Beta)."""
 
 from __future__ import annotations
 
@@ -27,28 +27,28 @@ def _decode_image(value, label):
     if not value:
         return None
     if not isinstance(value, str):
-        raise ValueError(f"{label} must be a base64 image.")
+        raise ValueError(f"{label} debe ser una imagen base64.")
     if "," in value:
         prefix, value = value.split(",", 1)
         if prefix and not prefix.lower().startswith("data:image/"):
-            raise ValueError(f"{label} has an invalid data URL.")
+            raise ValueError(f"{label} tiene un data URL no válido.")
     if len(value) > ((MAX_IMAGE_BYTES * 4) // 3) + 8:
-        raise ValueError(f"{label} exceeds {MAX_IMAGE_BYTES // (1024 * 1024)} MiB.")
+        raise ValueError(f"{label} supera {MAX_IMAGE_BYTES // (1024 * 1024)} MiB.")
     try:
         raw = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise ValueError(f"{label} contains invalid base64.") from exc
+        raise ValueError(f"{label} contiene base64 inválido.") from exc
     if len(raw) > MAX_IMAGE_BYTES:
-        raise ValueError(f"{label} exceeds {MAX_IMAGE_BYTES // (1024 * 1024)} MiB.")
+        raise ValueError(f"{label} supera {MAX_IMAGE_BYTES // (1024 * 1024)} MiB.")
     try:
         with Image.open(io.BytesIO(raw)) as opened:
             width, height = opened.size
             if width < 1 or height < 1 or width * height > MAX_IMAGE_PIXELS:
-                raise ValueError(f"{label} has dimensions that are not allowed ({width}×{height}).")
+                raise ValueError(f"{label} tiene dimensiones no permitidas ({width}×{height}).")
             opened.load()
             return ImageOps.exif_transpose(opened).convert("RGB")
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise ValueError(f"{label} is not a valid image.") from exc
+        raise ValueError(f"{label} no es una imagen válida.") from exc
 
 
 def _ollama_models(endpoint):
@@ -57,13 +57,13 @@ def _ollama_models(endpoint):
     try:
         response = requests.get(url, timeout=15, allow_redirects=False)
     except requests.RequestException as exc:
-        raise ValueError(f"Could not connect to Ollama at {base}.") from exc
+        raise ValueError(f"No se pudo conectar con Ollama en {base}.") from exc
     if response.status_code != 200:
-        raise ValueError(f"Ollama answered HTTP {response.status_code}: {response.text[:300]}")
+        raise ValueError(f"Ollama respondió HTTP {response.status_code}: {response.text[:300]}")
     try:
         payload = response.json()
     except ValueError as exc:
-        raise ValueError("Ollama returned invalid JSON.") from exc
+        raise ValueError("Ollama devolvió JSON inválido.") from exc
     models = []
     for item in payload.get("models") or []:
         if not isinstance(item, dict):
@@ -77,7 +77,7 @@ def _ollama_models(endpoint):
 def _grok_models(api_key):
     key = str(api_key or "").strip()
     if not key:
-        raise ValueError("The Grok API key is missing, so the available models cannot be listed.")
+        raise ValueError("Falta la API key de Grok para consultar los modelos disponibles.")
     try:
         response = requests.get(
             "https://api.x.ai/v1/models",
@@ -86,13 +86,13 @@ def _grok_models(api_key):
             allow_redirects=False,
         )
     except requests.RequestException as exc:
-        raise ValueError("Could not fetch the Grok/xAI model list.") from exc
+        raise ValueError("No se pudo consultar la lista de modelos de Grok/xAI.") from exc
     if response.status_code != 200:
         raise ValueError(f"Grok models HTTP {response.status_code}: {response.text[:500]}")
     try:
         payload = response.json()
     except ValueError as exc:
-        raise ValueError("Grok returned an invalid model list.") from exc
+        raise ValueError("Grok devolvió una lista de modelos no válida.") from exc
     excluded = ("imagine", "image", "video", "voice", "audio", "tts", "transcribe")
     models = []
     for item in payload.get("data") or []:
@@ -110,7 +110,7 @@ def _grok_models(api_key):
             }
         )
     if not models:
-        raise ValueError("The account returned no Grok models compatible with Chat Completions.")
+        raise ValueError("La cuenta no devolvió modelos Grok compatibles con Chat Completions.")
     return models
 
 
@@ -153,7 +153,7 @@ if not getattr(PromptServer.instance, "_onyx_nf_routes_registered", False):
         try:
             data = await request.json()
             if not isinstance(data, dict):
-                raise ValueError("The request body must be a JSON object.")
+                raise ValueError("El cuerpo debe ser un objeto JSON.")
             models = await asyncio.to_thread(_grok_models, data.get("api_key"))
             return web.json_response({"models": models}, headers={"Cache-Control": "no-store"})
         except Exception as exc:
@@ -164,11 +164,11 @@ if not getattr(PromptServer.instance, "_onyx_nf_routes_registered", False):
         try:
             data = await request.json()
             if not isinstance(data, dict):
-                raise ValueError("The request body must be a JSON object.")
+                raise ValueError("El cuerpo debe ser un objeto JSON.")
             state = _read_state(data.get("director_state") or "{}")
-            pil_1 = _decode_image(data.get("image_1_b64"), "IMAGE 1")
-            pil_2 = _decode_image(data.get("image_2_b64"), "IMAGE 2")
-            pil_3 = _decode_image(data.get("image_3_b64"), "IMAGE 3")
+            pil_1 = _decode_image(data.get("image_1_b64"), "IMAGEN 1")
+            pil_2 = _decode_image(data.get("image_2_b64"), "IMAGEN 2")
+            pil_3 = _decode_image(data.get("image_3_b64"), "IMAGEN 3")
             async with _GENERATION_LOCK:
                 result = await asyncio.to_thread(
                     generate_directed_prompt,
@@ -187,7 +187,7 @@ if not getattr(PromptServer.instance, "_onyx_nf_routes_registered", False):
         try:
             data = await request.json()
             if not isinstance(data, dict):
-                raise ValueError("The request body must be a JSON object.")
+                raise ValueError("El cuerpo debe ser un objeto JSON.")
             pil_image = _decode_image(data.get("image_b64"), "MASTER IMAGE")
             async with _GENERATION_LOCK:
                 result = await asyncio.to_thread(generate_pose_list, data, pil_image)
