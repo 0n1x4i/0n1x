@@ -70,7 +70,7 @@ def _snapshot_has_complete_weights(snapshot_path: Path) -> bool:
 
 
 def list_cached_models() -> list[dict]:
-    """Return only complete vision checkpoints supported by Transformers."""
+    """Devuelve únicamente checkpoints visuales completos soportados por Transformers."""
     from huggingface_hub import scan_cache_dir
 
     try:
@@ -174,12 +174,12 @@ def _load_error(model_id: str, exc: Exception) -> str:
     )
     if any(marker in lower for marker in network_markers):
         return (
-            f"Could not download '{model_id}'. Check your internet connection, HF_ENDPOINT and the local cache. "
-            f"Original error: {message}"
+            f"No se pudo descargar '{model_id}'. Comprueba Internet, HF_ENDPOINT y la caché local. "
+            f"Error original: {message}"
         )
     return (
-        f"Could not load '{model_id}' as a compatible VLM. Use a multimodal checkpoint "
-        f"natively supported by Transformers. Original error: {message}"
+        f"No se pudo cargar '{model_id}' como VLM compatible. Usa un checkpoint multimodal "
+        f"soportado nativamente por Transformers. Error original: {message}"
     )
 
 
@@ -214,12 +214,12 @@ def _load(model_id: str, four_bit: bool, attention: str) -> None:
             from transformers import Qwen3VLForConditionalGeneration as VisionModel
         except ImportError as exc:
             raise RuntimeError(
-                "The installed Transformers version includes neither AutoModelForImageTextToText "
-                "nor Qwen3VLForConditionalGeneration. Update Transformers."
+                "La versión instalada de Transformers no incluye AutoModelForImageTextToText "
+                "ni Qwen3VLForConditionalGeneration. Actualiza Transformers."
             ) from exc
 
     if four_bit and not torch.cuda.is_available():
-        raise RuntimeError("4-bit loading needs an NVIDIA GPU with CUDA.")
+        raise RuntimeError("La carga en 4-bit necesita una GPU NVIDIA con CUDA.")
 
     dtype = torch.float32
     device_map = "cpu"
@@ -240,8 +240,8 @@ def _load(model_id: str, four_bit: bool, attention: str) -> None:
             )
         except Exception as exc:
             raise RuntimeError(
-                "Could not initialize bitsandbytes. Install it or turn off 4-bit. "
-                f"Original error: {exc}"
+                "No se pudo inicializar bitsandbytes. Instálalo o desactiva 4-bit. "
+                f"Error original: {exc}"
             ) from exc
 
     attention_impl = _resolve_attention(attention, quantization is not None)
@@ -255,7 +255,7 @@ def _load(model_id: str, four_bit: bool, attention: str) -> None:
         kwargs.pop("dtype")
         kwargs["quantization_config"] = quantization
 
-    _set_status("loading", f"Loading {model_id} ({attention_impl})…")
+    _set_status("loading", f"Cargando {model_id} ({attention_impl})…")
     try:
         try:
             model = _from_pretrained(VisionModel, model_id, kwargs)
@@ -326,7 +326,7 @@ def generate_text(
     max_new_tokens=768,
     seed=0,
 ):
-    """Generate text from several images; the whole GPU operation is serialized."""
+    """Genera texto con varias imágenes; toda la operación GPU queda serializada."""
     import torch
 
     model_id = (model_id or DEFAULT_MODEL).strip()
@@ -340,7 +340,7 @@ def generate_text(
             _load(model_id, bool(four_bit), attn)
             model = _STATE["model"]
             processor = _STATE["processor"]
-            _set_status("generating", "Generating directed prompt…")
+            _set_status("generating", "Generando prompt dirigido…")
 
             content = []
             for index, image in enumerate(images, start=1):

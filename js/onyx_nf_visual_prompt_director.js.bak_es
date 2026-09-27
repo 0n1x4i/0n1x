@@ -54,36 +54,36 @@ async function loadDownloadedLocalModels(force = false) {
   }
 }
 const MAP_ROWS = [
-  ["subject", "Subject / appearance"],
-  ["face_identity", "Face / identity"],
-  ["body_proportions", "Body / proportions"],
-  ["outfit", "Outfit"],
+  ["subject", "Sujeto / apariencia"],
+  ["face_identity", "Rostro / identidad"],
+  ["body_proportions", "Cuerpo / proporciones"],
+  ["outfit", "Ropa"],
   ["pose", "Pose"],
-  ["composition", "Composition"],
-  ["camera", "Camera"],
-  ["scene_environment", "Scene / environment"],
-  ["lighting", "Lighting"],
-  ["colors", "Colors"],
-  ["mood_style", "Mood / style"],
-  ["materials", "Materials"],
+  ["composition", "Composición"],
+  ["camera", "Cámara"],
+  ["scene_environment", "Escena / entorno"],
+  ["lighting", "Iluminación"],
+  ["colors", "Colores"],
+  ["mood_style", "Atmósfera / estilo"],
+  ["materials", "Materiales"],
 ];
 const MAP_OPTIONS = ["Auto", "Image 1", "Image 2", "Image 3", "Blend"];
-const MAP_PRESETS = ["Manual", "Identity 1 / Scene 2", "Outfit from 3", "Pose lock (Krea)", "Style only from 2"];
+const MAP_PRESETS = ["Manual", "Identidad 1 / Escena 2", "Ropa en 3", "Pose lock (Krea)", "Solo estilo de 2"];
 const PRESERVE_ROWS = [
-  ["subject", "Subject"], ["face_identity", "Face"], ["body_proportions", "Body"],
-  ["outfit", "Outfit"], ["pose", "Pose"], ["composition", "Composition"],
-  ["camera", "Camera"], ["scene_environment", "Scene"], ["lighting", "Lighting"],
-  ["colors", "Colors"], ["mood_style", "Style"], ["materials", "Materials"],
+  ["subject", "Sujeto"], ["face_identity", "Rostro"], ["body_proportions", "Cuerpo"],
+  ["outfit", "Ropa"], ["pose", "Pose"], ["composition", "Composición"],
+  ["camera", "Cámara"], ["scene_environment", "Escena"], ["lighting", "Iluminación"],
+  ["colors", "Colores"], ["mood_style", "Estilo"], ["materials", "Materiales"],
 ];
 
 const MAP_PRESET_VALUES = {
-  "Identity 1 / Scene 2": {
+  "Identidad 1 / Escena 2": {
     subject: "Image 1", face_identity: "Image 1", body_proportions: "Image 1",
     outfit: "Image 1", pose: "Image 1", composition: "Image 2", camera: "Image 2",
     scene_environment: "Image 2", lighting: "Image 2", colors: "Image 2",
     mood_style: "Image 2", materials: "Image 1",
   },
-  "Outfit from 3": {
+  "Ropa en 3": {
     subject: "Image 1", face_identity: "Image 1", body_proportions: "Image 1",
     outfit: "Image 3", pose: "Image 2", composition: "Image 2", camera: "Image 2",
     scene_environment: "Image 2", lighting: "Image 2", colors: "Image 2",
@@ -95,7 +95,7 @@ const MAP_PRESET_VALUES = {
     scene_environment: "Image 2", lighting: "Image 2", colors: "Image 2",
     mood_style: "Image 2", materials: "Image 1",
   },
-  "Style only from 2": {
+  "Solo estilo de 2": {
     subject: "Image 1", face_identity: "Image 1", body_proportions: "Image 1",
     outfit: "Image 1", pose: "Image 1", composition: "Image 1", camera: "Image 1",
     scene_environment: "Image 1", lighting: "Image 2", colors: "Image 2",
@@ -107,12 +107,12 @@ const MAP_PRESET_VALUES = {
 const CONTENT_MODES = ["SFW", "NSFW"];
 const INTENTION_PRESET_NAMES = [
   "Manual",
-  "Identity + scene",
-  "Identity + scene + outfit",
-  "Outfit change only",
+  "Identidad + escena",
+  "Identidad + escena + ropa",
+  "Solo cambiar ropa",
   "Pose lock (Krea)",
   "Mirror / gym selfie",
-  "Face close-up",
+  "Close-up cara",
   "Lingerie / implied",
   "Explicit",
 ];
@@ -137,8 +137,8 @@ const NSFW_EXPLICIT_RULE =
 /** Intention presets: auto-fill request, map, preserve, director, rules. */
 const INTENTION_PRESETS = {
   "Manual": null,
-  "Identity + scene": {
-    map_preset: "Identity 1 / Scene 2",
+  "Identidad + escena": {
+    map_preset: "Identidad 1 / Escena 2",
     mode: "Photography",
     target: "Krea 2",
     creativity: "Strict",
@@ -157,8 +157,8 @@ const INTENTION_PRESETS = {
     rules_sfw: SFW_RULE + " Prefer photorealistic coherence between identity and scene.",
     rules_nsfw: NSFW_SOFT_RULE,
   },
-  "Identity + scene + outfit": {
-    map_preset: "Outfit from 3",
+  "Identidad + escena + ropa": {
+    map_preset: "Ropa en 3",
     mode: "Photography",
     target: "Krea 2",
     creativity: "Strict",
@@ -170,15 +170,15 @@ const INTENTION_PRESETS = {
       outfit: "Image 3", pose: "Image 2", composition: "Image 2", camera: "Image 2",
       scene_environment: "Image 2", lighting: "Image 2", colors: "Image 2", mood_style: "Image 2", materials: "Image 3",
     },
-    denoise_hint: "0.72–0.80 (outfit); lower to 0.65 if the pose is lost",
+    denoise_hint: "0.72–0.80 (ropa); baja a 0.65 si se pierde la pose",
     nsfw_only: false,
     request_sfw: "IMAGE 1 = identity only. IMAGE 2 = scene and pose to recreate. IMAGE 3 = clothing only. Write one prompt putting the IMAGE 1 person into the IMAGE 2 scene wearing the IMAGE 3 outfit.",
     request_nsfw: "IMAGE 1 = identity. IMAGE 2 = scene/pose. IMAGE 3 = outfit (may be revealing). Write one prompt combining them.",
     rules_sfw: SFW_RULE + " " + ANTI_IMG3_LEAK,
     rules_nsfw: NSFW_SOFT_RULE + " " + ANTI_IMG3_LEAK,
   },
-  "Outfit change only": {
-    map_preset: "Outfit from 3",
+  "Solo cambiar ropa": {
+    map_preset: "Ropa en 3",
     mode: "Image Edit",
     target: "Krea 2",
     creativity: "Strict",
@@ -218,7 +218,7 @@ const INTENTION_PRESETS = {
     rules_nsfw: NSFW_SOFT_RULE + " Prioritize spatial pose accuracy for Krea 2.",
   },
   "Mirror / gym selfie": {
-    map_preset: "Identity 1 / Scene 2",
+    map_preset: "Identidad 1 / Escena 2",
     mode: "Photography",
     target: "Krea 2",
     creativity: "Strict",
@@ -237,8 +237,8 @@ const INTENTION_PRESETS = {
     rules_sfw: SFW_RULE + " Account for mirror reflection and phone selfie perspective. " + ANTI_IMG3_LEAK,
     rules_nsfw: NSFW_SOFT_RULE + " Mirror selfie realism. " + ANTI_IMG3_LEAK,
   },
-  "Face close-up": {
-    map_preset: "Identity 1 / Scene 2",
+  "Close-up cara": {
+    map_preset: "Identidad 1 / Escena 2",
     mode: "Photography",
     target: "Krea 2",
     creativity: "Strict",
@@ -258,7 +258,7 @@ const INTENTION_PRESETS = {
     rules_nsfw: NSFW_SOFT_RULE + " Stable facial anatomy; no celebrity naming.",
   },
   "Lingerie / implied": {
-    map_preset: "Outfit from 3",
+    map_preset: "Ropa en 3",
     mode: "Photography",
     target: "Krea 2",
     creativity: "Balanced",
@@ -278,7 +278,7 @@ const INTENTION_PRESETS = {
     rules_nsfw: NSFW_SOFT_RULE + " " + ANTI_IMG3_LEAK,
   },
   "Explicit": {
-    map_preset: "Outfit from 3",
+    map_preset: "Ropa en 3",
     mode: "Photography",
     target: "Krea 2",
     creativity: "Balanced",
@@ -388,7 +388,7 @@ async function fetchLoadImageAsDataUrl(imageNode) {
   if (!response.ok) {
     response = await api.fetchApi(`/view?filename=${encodeURIComponent(filename)}&type=input`);
   }
-  if (!response.ok) throw new Error(`Could not read ${filename} (${response.status})`);
+  if (!response.ok) throw new Error(`No pude leer ${filename} (${response.status})`);
   const blob = await response.blob();
   return await blobToDataUrl(blob);
 }
@@ -426,12 +426,12 @@ const FALLBACK_STATE = {
   },
   reference_map: Object.fromEntries(MAP_ROWS.map(([key]) => [key, "Auto"])),
   map_preset: "Manual",
-  intention_preset: "Identity + scene + outfit",
+  intention_preset: "Identidad + escena + ropa",
   content_mode: "SFW",
   prompt_language: "English",
   trigger_phrase: "vixmodel",
-  run_mode: "Prompt only",
-  denoise_hint: "0.72–0.80 (outfit); lower to 0.65 if the pose is lost",
+  run_mode: "Solo prompt",
+  denoise_hint: "0.72–0.80 (ropa); baja a 0.65 si se pierde la pose",
   seed: 0,
   prompt_length: "Detailed",
   workflow_rules: "",
@@ -504,33 +504,14 @@ function injectStyle() {
   document.head.appendChild(style);
 }
 
-// Old Spanish option values from workflows saved before the English
-// translation — mapped on load so saved presets keep working.
-const LEGACY_VALUES = {
-  "Identidad + escena + ropa": "Identity + scene + outfit",
-  "Identidad + escena": "Identity + scene",
-  "Identidad 1 / Escena 2": "Identity 1 / Scene 2",
-  "Solo cambiar ropa": "Outfit change only",
-  "Solo estilo de 2": "Style only from 2",
-  "Ropa en 3": "Outfit from 3",
-  "Close-up cara": "Face close-up",
-  "Solo prompt": "Prompt only",
-  "Cola completa": "Full queue",
-  "Español": "Spanish",
-  "0.72–0.80 (ropa); baja a 0.65 si se pierde la pose": "0.72–0.80 (outfit); lower to 0.65 if the pose is lost",
-};
-
 function parseState(value) {
   let incoming = {};
   try { incoming = JSON.parse(value || "{}"); } catch (_) {}
-  for (const key of ["intention_preset", "map_preset", "run_mode", "prompt_language", "denoise_hint"]) {
-    if (typeof incoming[key] === "string" && LEGACY_VALUES[incoming[key]]) incoming[key] = LEGACY_VALUES[incoming[key]];
-  }
   const state = { ...FALLBACK_STATE, ...incoming };
   state.preserve = { ...FALLBACK_STATE.preserve, ...(incoming.preserve || {}) };
   state.reference_map = { ...FALLBACK_STATE.reference_map, ...(incoming.reference_map || {}) };
   if (!state.content_mode) state.content_mode = "SFW";
-  if (!state.intention_preset) state.intention_preset = "Identity + scene + outfit";
+  if (!state.intention_preset) state.intention_preset = "Identidad + escena + ropa";
   if (!state.prompt_language) state.prompt_language = "English";
   if (state.trigger_phrase == null) state.trigger_phrase = "vixmodel";
   return state;
@@ -638,10 +619,10 @@ app.registerExtension({
       requestSection.className = "onx2d-section";
       const requestTitle = document.createElement("div");
       requestTitle.className = "onx2d-title";
-      requestTitle.textContent = "What do you want to create or change?";
+      requestTitle.textContent = "¿Qué quieres crear o cambiar?";
       const request = document.createElement("textarea");
       request.className = "onx2d-area";
-      request.placeholder = "Describe the image or the change. References are assigned below.";
+      request.placeholder = "Describe la imagen o el cambio. Las referencias se asignan abajo.";
       bindText(request, "request");
       requestSection.append(requestTitle, request);
 
@@ -653,7 +634,7 @@ app.registerExtension({
       const target = optionSelect(TARGETS, state.target);
       const creativity = optionSelect(CREATIVITY, state.creativity);
       bindSelect(mode, "mode"); bindSelect(target, "target"); bindSelect(creativity, "creativity");
-      directionGrid.append(field("Mode", mode), field("Target", target), field("Creativity", creativity));
+      directionGrid.append(field("Modo", mode), field("Destino", target), field("Creatividad", creativity));
       const director = optionSelect(DIRECTORS, state.director);
       bindSelect(director, "director");
       directionSection.append(directionGrid, field("Director", director));
@@ -662,16 +643,16 @@ app.registerExtension({
       engineSection.className = "onx2d-section";
       const engineTitle = document.createElement("div");
       engineTitle.className = "onx2d-title";
-      engineTitle.textContent = "Local model that writes the prompt";
+      engineTitle.textContent = "Modelo local que redacta el prompt";
       const runtime = optionSelect(["Transformers local", "Ollama", "llama.cpp"], state.runtime);
       controls.runtime = runtime;
       const modelSelect = document.createElement("select");
       modelSelect.className = "onx2d-select";
-      modelSelect.title = "Select a downloaded VLM or a suggestion from the list.";
+      modelSelect.title = "Selecciona un VLM descargado o una sugerencia de la lista.";
       const model = document.createElement("input");
       model.className = "onx2d-input";
-      model.placeholder = "Custom Hugging Face ID";
-      model.title = "Any compatible ID; downloaded on first use if not in the cache.";
+      model.placeholder = "ID personalizado de Hugging Face";
+      model.title = "Cualquier ID compatible; se descarga al usarlo si no está en la caché.";
       let downloadedModels = [];
       let ollamaModels = [];
 
@@ -697,9 +678,9 @@ app.registerExtension({
           const downloadedById = new Map(downloadedModels.map((item) => [item.id, item]));
           const describe = (item) =>
             [item.model_type, formatModelSize(item.size_bytes)].filter(Boolean).join(" · ");
-          addModelGroup("Downloaded", [...downloadedById].map(([id, item]) => [id, describe(item)]));
+          addModelGroup("Descargados", [...downloadedById].map(([id, item]) => [id, describe(item)]));
           addModelGroup(
-            "Suggested · downloaded on first use",
+            "Sugeridos · se descargan al usarlo",
             MODEL_PRESETS.filter((id) => !downloadedById.has(id)).map((id) => [id, ""]),
           );
         } else if (runtime.value === "Ollama") {
@@ -708,8 +689,8 @@ app.registerExtension({
         const current = (state.model_id || "").trim();
         const custom = document.createElement("option");
         custom.value = CUSTOM_MODEL;
-        custom.textContent = "Custom…";
-        custom.title = "Enables the field below to type any ID.";
+        custom.textContent = "Personalizado…";
+        custom.title = "Habilita el campo de abajo para escribir cualquier ID.";
         modelSelect.appendChild(custom);
 
         const known = [...modelSelect.options].some(
@@ -742,13 +723,13 @@ app.registerExtension({
 
       const engineGrid = document.createElement("div");
       engineGrid.className = "onx2d-grid3";
-      engineGrid.append(field("Runtime", runtime), field("VLM model", modelSelect, model), field("Local endpoint", endpoint));
+      engineGrid.append(field("Runtime", runtime), field("Modelo VLM", modelSelect, model), field("Endpoint local", endpoint));
       const engineActions = document.createElement("div");
       engineActions.className = "onx2d-row";
       const fetchModels = document.createElement("button");
-      fetchModels.type = "button"; fetchModels.className = "onx2d-action"; fetchModels.textContent = "FIND OLLAMA";
+      fetchModels.type = "button"; fetchModels.className = "onx2d-action"; fetchModels.textContent = "BUSCAR OLLAMA";
       const unload = document.createElement("button");
-      unload.type = "button"; unload.className = "onx2d-action"; unload.textContent = "UNLOAD MODEL";
+      unload.type = "button"; unload.className = "onx2d-action"; unload.textContent = "LIBERAR MODELO";
       const actionSpacer = document.createElement("span"); actionSpacer.className = "onx2d-spacer";
       controls.status = document.createElement("span"); controls.status.className = "onx2d-status";
       engineActions.append(fetchModels, unload, actionSpacer, controls.status);
@@ -759,10 +740,10 @@ app.registerExtension({
         state.runtime = current;
         endpoint.disabled = current === "Transformers local";
         fetchModels.style.display = current === "llama.cpp" ? "none" : "";
-        fetchModels.textContent = current === "Transformers local" ? "REFRESH LOCAL" : "FIND OLLAMA";
+        fetchModels.textContent = current === "Transformers local" ? "ACTUALIZAR LOCALES" : "BUSCAR OLLAMA";
         fetchModels.title = current === "Transformers local"
-          ? "Rescan the local Hugging Face cache."
-          : "List the models installed on the local Ollama server.";
+          ? "Vuelve a examinar la caché local de Hugging Face."
+          : "Consulta los modelos instalados en el servidor Ollama local.";
         unload.style.display = current === "Transformers local" ? "" : "none";
         if (resetKnownDefault) {
           const configured = (state.endpoint || "").trim();
@@ -784,12 +765,12 @@ app.registerExtension({
       async function refreshLocalModels(quiet = false) {
         if (!quiet) {
           fetchModels.disabled = true;
-          setStatus("Searching downloaded models…");
+          setStatus("Buscando modelos descargados…");
         }
         try {
           downloadedModels = await loadDownloadedLocalModels(!quiet);
           if (runtime.value === "Transformers local") renderModelOptions();
-          if (!quiet) setStatus(`${downloadedModels.length} downloaded VLM model(s)`);
+          if (!quiet) setStatus(`${downloadedModels.length} modelo(s) VLM descargado(s)`);
         } catch (error) {
           if (!quiet) setStatus(`Error: ${error.message}`, true);
         } finally {
@@ -803,10 +784,10 @@ app.registerExtension({
           return;
         }
         fetchModels.disabled = true;
-        setStatus("Querying models…");
+        setStatus("Consultando modelos…");
         try {
           if (!isLocalEndpoint(state.endpoint || "http://127.0.0.1:11434")) {
-            throw new Error("The Ollama endpoint must be localhost");
+            throw new Error("El endpoint de Ollama debe ser localhost");
           }
           const response = await api.fetchApi("/onyx/nf/ollama/models", {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -821,7 +802,7 @@ app.registerExtension({
             persist();
           }
           renderModelOptions();
-          setStatus(`${ollamaModels.length} model(s) found`);
+          setStatus(`${ollamaModels.length} modelo(s) encontrado(s)`);
         } catch (error) {
           setStatus(`Error: ${error.message}`, true);
         } finally {
@@ -831,14 +812,14 @@ app.registerExtension({
 
       unload.addEventListener("click", async () => {
         unload.disabled = true;
-        setStatus("Freeing memory…");
+        setStatus("Liberando memoria…");
         try {
           const response = await api.fetchApi(
             "/onyx/nf/local/unload", { method: "POST" }
           );
           const data = await response.json();
           if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-          setStatus("Local model unloaded");
+          setStatus("Modelo local liberado");
         } catch (error) {
           setStatus(`Error: ${error.message}`, true);
         } finally {
@@ -850,10 +831,10 @@ app.registerExtension({
       toolsSection.className = "onx2d-section";
       const toolsTitle = document.createElement("div");
       toolsTitle.className = "onx2d-title";
-      toolsTitle.textContent = "Intention presets (no prompt writing needed)";
+      toolsTitle.textContent = "Presets de intención (sin escribir prompt)";
       const guide = document.createElement("div");
       guide.className = "onx2d-guide";
-      guide.textContent = "1) Pick SFW/NSFW → 2) Pick a preset → 3) Connect photos → 4) Generate prompt now (or Queue).";
+      guide.textContent = "1) Elige SFW/NSFW → 2) Elige preset → 3) Conecta fotos → 4) Generar prompt ya (o Queue).";
       const contentToggle = document.createElement("div");
       contentToggle.className = "onx2d-toggle";
       const btnSfw = document.createElement("button"); btnSfw.type = "button"; btnSfw.textContent = "SFW";
@@ -880,8 +861,8 @@ app.registerExtension({
           intention.appendChild(opt);
         }
         if (!allowed.includes(state.intention_preset)) {
-          state.intention_preset = allowed.includes("Identity + scene + outfit")
-            ? "Identity + scene + outfit" : allowed[0];
+          state.intention_preset = allowed.includes("Identidad + escena + ropa")
+            ? "Identidad + escena + ropa" : allowed[0];
         }
         intention.value = state.intention_preset;
       }
@@ -891,13 +872,13 @@ app.registerExtension({
         const mode = state.content_mode === "NSFW" ? "NSFW" : "SFW";
         const preset = INTENTION_PRESETS[name];
         if (preset?.nsfw_only && mode !== "NSFW") {
-          setStatus("That preset requires NSFW mode", true);
+          setStatus("Ese preset requiere modo NSFW", true);
           return;
         }
         if (name === "Manual") {
           state.intention_preset = "Manual";
           persist();
-          if (showStatus) setStatus("Manual preset — edit by hand");
+          if (showStatus) setStatus("Preset manual — edita a mano");
           updatePreflight();
           return;
         }
@@ -920,9 +901,9 @@ app.registerExtension({
         }
         renderMap?.();
         denoiseHint.textContent = state.denoise_hint
-          ? `Suggested denoise: ${state.denoise_hint}` : "";
+          ? `Denoise sugerido: ${state.denoise_hint}` : "";
         persist();
-        if (showStatus) setStatus(`Preset applied: ${name} (${mode})`);
+        if (showStatus) setStatus(`Preset aplicado: ${name} (${mode})`);
         updatePreflight();
       }
       btnSfw.addEventListener("click", () => {
@@ -930,7 +911,7 @@ app.registerExtension({
         syncContentToggle();
         refreshIntentionOptions();
         if (INTENTION_PRESETS[state.intention_preset]?.nsfw_only) {
-          state.intention_preset = "Identity + scene + outfit";
+          state.intention_preset = "Identidad + escena + ropa";
           intention.value = state.intention_preset;
         }
         runIntentionApply(true);
@@ -957,7 +938,7 @@ app.registerExtension({
           renderMap?.();
         }
         persist();
-        setStatus(state.map_preset === "Manual" ? "Manual map" : `Map: ${state.map_preset}`);
+        setStatus(state.map_preset === "Manual" ? "Mapa manual" : `Mapa: ${state.map_preset}`);
         updatePreflight();
       });
       const seed = document.createElement("input");
@@ -972,33 +953,33 @@ app.registerExtension({
       const denoiseHint = document.createElement("div");
       denoiseHint.className = "onx2d-hint";
       controls.denoise_hint = denoiseHint;
-      denoiseHint.textContent = state.denoise_hint ? `Suggested denoise: ${state.denoise_hint}` : "";
+      denoiseHint.textContent = state.denoise_hint ? `Denoise sugerido: ${state.denoise_hint}` : "";
       const toolsGrid = document.createElement("div");
       toolsGrid.className = "onx2d-grid3";
       toolsGrid.append(
-        field("Intention preset", intention),
-        field("Map preset", presetSelect),
-        field("Seed", seed),
+        field("Preset de intención", intention),
+        field("Preset de mapa", presetSelect),
+        field("Semilla", seed),
       );
       const runModeToggle = document.createElement("div");
       runModeToggle.className = "onx2d-toggle";
       const btnPromptOnly = document.createElement("button");
-      btnPromptOnly.type = "button"; btnPromptOnly.textContent = "Prompt only";
+      btnPromptOnly.type = "button"; btnPromptOnly.textContent = "Solo prompt";
       const btnFullQueue = document.createElement("button");
-      btnFullQueue.type = "button"; btnFullQueue.textContent = "Full queue";
+      btnFullQueue.type = "button"; btnFullQueue.textContent = "Cola completa";
       runModeToggle.append(btnPromptOnly, btnFullQueue);
       function syncRunMode() {
-        const mode = state.run_mode === "Full queue" ? "Full queue" : "Prompt only";
+        const mode = state.run_mode === "Cola completa" ? "Cola completa" : "Solo prompt";
         state.run_mode = mode;
-        btnPromptOnly.className = mode === "Prompt only" ? "active" : "";
-        btnFullQueue.className = mode === "Full queue" ? "active" : "";
-        generateNow.textContent = mode === "Prompt only" ? "GENERATE PROMPT" : "GENERATE PROMPT + IMAGE";
-        generateNow.title = mode === "Prompt only"
-          ? "Analyzes the 3 photos with the VLM, writes the prompt and leaves it editable. Does not queue."
-          : "Analyzes the 3 photos, locks the prompt (Lock) and runs Queue to generate the image.";
+        btnPromptOnly.className = mode === "Solo prompt" ? "active" : "";
+        btnFullQueue.className = mode === "Cola completa" ? "active" : "";
+        generateNow.textContent = mode === "Solo prompt" ? "GENERAR PROMPT" : "GENERAR PROMPT + IMAGEN";
+        generateNow.title = mode === "Solo prompt"
+          ? "Analiza las 3 fotos con el VLM, escribe el prompt y lo deja editable. No lanza la cola."
+          : "Analiza las 3 fotos, fija el prompt (Bloquear) y lanza Queue para generar la imagen.";
       }
-      btnPromptOnly.addEventListener("click", () => { state.run_mode = "Prompt only"; syncRunMode(); persist(); });
-      btnFullQueue.addEventListener("click", () => { state.run_mode = "Full queue"; syncRunMode(); persist(); });
+      btnPromptOnly.addEventListener("click", () => { state.run_mode = "Solo prompt"; syncRunMode(); persist(); });
+      btnFullQueue.addEventListener("click", () => { state.run_mode = "Cola completa"; syncRunMode(); persist(); });
 
       const genRow = document.createElement("div"); genRow.className = "onx2d-row";
       const generateNow = document.createElement("button");
@@ -1015,8 +996,8 @@ app.registerExtension({
       }
       toolsSection.append(
         toolsTitle, guide,
-        field("Content", contentToggle),
-        field("After generating", runModeToggle),
+        field("Contenido", contentToggle),
+        field("Después de generar", runModeToggle),
         toolsGrid, denoiseHint, genRow, preflight,
       );
 
@@ -1029,26 +1010,26 @@ app.registerExtension({
         const flags = connectedFlags();
         const problems = [];
         if (!(state.request || "").trim() && !flags.image_1 && !flags.image_2 && !flags.image_3) {
-          problems.push("Write a request or connect an image");
+          problems.push("Escribe un pedido o conecta una imagen");
         }
         if ((state.runtime === "Ollama" || state.runtime === "llama.cpp") && state.runtime === "Ollama" && !(state.model_id || "").trim()) {
-          problems.push("Ollama model missing");
+          problems.push("Falta modelo Ollama");
         }
         const outfit = (state.reference_map || {}).outfit || "Auto";
         for (const [key, route] of Object.entries(state.reference_map || {})) {
-          if (route === "Image 1" && !flags.image_1) problems.push(`${key} needs Img 1, not connected`);
-          if (route === "Image 2" && !flags.image_2) problems.push(`${key} needs Img 2, not connected`);
-          if (route === "Image 3" && !flags.image_3) problems.push(`${key} needs Img 3, not connected`);
-          if (route === "Blend" && (!flags.image_1 || !flags.image_2)) problems.push(`${key}: Blend needs Img 1 and 2`);
+          if (route === "Image 1" && !flags.image_1) problems.push(`${key} pide Img 1 sin conectar`);
+          if (route === "Image 2" && !flags.image_2) problems.push(`${key} pide Img 2 sin conectar`);
+          if (route === "Image 3" && !flags.image_3) problems.push(`${key} pide Img 3 sin conectar`);
+          if (route === "Blend" && (!flags.image_1 || !flags.image_2)) problems.push(`${key}: Mezclar necesita Img 1 y 2`);
         }
         if (state.lock_generated_prompt && !(state.generated_prompt || "").trim()) {
-          problems.push("Lock on without a prompt");
+          problems.push("Bloquear activo sin prompt");
         }
-        let tip = "Ready to generate";
+        let tip = "Listo para generar";
         let cls = "ok";
         if (problems.length) { tip = problems[0]; cls = "bad"; }
-        else if (flags.image_3 && outfit === "Auto") { tip = "IMAGE 3 connected → Auto will use the outfit from 3"; cls = "warn"; }
-        else if (state.target === "Krea 2") { tip = "Krea 2: no negative prompt"; cls = "ok"; }
+        else if (flags.image_3 && outfit === "Auto") { tip = "IMAGEN 3 conectada → Auto usará ropa de la 3"; cls = "warn"; }
+        else if (state.target === "Krea 2") { tip = "Krea 2: sin prompt negativo"; cls = "ok"; }
         preflight.textContent = tip;
         preflight.className = "onx2d-preflight " + cls;
       }
@@ -1060,10 +1041,10 @@ app.registerExtension({
           return;
         }
         generateNow.disabled = true;
-        const fullQueue = state.run_mode === "Full queue";
+        const fullQueue = state.run_mode === "Cola completa";
         setStatus(fullQueue
-          ? "Reading photos and generating prompt… (then Queue)"
-          : "Reading photos and generating prompt…");
+          ? "Leyendo fotos y generando prompt… (luego Queue)"
+          : "Leyendo fotos y generando prompt…");
         try {
           const images = await collectDirectorImages(app.graph, node);
           const flags = connectedFlags();
@@ -1075,20 +1056,20 @@ app.registerExtension({
               state.lock_generated_prompt = false;
               if (controls.lock) controls.lock.checked = false;
               persist();
-              setStatus(`${unreadable.join(", ")} are dynamic; generating the prompt inside the queue…`);
+              setStatus(`Las ${unreadable.join(", ")} son dinámicas; generando prompt dentro de la cola…`);
               await app.queuePrompt(0);
-              setStatus("Queued. The Director will analyze the real tensors during execution.");
+              setStatus("Cola lanzada. El Director analizará los tensores reales durante la ejecución.");
               return;
             }
             throw new Error(
-              `Could not preview ${unreadable.join(", ")}. Use Full queue to analyze dynamic tensors.`,
+              `No pude previsualizar ${unreadable.join(", ")}. Usa Cola completa para analizar tensores dinámicos.`,
             );
           }
           const attached = [images.image_1_b64, images.image_2_b64, images.image_3_b64].filter(Boolean).length;
           if (attached === 0) {
-            setStatus("No photos read: check Load Image 1/2/3. Continuing with text only…", true);
+            setStatus("Sin fotos leídas: revisa Load Image 1/2/3. Sigo solo con el texto…", true);
           } else {
-            setStatus(`Photos OK (${attached}/3). Calling the VLM…`);
+            setStatus(`Fotos OK (${attached}/3). Llamando al VLM…`);
           }
           const response = await api.fetchApi("/onyx/nf/director/generate", {
             method: "POST",
@@ -1115,15 +1096,15 @@ app.registerExtension({
             persist();
           }
           if (fullQueue) {
-            setStatus((data.status || "Prompt ready") + " · queueing…");
+            setStatus((data.status || "Prompt listo") + " · lanzando cola…");
             try {
               await app.queuePrompt(0);
-              setStatus("Queued. The prompt is locked; edit it or unlock to regenerate.");
+              setStatus("Cola lanzada. El prompt está bloqueado; edítalo o desbloquea si quieres regenerar.");
             } catch (qerr) {
-              setStatus(`Prompt ready, but Queue failed: ${qerr.message || qerr}`, true);
+              setStatus(`Prompt listo, pero Queue falló: ${qerr.message || qerr}`, true);
             }
           } else {
-            setStatus((data.status || "Generated prompt") + " · editable. Review it and hit Queue whenever you like.");
+            setStatus((data.status || "Prompt generado") + " · editable. Revisa y dale Queue cuando quieras.");
           }
         } catch (error) {
           setStatus(`Error: ${error.message}`, true);
@@ -1135,22 +1116,22 @@ app.registerExtension({
 
       const banner = document.createElement("div");
       banner.className = "onx2d-banner";
-      banner.textContent = "Prompt only = you edit · Full queue = prompt + image";
+      banner.textContent = "Solo prompt = editas tú · Cola completa = prompt + imagen";
 
       const outputSection = document.createElement("div");
       outputSection.className = "onx2d-section";
       const outputRow = document.createElement("div"); outputRow.className = "onx2d-row";
       const outputTitle = document.createElement("div"); outputTitle.className = "onx2d-title";
-      outputTitle.textContent = "Generated prompt";
+      outputTitle.textContent = "Prompt generado";
       const outputSpacer = document.createElement("span"); outputSpacer.className = "onx2d-spacer";
-      const lock = checkControl("Lock", state.lock_generated_prompt, (value) => {
+      const lock = checkControl("Bloquear", state.lock_generated_prompt, (value) => {
         state.lock_generated_prompt = value; persist();
       });
       controls.lock = lock.input;
       outputRow.append(outputTitle, outputSpacer, lock.root);
       generated = document.createElement("textarea");
       generated.className = "onx2d-area output";
-      generated.placeholder = "The prompt will appear here after running…";
+      generated.placeholder = "Aquí aparecerá el prompt después de ejecutar…";
       bindText(generated, "generated_prompt");
       controls.generated = generated;
       outputSection.append(outputRow, generated);
@@ -1158,12 +1139,12 @@ app.registerExtension({
       const advanced = document.createElement("details");
       advanced.className = "onx2d-details";
       advanced.open = true;
-      const summary = document.createElement("summary"); summary.textContent = "Advanced reference control";
+      const summary = document.createElement("summary"); summary.textContent = "Control avanzado de referencias";
       const advancedBody = document.createElement("div"); advancedBody.className = "onx2d-details-body";
 
       const preserveSection = document.createElement("div"); preserveSection.className = "onx2d-section";
       const preserveTitle = document.createElement("div"); preserveTitle.className = "onx2d-title";
-      preserveTitle.textContent = "Preserve";
+      preserveTitle.textContent = "Preservar";
       const preserveGrid = document.createElement("div"); preserveGrid.className = "onx2d-checks";
       controls.preserve = {};
       for (const [key, label] of PRESERVE_ROWS) {
@@ -1177,10 +1158,10 @@ app.registerExtension({
 
       const mapSection = document.createElement("div"); mapSection.className = "onx2d-section";
       const mapTitle = document.createElement("div"); mapTitle.className = "onx2d-title";
-      mapTitle.textContent = "Reference map";
+      mapTitle.textContent = "Mapa de referencias";
       const map = document.createElement("div"); map.className = "onx2d-map";
       map.appendChild(document.createElement("span"));
-      for (const label of ["Auto", "Img 1", "Img 2", "Outfit", "Blend"]) {
+      for (const label of ["Auto", "Img 1", "Img 2", "Ropa", "Mezclar"]) {
         const head = document.createElement("span"); head.className = "onx2d-map-head"; head.textContent = label;
         map.appendChild(head);
       }
@@ -1220,33 +1201,33 @@ app.registerExtension({
       const rulesSection = document.createElement("div"); rulesSection.className = "onx2d-section";
       const promptLength = optionSelect(["Short", "Medium", "Detailed", "Maximum Detail"], state.prompt_length);
       bindSelect(promptLength, "prompt_length");
-      const promptLanguage = optionSelect(["English", "Spanish", "Auto"], state.prompt_language);
+      const promptLanguage = optionSelect(["English", "Español", "Auto"], state.prompt_language);
       bindSelect(promptLanguage, "prompt_language");
       const triggerPhrase = document.createElement("input"); triggerPhrase.className = "onx2d-input";
-      triggerPhrase.placeholder = "Empty = no trigger";
+      triggerPhrase.placeholder = "Vacío = sin trigger";
       bindText(triggerPhrase, "trigger_phrase");
       const workflowRules = document.createElement("textarea"); workflowRules.className = "onx2d-area";
-      workflowRules.placeholder = "Extra rules for this workflow only (optional)";
+      workflowRules.placeholder = "Reglas adicionales solo para este workflow (opcional)";
       bindText(workflowRules, "workflow_rules");
       const customBehavior = document.createElement("textarea"); customBehavior.className = "onx2d-area";
-      customBehavior.placeholder = "Custom director behavior (optional)";
+      customBehavior.placeholder = "Comportamiento personalizado del director (opcional)";
       bindText(customBehavior, "custom_director_behavior");
       rulesSection.append(
-        field("Prompt length", promptLength),
-        field("Output language", promptLanguage),
-        field("Trigger / prefix", triggerPhrase),
-        field("Workflow rules", workflowRules),
-        field("Director behavior", customBehavior),
+        field("Longitud del prompt", promptLength),
+        field("Idioma de salida", promptLanguage),
+        field("Trigger / prefijo", triggerPhrase),
+        field("Reglas del workflow", workflowRules),
+        field("Comportamiento del director", customBehavior),
       );
 
       const backendSection = document.createElement("div"); backendSection.className = "onx2d-section";
       const backendTitle = document.createElement("div"); backendTitle.className = "onx2d-title";
-      backendTitle.textContent = "Memory & visual input";
+      backendTitle.textContent = "Memoria y entrada visual";
       const backendChecks = document.createElement("div"); backendChecks.className = "onx2d-checks";
-      const fourBit = checkControl("Load in 4-bit", state.four_bit, (value) => {
+      const fourBit = checkControl("Cargar en 4-bit", state.four_bit, (value) => {
         state.four_bit = value; persist();
       });
-      const unloadAfter = checkControl("Unload when done", state.unload_after, (value) => {
+      const unloadAfter = checkControl("Liberar al terminar", state.unload_after, (value) => {
         state.unload_after = value; persist();
       });
       controls.fourBit = fourBit.input; controls.unloadAfter = unloadAfter.input;
@@ -1270,7 +1251,7 @@ app.registerExtension({
       });
       controls.timeout = timeout;
       const backendGrid = document.createElement("div"); backendGrid.className = "onx2d-grid3";
-      backendGrid.append(field("Attention", attention), field("Max image edge", maxEdge), field("Timeout (s)", timeout));
+      backendGrid.append(field("Atención", attention), field("Arista máx. imagen", maxEdge), field("Timeout (s)", timeout));
       backendSection.append(backendTitle, backendChecks, backendGrid);
 
       advancedBody.append(preserveSection, mapSection, rulesSection, backendSection);
@@ -1299,7 +1280,7 @@ app.registerExtension({
         }
         if (controls.denoise_hint) {
           controls.denoise_hint.textContent = state.denoise_hint
-            ? `Suggested denoise: ${state.denoise_hint}` : "";
+            ? `Denoise sugerido: ${state.denoise_hint}` : "";
         }
         promptLength.value = state.prompt_length;
         promptLanguage.value = state.prompt_language || "English";

@@ -21,8 +21,7 @@ from . import local_vlm
 from .director import _llamacpp_generate, _local_endpoint, _ollama_generate
 
 
-BACKENDS = ("Transformers local", "Ollama", "llama.cpp", "Gemini API", "Grok API", "Vertex AI")
-VERTEX_DEFAULT_MODEL = "gemini-3.6-flash"
+BACKENDS = ("Transformers local", "Ollama", "llama.cpp", "Gemini API", "Grok API")
 MAX_POSES = 8
 DEFAULT_VIBE = (
     "Confident lifestyle influencer photo carousel: natural candid energy, varied hand gestures, "
@@ -50,7 +49,7 @@ def _safe_cloud_model(value, default):
     value = _bounded(value, 160, default)
     value = value.removeprefix("models/")
     if not re.fullmatch(r"[A-Za-z0-9._:-]+", value):
-        raise ValueError("The model identifier contains characters that are not allowed.")
+        raise ValueError("El identificador del modelo contiene caracteres no permitidos.")
     return value
 
 
@@ -129,7 +128,7 @@ def _extract_poses(text, count, strict=False):
         if isinstance(parsed, list):
             values = [item.strip() for item in parsed if isinstance(item, str) and item.strip()]
             if strict and len(values) != len(parsed):
-                raise ValueError("The model returned entries that are not text instructions.")
+                raise ValueError("El modelo devolvió entradas que no son instrucciones de texto.")
         elif isinstance(parsed, str) and parsed.strip():
             # Vision models sometimes return {"poses": "one instruction"} even
             # when asked for an array. That is valid for Reference Copy's one pose.
@@ -147,13 +146,13 @@ def _extract_poses(text, count, strict=False):
         if value and value not in cleaned:
             cleaned.append(value)
     if strict and not cleaned:
-        raise ValueError("The model did not return a valid pose instruction; check the reference or retry.")
+        raise ValueError("El modelo no devolvió una instrucción de pose válida; revisa la referencia o reintenta.")
     if strict and len(values) != len(cleaned):
-        raise ValueError("The model returned duplicate poses; prepare the list again.")
+        raise ValueError("El modelo devolvió poses repetidas; prepara de nuevo la lista.")
     if strict and len(cleaned) != count:
         raise ValueError(
-            f"The model returned {len(cleaned)} unique poses; {count} were expected. "
-            "Prepare the list again. No generic poses were added."
+            f"El modelo devolvió {len(cleaned)} poses únicas; se esperaban {count}. "
+            "Vuelve a preparar la lista. No se añadieron poses genéricas."
         )
     if not strict:
         for fallback in FALLBACK_POSES:
@@ -167,7 +166,7 @@ def _extract_poses(text, count, strict=False):
 def _gemini_generate(api_key, model_id, system, user, image, timeout):
     key = _bounded(api_key or os.getenv("GEMINI_API_KEY"), 500)
     if not key:
-        raise ValueError("The Gemini API key is missing (private field or GEMINI_API_KEY).")
+        raise ValueError("Falta la API key de Gemini (campo privado o GEMINI_API_KEY).")
     model = _safe_cloud_model(model_id, "gemini-3.5-flash")
     parts = [{"text": user}]
     if image is not None:
@@ -190,22 +189,22 @@ def _gemini_generate(api_key, model_id, system, user, image, timeout):
             timeout=timeout,
         )
     except requests.RequestException as exc:
-        raise ValueError("Could not connect to Gemini.") from exc
+        raise ValueError("No se pudo conectar con Gemini.") from exc
     if response.status_code != 200:
         raise ValueError(f"Gemini HTTP {response.status_code}: {response.text[:500]}")
     try:
         parts = response.json()["candidates"][0]["content"]["parts"]
         return "".join(part.get("text", "") for part in parts if isinstance(part, dict))
     except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise ValueError("Gemini returned an invalid response.") from exc
+        raise ValueError("Gemini devolvió una respuesta no válida.") from exc
 
 
 def _grok_generate(api_key, model_id, system, user, image, timeout):
     key = _bounded(api_key or os.getenv("XAI_API_KEY"), 500)
     if not key:
-        raise ValueError("The Grok API key is missing (private field or XAI_API_KEY).")
+        raise ValueError("Falta la API key de Grok (campo privado o XAI_API_KEY).")
     if not str(model_id or "").strip():
-        raise ValueError("Select a Grok model after pressing Models.")
+        raise ValueError("Selecciona un modelo Grok después de pulsar Models.")
     model = _safe_cloud_model(model_id, "")
     content = [{"type": "text", "text": user}]
     if image is not None:
@@ -231,7 +230,7 @@ def _grok_generate(api_key, model_id, system, user, image, timeout):
             timeout=timeout,
         )
     except requests.RequestException as exc:
-        raise ValueError("Could not connect to Grok/xAI.") from exc
+        raise ValueError("No se pudo conectar con Grok/xAI.") from exc
     if response.status_code != 200:
         raise ValueError(f"Grok HTTP {response.status_code}: {response.text[:500]}")
     try:
@@ -240,102 +239,23 @@ def _grok_generate(api_key, model_id, system, user, image, timeout):
             content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
         return str(content)
     except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise ValueError("Grok returned an invalid response.") from exc
-
-
-# Rotation entre les service accounts du dossier, comme les autres nodes Onyx :
-# chaque appel prend le JSON suivant, pour repartir la charge sur les projets.
-_VERTEX_ROTATION = {"offset": 0}
-
-
-def _vertex_json_files(folder):
-    folder = _bounded(folder, 1_000).strip().strip('"')
-    if not folder:
-        raise ValueError("Vertex AI needs a Vertex JSON folder (folder with your service-account .json files).")
-    if not os.path.isdir(folder):
-        raise ValueError(f"Vertex JSON folder not found: {folder}")
-    files = sorted(
-        os.path.join(folder, name) for name in os.listdir(folder) if name.lower().endswith(".json")
-    )
-    if not files:
-        raise ValueError(f"No .json file found in: {folder}")
-    return files
-
-
-def _vertex_generate(json_folder, model_id, system, user, image, timeout):
-    try:
-        from google import genai
-        from google.genai import types
-        from google.oauth2 import service_account
-    except ImportError as exc:
-        raise ValueError("Vertex AI needs the google-genai and google-auth packages.") from exc
-
-    model = _safe_cloud_model(model_id, VERTEX_DEFAULT_MODEL)
-    files = _vertex_json_files(json_folder)
-    index = _VERTEX_ROTATION["offset"] % len(files)
-    _VERTEX_ROTATION["offset"] = index + 1
-    json_path = files[index]
-
-    try:
-        with open(json_path, "r", encoding="utf-8") as fh:
-            project_id = json.load(fh).get("project_id", "")
-        credentials = service_account.Credentials.from_service_account_file(
-            json_path, scopes=["https://www.googleapis.com/auth/cloud-platform"]
-        )
-    except Exception as exc:
-        raise ValueError(f"Invalid Vertex service-account file {os.path.basename(json_path)}: {exc}") from exc
-    print(f"[Onyx Pose List Prep] Vertex — {os.path.basename(json_path)} ({index + 1}/{len(files)}) "
-          f"| project={project_id} | model={model}")
-
-    # location=global : les modeles Gemini recents n'existent pas sur les
-    # endpoints regionaux (404), meme choix que les autres nodes du pack.
-    # google-genai >= 1.0 attend le timeout en millisecondes ; si la version
-    # installee refuse l'option, on retombe sur le client sans timeout explicite.
-    try:
-        client = genai.Client(
-            vertexai=True, project=project_id, location="global", credentials=credentials,
-            http_options=types.HttpOptions(timeout=int(timeout) * 1000),
-        )
-    except Exception:
-        client = genai.Client(
-            vertexai=True, project=project_id, location="global", credentials=credentials,
-        )
-    contents = []
-    if image is not None:
-        contents.append(types.Part.from_bytes(
-            data=base64.b64decode(_image_b64(image)), mime_type="image/jpeg",
-        ))
-    contents.append(user)
-    config = types.GenerateContentConfig(
-        system_instruction=system,
-        temperature=0.8,
-        max_output_tokens=1200,
-        response_mime_type="application/json",
-    )
-    try:
-        response = client.models.generate_content(model=model, contents=contents, config=config)
-    except Exception as exc:
-        raise ValueError(f"Vertex AI error ({os.path.basename(json_path)}): {exc}") from exc
-    text = getattr(response, "text", "") or ""
-    if not text.strip():
-        raise ValueError("Vertex AI returned an empty response.")
-    return text
+        raise ValueError("Grok devolvió una respuesta no válida.") from exc
 
 
 def generate_pose_list(config, image=None):
     backend = _bounded(config.get("backend"), 40, "Transformers local")
     if backend not in BACKENDS:
-        raise ValueError("Invalid pose backend.")
+        raise ValueError("Backend de poses no válido.")
     mode = _bounded(config.get("mode"), 40, "Vibe List")
     if mode not in ("Master Auto", "Vibe List", "Reference Copy"):
-        raise ValueError("Invalid pose mode.")
+        raise ValueError("Modo de poses no válido.")
     count = max(1, min(MAX_POSES, int(config.get("count") or 4)))
     if mode == "Reference Copy":
         if image is None:
-            raise ValueError("Reference Copy needs a pose image.")
+            raise ValueError("Reference Copy necesita una imagen de pose.")
         count = 1
     if mode == "Master Auto" and image is None:
-        raise ValueError("Master Auto needs the master image connected.")
+        raise ValueError("Master Auto necesita la imagen maestra conectada.")
     vibe = _bounded(config.get("vibe"), 4_000, DEFAULT_VIBE)
     model_id = _bounded(config.get("model_id"), 500)
     endpoint = _bounded(config.get("endpoint"), 500)
@@ -380,8 +300,6 @@ def generate_pose_list(config, image=None):
             text = _llamacpp_generate(endpoint, model_id, system, user, items, state)
     elif backend == "Gemini API":
         text = _gemini_generate(config.get("api_key"), model_id, system, user, image, timeout)
-    elif backend == "Vertex AI":
-        text = _vertex_generate(config.get("vertex_json_folder"), model_id, system, user, image, timeout)
     else:
         text = _grok_generate(config.get("api_key"), model_id, system, user, image, timeout)
 
