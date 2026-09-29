@@ -96,7 +96,8 @@ def _load_guides(folder: str = "") -> str:
 
 TARGET_H3 = "MiniMax H3"
 TARGET_SEEDANCE = "Seedance"
-_TARGETS = [TARGET_H3, TARGET_SEEDANCE]
+TARGET_SEEDANCE_V2 = "Seedance v2"
+_TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2]
 
 ROLE_REFERENCE = "reference"
 ROLE_FIRST = "first_frame"
@@ -186,7 +187,10 @@ class OnyxH3ContextIR:
                                "MiniMax H3: compiles against the two official MiniMax guides, "
                                "verbatim, with <Picture N> / <Video N> labels.\n"
                                "Seedance: compiles against ByteDance's six-slot grammar with "
-                               "@Image 1 / @Video 1 tags.\n\n"
+                               "@Image 1 / @Video 1 tags.\n"
+                               "Seedance v2: same tags, but outputs one structured JSON "
+                               "object (people, scene_events with measured dialogue, a single "
+                               "continuous shot, negative_prompt, reference_images).\n\n"
                                "The two are not interchangeable. H3's guide asks for an "
                                "exhaustive description; ByteDance's says a long paragraph fights "
                                "itself and that two or three sentences is the target. Pass A does "

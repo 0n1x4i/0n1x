@@ -141,6 +141,14 @@ function setupBatchLoader(node) {
     let currentIndex = -1;
     let isUploading  = false;
 
+    // Hauteur reservee a la zone medias (toolbar + grille/drop zone + status).
+    // Exposee au frontend via getMinHeight : c'est ce qui empeche ComfyUI de
+    // l'ecraser quand les autres widgets du node (trim, resize, fps...) prennent
+    // la place. Avant, refresh() fixait la hauteur du node sans compter ces
+    // widgets, et la zone "Drop images here" se retrouvait avec ~0 px.
+    const DISPLAY_MIN = 42 + 320 + 26;
+    let displayH = DISPLAY_MIN;
+
     // ── Find / hide the batch_data STRING widget ──────────────────────────
     // ComfyUI creates a textarea widget for our "batch_data" required STRING.
     // We make it invisible (0-height) and manage its value ourselves.
@@ -177,6 +185,7 @@ function setupBatchLoader(node) {
         flexDirection: "column",
         width:         "100%",
         height:        "100%",
+        minHeight:     `${DISPLAY_MIN}px`,
         background:    T.bg,
         borderRadius:  "6px",
         overflow:      "hidden",
@@ -221,6 +230,7 @@ function setupBatchLoader(node) {
         alignItems:      "center",
         justifyContent:  "center",
         flex:            "1",
+        minHeight:       "200px",
         margin:          "10px",
         border:          `2px dashed ${T.border}`,
         borderRadius:    "8px",
@@ -404,6 +414,23 @@ function setupBatchLoader(node) {
         syncBatchData();
     }
 
+    // Taille du node = ce que le frontend calcule (tous les widgets + la zone
+    // medias a displayH), comme l'auto-size d'avant mais sans rien oublier.
+    function fitNode() {
+        let need;
+        try { need = node.computeSize(); } catch { need = null; }
+        if (!need || !isFinite(need[1])) {
+            const others = (node.widgets?.length || 1) * 26 + 40;
+            need = [node.size[0], others + displayH];
+        }
+        const w = Math.max(node.size[0], need[0]);
+        const h = Math.max(need[1], displayH + 40);
+        if (Math.abs(node.size[1] - h) > 1 || node.size[0] !== w) {
+            if (node.setSize) node.setSize([w, h]); else node.size = [w, h];
+        }
+        app.graph?.setDirtyCanvas(true, true);
+    }
+
     // ── Rebuild UI ─────────────────────────────────────────────────────────
     function refresh() {
         const count = imageData.order.length;
@@ -557,12 +584,15 @@ function setupBatchLoader(node) {
             grid.appendChild(card);
         });
 
-        // Auto-size node height: toolbar(42) + grid + status(26)
+        // Auto-size : toolbar(42) + grille + status(26) pour la zone medias,
+        // PLUS les autres widgets du node — node.computeSize() les compte et
+        // lit displayH via getMinHeight.
         const cols      = Math.max(1, Math.floor((node.size[0] - 16) / 148));
         const rows      = Math.ceil(count / cols);
         const gridH     = count === 0 ? 320 : Math.min(Math.max(rows * 160, 320), 900);
-        node.size[1]    = 42 + gridH + 26;
-        app.graph.setDirtyCanvas(true, true);
+        displayH        = 42 + gridH + 26;
+        root.style.minHeight = `${displayH}px`;
+        fitNode();
     }
 
     // ── WebSocket: highlight current image during processing ───────────────
@@ -596,9 +626,10 @@ function setupBatchLoader(node) {
 
     // ── DOM widget (display only — does not serialize) ─────────────────────
     node.addDOMWidget("images_display", "ONYX_BATCH_DISPLAY", root, {
-        serialize: false,
-        getValue:  () => undefined,
-        setValue:  () => {},
+        serialize:    false,
+        getValue:     () => undefined,
+        setValue:     () => {},
+        getMinHeight: () => displayH,
     });
 
     // ── Serialisation: persist imageData in batch_data widget ──────────────
@@ -644,6 +675,10 @@ function setupBatchLoader(node) {
     // ── Initial render ─────────────────────────────────────────────────────
     node.size = [460, 540];
     refresh();
+    // Les widgets natifs peuvent finir de s'installer apres nous : on
+    // recalcule une fois qu'ils sont tous la.
+    setTimeout(fitNode, 50);
+    setTimeout(fitNode, 300);
 }
 
 // ── Register extension ───────────────────────────────────────────────────────

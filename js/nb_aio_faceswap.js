@@ -48,6 +48,58 @@ function syncNodeWidget(node, name, value) {
         if (w.callback) w.callback(value);
     }
 }
+// ─── Face Swap · Keep original expression ─────────────────────────────────
+// La cle Grok vit dans les reglages ComfyUI (jamais dans le workflow) ; le
+// Python la relit dans comfy.settings.json au moment de l'execution.
+const GROK_SETTING_ID = "Onyx.FaceSwap.GrokApiKey";
+function getGrokKey() {
+    try {
+        const v = app.extensionManager?.setting?.get?.(GROK_SETTING_ID)
+            ?? app.ui?.settings?.getSettingValue?.(GROK_SETTING_ID);
+        return String(v || "").trim();
+    } catch (_) { return ""; }
+}
+async function setGrokKey(value) {
+    if (app.extensionManager?.setting?.set) return app.extensionManager.setting.set(GROK_SETTING_ID, value);
+    if (app.ui?.settings?.setSettingValueAsync) return app.ui.settings.setSettingValueAsync(GROK_SETTING_ID, value);
+    return app.ui?.settings?.setSettingValue?.(GROK_SETTING_ID, value);
+}
+function openComfySettings() {
+    try {
+        if (app.extensionManager?.command?.execute) { app.extensionManager.command.execute("Comfy.ShowSettingsDialog"); return; }
+    } catch (_) { /* fallback below */ }
+    try { app.ui?.settings?.show?.(); } catch (_) { /* noop */ }
+}
+function maybeWarnSeedreamExpression(node) {
+    const model = String(getWidget(node, "model")?.value || "");
+    const expr  = getWidget(node, "face_expression")?.value;
+    if (expr !== "Keep original" || !model.startsWith("Seedream") || getGrokKey()) return;
+    if (document.getElementById("onyx-expr-modal")) return;
+    const overlay = document.createElement("div");
+    overlay.id = "onyx-expr-modal";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;";
+    const box = document.createElement("div");
+    box.style.cssText = "width:440px;max-width:92vw;background:#0c1a1e;border:1.5px solid #1497b8;border-radius:10px;padding:16px;color:#dfeff2;font:12.5px/1.45 Segoe UI,Arial,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.6);";
+    box.innerHTML = `
+        <div style="font-size:14px;font-weight:700;color:#2ec4e0;margin-bottom:8px">Keep original expression · Seedream</div>
+        <div style="margin-bottom:8px">The original expression is read from image 2 by <b>Gemini 3.1 Flash-Lite</b>. Seedream is mostly used for NSFW swaps, and Gemini <b>refuses NSFW photos</b>: when it does, the exact expression can't be read and only a generic “keep the same expression” instruction is sent.</div>
+        <div style="margin-bottom:10px">Add a <b>Grok API key</b> and <b>Grok 4.20 non-reasoning</b> takes over automatically whenever Gemini refuses a photo. The key is stored in ComfyUI settings (Onyx › Face Swap), never in the workflow.</div>`;
+    const input = document.createElement("input");
+    input.type = "password"; input.placeholder = "xai-…  (Grok API key)";
+    input.style.cssText = "width:100%;box-sizing:border-box;padding:7px;border-radius:6px;border:1px solid #35636b;background:#07100f;color:#fff;margin-bottom:10px;";
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;";
+    const mk = (label, primary) => { const b = document.createElement("button"); b.textContent = label; b.style.cssText = `padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:600;border:1px solid ${primary ? "#2ec4e0" : "#444"};background:${primary ? "#115c6a" : "#222"};color:#fff;`; return b; };
+    const save = mk("Save key", true), settings = mk("Open settings", false), skip = mk("Continue without Grok", false);
+    const close = () => overlay.remove();
+    save.onclick = async () => { const v = input.value.trim(); if (!v) { input.focus(); return; } try { await setGrokKey(v); } catch (e) { console.warn("[Onyx] could not save Grok key", e); } close(); };
+    settings.onclick = () => { close(); openComfySettings(); };
+    skip.onclick = close;
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    row.append(skip, settings, save);
+    box.append(input, row); overlay.append(box); document.body.append(overlay);
+    input.focus();
+}
 /** Masque ou affiche un widget standard (computeSize trick). */
 function setWidgetVisible(node, widgetName, visible) {
     const w = getWidget(node, widgetName);
@@ -847,6 +899,7 @@ function buildFaceSwapUI(node) {
     // ── Facial Expression section (hidden until automation ON) ───────────
     const EXPRESSIONS = [
         "Manual", "Neutral", "Sensual", "Playful", "Subtle smile", "Smile",
+        "Keep original",
     ];
     const exprSection = document.createElement("div");
     exprSection.style.cssText = `
@@ -900,13 +953,31 @@ function buildFaceSwapUI(node) {
             overflow: hidden;
             text-overflow: ellipsis;
         `;
-        btn.addEventListener("click", () => selectExpression(value));
+        if (value === "Keep original") {
+            btn.title = "Reads the expression of image 2 with a cheap model (Gemini 3.1 Flash-Lite, "
+                      + "Grok 4.20 non-reasoning as fallback) and adds it to the swap prompt.";
+        }
+        btn.addEventListener("click", () => {
+            selectExpression(value);
+            if (value === "Keep original") maybeWarnSeedreamExpression(node);
+        });
         exprBtns[value] = btn;
         exprGrid.appendChild(btn);
     }
     exprSection.appendChild(exprGrid);
     container.appendChild(exprSection);
     selectExpression("Manual");
+    // Passage a Seedream alors que "Keep original" est actif : meme avertissement.
+    const _exprModelW = getWidget(node, "model");
+    if (_exprModelW && !_exprModelW._onyxExprHooked) {
+        _exprModelW._onyxExprHooked = true;
+        const _origCb = _exprModelW.callback;
+        _exprModelW.callback = function (...args) {
+            const r = _origCb?.apply(this, args);
+            try { maybeWarnSeedreamExpression(node); } catch (_) { /* noop */ }
+            return r;
+        };
+    }
     // ── Custom Prompt section (hidden until automation ON) ─────────────────
     const promptSection = document.createElement("div");
     promptSection.style.cssText = `
@@ -959,7 +1030,7 @@ function buildFaceSwapUI(node) {
     let lowNeckActive       = false;
     let amateurModeActive   = false;
     const FS_HEIGHT_OFF = 115;
-    const FS_HEIGHT_ON  = 400;
+    const FS_HEIGHT_ON  = 428;  // +28 : 3e ligne d'expressions ("Keep original")
     let _blockH = FS_HEIGHT_OFF;
     // ── Face Swap toggle ──────────────────────────────────────────────────
     toggleBtn.addEventListener("click", () => {
@@ -1362,4 +1433,18 @@ app.registerExtension({
             return r;
         };
     },
+});
+
+// Reglage ComfyUI pour la cle Grok du Face Swap (lecteur d'expression).
+app.registerExtension({
+    name: "Onyx.FaceSwap.ExpressionSettings",
+    settings: [{
+        id: GROK_SETTING_ID,
+        name: "Grok API key (Face Swap · Keep original expression)",
+        type: "text",
+        defaultValue: "",
+        category: ["Onyx", "Face Swap", "Grok API key"],
+        tooltip: "Used by Face Swap › Keep original expression when Gemini refuses a photo "
+               + "(or when no Gemini key / Vertex folder is set). Stored in ComfyUI settings, never in workflows.",
+    }],
 });

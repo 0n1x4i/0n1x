@@ -52,7 +52,7 @@ def _nearest_ratio_label(ar: float) -> str:
 
 
 def _snap_to_budget(megapixels: float, ar: float, multiple: int,
-                    min_side: int = 64, max_side: int = 8192) -> tuple:
+                    min_side: int = 64, max_side: int = 16384) -> tuple:
     """Best (width, height) on the `multiple` grid for a MP budget and ratio.
 
     Searches candidate heights around the ideal rather than rounding once. For
@@ -108,7 +108,7 @@ class OnyxResolutionMP:
         return {
             "required": {
                 "megapixels": ("FLOAT", {
-                    "default": 0.98, "min": 0.05, "max": 8.0, "step": 0.01, "round": 0.01,
+                    "default": 0.98, "min": 0.05, "max": 20.0, "step": 0.01, "round": 0.01,
                     "tooltip": "Pixel budget in megapixels, to two decimals.\n"
                                "Models behave best near the resolution they were trained on — "
                                "0.98 and 1.05 are not interchangeable even though both 'look like 1MP'.\n"
