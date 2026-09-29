@@ -26,6 +26,7 @@ Neither re-encodes. The frames in the output are bit-identical to the input's.
 """
 
 import os
+import random
 import shutil
 import time
 import logging
@@ -43,6 +44,8 @@ try:
 except Exception:
     _mp4_strip_metadata = None
 
+
+from . import metadata_spoof as _spoof
 
 _METHODS = {
     "remux (rebuild container, most thorough)": "remux",
@@ -171,6 +174,28 @@ class OnyxSaveVideoNoMetadata:
                     "label_on": "prefix_00001_1699999999.mp4",
                     "label_off": "prefix_00001.mp4",
                     "tooltip": "On by default: two runs a second apart cannot collide."}),
+                # Ajoutes en dernier : les workflows sauvegardes gardent leurs reglages.
+                "metadata_profile": (_spoof.VIDEO_PROFILES, {
+                    "default": _spoof.PROFILE_NONE,
+                    "tooltip": "None = strip every tag (as before, uses `method`).\n"
+                               "iOS (iPhone) = fresh iPhone identity per file: Apple QuickTime "
+                               "tags, iOS version, creation date, ISO6709 GPS, Core Media "
+                               "handlers, mp42 (.mp4).\n"
+                               "CapCut iOS = a CapCut iOS 19.6.0 export: DreaminaMetaInfo + "
+                               "artwork JSON with a new videoId, encoder H.264, QuickTime (.mov).\n"
+                               "CapCut Android = a CapCut Android export: MediaMuxer MP4, "
+                               "com.android.version, no date, no GPS (.mp4).\n"
+                               "CapCut PC = a CapCut PC (Windows) export: FFmpeg Lavf61 MP4, vicut "
+                               "JSON \"os\":\"windows\", export date (.mp4).\n"
+                               "All are stream copies through ffmpeg: frames are never re-encoded "
+                               "(CapCut Android / PC only re-encode a source that is not "
+                               "H.264 + AAC). Needs ffmpeg (PATH or imageio-ffmpeg)."}),
+                "iphone_model": (_spoof.IPHONE_CHOICES, {
+                    "default": "random",
+                    "tooltip": "iOS profile only. 'random' picks a model per file."}),
+                "country": (_spoof.COUNTRY_CODES, {
+                    "default": "US",
+                    "tooltip": "iOS profile only. GPS position and timezone are drawn in this country."}),
             },
         }
 
@@ -190,7 +215,8 @@ class OnyxSaveVideoNoMetadata:
         return float("nan")
 
     def save(self, filename_prefix, method, video=None, video_path=None,
-             add_timestamp=True):
+             add_timestamp=True, metadata_profile=_spoof.PROFILE_NONE,
+             iphone_model="random", country="US"):
         ensure_profile_ready()
         tag = "[Save Video]"
         src = _resolve(video, video_path)
@@ -224,13 +250,33 @@ class OnyxSaveVideoNoMetadata:
         os.makedirs(dest_dir, exist_ok=True)
 
         existing = [f for f in os.listdir(dest_dir)
-                    if f.startswith(stem + "_") and f.lower().endswith(".mp4")]
+                    if f.startswith(stem + "_") and f.lower().endswith((".mp4", ".mov"))]
         counter = len(existing) + 1
         ext = os.path.splitext(src)[1].lower() or ".mp4"
         name = f"{stem}_{counter:05d}"
         if add_timestamp:
             name += f"_{int(time.time())}"
         dest = os.path.join(dest_dir, name + ext)
+
+        if metadata_profile and metadata_profile != _spoof.PROFILE_NONE:
+            # Spoof : copie du flux par ffmpeg dans un conteneur neuf porteur
+            # de l'identite choisie. Aucun re-encodage, comme le mode remux.
+            dest = os.path.join(dest_dir, name + _spoof.video_extension(metadata_profile))
+            try:
+                desc = _spoof.spoof_video(src, dest, metadata_profile, iphone_model,
+                                          country, seed=random.getrandbits(64))
+            except Exception:
+                if os.path.isfile(dest):
+                    try:
+                        os.remove(dest)
+                    except Exception:
+                        pass
+                raise
+            size_mb = os.path.getsize(dest) / 1024 ** 2
+            print(f"🎭 {tag} {metadata_profile}: {desc}\n     → {dest}\n"
+                  f"     {size_mb:.1f} MB — stream copy, no frame re-encoded.")
+            logging.info("Onyx Save Video (%s): %s", metadata_profile, dest)
+            return (dest, dest)
 
         mode = _METHODS[method]
         used = mode

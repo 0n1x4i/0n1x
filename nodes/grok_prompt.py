@@ -15,8 +15,41 @@ The actual API call (message building, request, usage logging) lives server-side
 import json
 import os
 import logging
+import random
+import re
 
 from .onyx_remote_exec import load_remote
+
+
+# Tirage aleatoire {a|b|c} dans le prompt, resolu ICI avant l'envoi a Grok.
+# Pourquoi cote node et pas dans le prompt : chaque appel a Grok est
+# independant (aucune memoire des images precedentes), donc "ne repete pas le
+# meme lieu" ne peut pas marcher — le modele retombe toujours sur son choix le
+# plus probable. Le hasard doit venir de l'exterieur. Tirage cale sur la seed :
+# seed fixe = memes tirages, seed randomize = nouveaux tirages a chaque run.
+# Seuls les blocs contenant au moins un "|" sont touches, donc un JSON ou des
+# accolades normales dans le prompt restent intacts.
+_CHOICE_RE = re.compile(r"\{([^{}]*\|[^{}]*)\}")
+
+
+def _resolve_choices(text, seed):
+    rng = random.Random(int(seed or 0))
+    picks = []
+
+    def _pick(match):
+        options = [o.strip() for o in match.group(1).split("|")]
+        options = [o for o in options if o] or [""]
+        choice = rng.choice(options)
+        picks.append(choice)
+        return choice
+
+    # Plusieurs passes pour les blocs imbriques ({a|{b|c}}), de l'interieur vers l'exterieur.
+    for _ in range(5):
+        new_text = _CHOICE_RE.sub(_pick, text)
+        if new_text == text:
+            break
+        text = new_text
+    return text, picks
 
 
 # Vision-capable models (support image input) first, text-only models after.
@@ -179,6 +212,19 @@ class OnyxGrokPromptNode:
                     "tooltip": "Replaces every occurrence of TRIGGER in the prompt. "
                                "Left empty, TRIGGER is sent as-is.",
                 }),
+                # Aussi en dernier, pour la meme raison de position. N'est PAS
+                # envoye a l'API : sa seule fonction est de changer les entrees
+                # du node, donc de casser le cache de ComfyUI. En "randomize",
+                # chaque run d'un batch rappelle Grok (nouveau prompt a chaque
+                # image) ; en "fixed", le prompt est reutilise tant que rien ne
+                # change, comme avant.
+                "seed": ("INT", {
+                    "default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF,
+                    "control_after_generate": True,
+                    "tooltip": "randomize = a new Grok prompt on every run (e.g. every image of a "
+                               "batch). fixed = reuse the same prompt while nothing else changes. "
+                               "Not sent to the API.",
+                }),
             },
         }
 
@@ -201,8 +247,12 @@ class OnyxGrokPromptNode:
         temperature=0.7,
         max_tokens=1024,
         trigger_word="",
+        seed=0,
     ):
         ensure_profile_ready()
+        prompt, _picks = _resolve_choices(prompt or "", seed)
+        if _picks:
+            print(f"🎲 [Onyx Grok] Random picks (seed {seed}): " + " · ".join(p[:60] for p in _picks))
         ns = load_remote("grok_prompt_core")
         return ns["generate_impl"](
             OnyxGrokPromptNode, prompt, model, image, api_key,

@@ -9,9 +9,12 @@ Supports PNG and JPEG output.
 
 import os
 import logging
+import random
 import numpy as np
 from PIL import Image
 import folder_paths
+
+from . import metadata_spoof as _spoof
 
 
 class OnyxSaveImageNoMetadataNode:
@@ -43,6 +46,25 @@ class OnyxSaveImageNoMetadataNode:
                     "tooltip": "JPEG quality (1-100). Ignored for PNG.",
                 }),
             },
+            # Ajoutes en "optional" et en dernier : l'ordre des widgets des
+            # workflows deja sauvegardes ne bouge pas.
+            "optional": {
+                "metadata_profile": (_spoof.IMAGE_PROFILES, {
+                    "default": _spoof.PROFILE_NONE,
+                    "tooltip": "None = no metadata at all (as before).\n"
+                               "iOS (iPhone) = saved as JPEG with a full, fresh iPhone EXIF per "
+                               "image: device, iOS version, date, optics, exposure and GPS. "
+                               "Forces JPEG — a PNG carrying iPhone EXIF would contradict itself.",
+                }),
+                "iphone_model": (_spoof.IPHONE_CHOICES, {
+                    "default": "random",
+                    "tooltip": "iOS profile only. 'random' picks a model per image.",
+                }),
+                "country": (_spoof.COUNTRY_CODES, {
+                    "default": "US",
+                    "tooltip": "iOS profile only. GPS position and timezone are drawn in this country.",
+                }),
+            },
         }
 
     RETURN_TYPES = ()
@@ -50,7 +72,11 @@ class OnyxSaveImageNoMetadataNode:
     OUTPUT_NODE = True
     CATEGORY = "Onyx/Image"
 
-    def save_images(self, images, filename_prefix="ComfyUI", format="PNG", quality=95):
+    def save_images(self, images, filename_prefix="ComfyUI", format="PNG", quality=95,
+                    metadata_profile=_spoof.PROFILE_NONE, iphone_model="random", country="US"):
+        spoof_ios = metadata_profile == _spoof.PROFILE_IOS
+        if spoof_ios:
+            format = "JPEG"   # an iPhone EXIF only makes sense in a JPEG
         # Resolve output path and counter (same logic as native SaveImage)
         ensure_profile_ready()
         full_output_folder, filename, counter, subfolder, filename_prefix = \
@@ -91,6 +117,12 @@ class OnyxSaveImageNoMetadataNode:
                     quality=quality,
                     optimize=True,
                 )
+                if spoof_ios:
+                    desc = _spoof.spoof_jpeg(
+                        os.path.join(full_output_folder, file), iphone_model, country,
+                        seed=random.getrandbits(64),
+                        width=pil_img.width, height=pil_img.height)
+                    logging.info("[%s SaveNoMeta] iOS EXIF: %s", "Onyx", desc)
             else:
                 ext = "png"
                 file = f"{filename}_{counter:05}_.{ext}"

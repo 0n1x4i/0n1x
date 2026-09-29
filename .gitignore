@@ -46,3 +46,7 @@ license-worker/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# The Onyx key saved by the Onyx Session node (never commit it)
+onyx_session.key
+onyx_session.key.tmp
