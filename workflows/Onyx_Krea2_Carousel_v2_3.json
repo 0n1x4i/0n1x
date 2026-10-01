@@ -560,19 +560,13 @@
           "shape": 7
         },
         {
-          "name": "pose_list",
+          "name": "pose_list_in",
           "type": "STRING",
-          "widget": {
-            "name": "pose_list"
-          },
           "link": 31
         },
         {
-          "name": "slide_count",
+          "name": "slide_count_in",
           "type": "INT",
-          "widget": {
-            "name": "slide_count"
-          },
           "link": 32
         }
       ],

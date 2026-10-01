@@ -4,6 +4,34 @@ import { chainCallback } from "./onyx_nf_utility.js";
 import { connectedNode, masterSource, imageViewQuery, poseLines, preparationSignature } from "./onyx_nf_pose_prep_sources.js";
 
 const TYPE = "OnyxKrea2PoseListPrep";
+// Meme liste que les autres nodes Grok du pack (grok_prompt.py) : visible tout
+// de suite, sans cle ni clic. "Models" y ajoute ce que le compte xAI propose.
+const GROK_DEFAULTS = ["grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning", "grok-4-1-fast-reasoning",
+  "grok-4-1-fast-non-reasoning", "grok-2-vision-1212", "grok-3", "grok-3-fast", "grok-3-mini", "grok-3-mini-fast"];
+// Cles gardees dans CE navigateur (localStorage), jamais dans le workflow.
+// Relit aussi l'ancien emplacement (onglet seulement) et celui de NodoForge.
+const KEY_ALIASES = { "onx2.krea.grok": ["nfl2.krea.grok"], "onx2.krea.gemini": ["nfl2.krea.gemini"] };
+function readKey(name) {
+  if (!name) return "";
+  for (const store of [localStorage, sessionStorage]) {
+    for (const n of [name, ...(KEY_ALIASES[name] || [])]) {
+      try { const v = store.getItem(n); if (v) return v; } catch (_) {}
+    }
+  }
+  return "";
+}
+function writeKey(name, value) {
+  if (!name) return;
+  try { if (value) localStorage.setItem(name, value); else localStorage.removeItem(name); } catch (_) {}
+  try { sessionStorage.setItem(name, value || ""); } catch (_) {}
+}
+// One-step genere les poses cote serveur, pendant le run : la cle doit donc y
+// etre aussi. Elle reste en memoire du process ComfyUI, jamais sur disque.
+function pushRuntimeKey(backend, value) {
+  if (!["Grok API", "Gemini API"].includes(backend)) return;
+  api.fetchApi("/onyx/nf/runtime_key", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ backend, api_key: value || "" }) }).catch(() => {});
+}
 const DEFAULT_MODEL = "huihui-ai/Huihui-Qwen3-VL-4B-Instruct-abliterated";
 const DEFAULT_VIBE = "Natural Instagram carousel with varied body orientation and hand gestures. Every slide visibly changes the master's pose, especially hand placement. When a selfie is enabled, make it a first-person chest-up photo taken by one extended camera arm, with the free hand relaxed and the phone outside the frame. Output pose and framing only, without scenery or appearance descriptions.";
 const DEFAULTS = { run_mode: "One-step", mode: "Master Auto", detail: "Simple", after_prepare: "Review first", backend: "Transformers local", model_id: DEFAULT_MODEL, model_by_backend: { "Transformers local": DEFAULT_MODEL, Ollama: "", "llama.cpp": "", "Gemini API": "gemini-3.5-flash", "Grok API": "", "Vertex AI": "gemini-3.6-flash" }, vertex_json_folder: "", endpoint: "http://127.0.0.1:11434", vibe: DEFAULT_VIBE, count: 4, include_selfie: true, unload_after: true };
@@ -48,7 +76,7 @@ app.registerExtension({
       const grokModels = select([]); grokModels.classList.add("onx2p-hidden");
       const modelWrap = el("div"); modelWrap.append(model, grokModels);
       const endpoint = input(); endpoint.value = state.endpoint;
-      const key = input("password"); key.placeholder = "Private key · this browser tab only";
+      const key = input("password"); key.placeholder = "Private key · kept in this browser only";
       const vertexFolder = input(); vertexFolder.placeholder = "C:\\path\\to\\vertex_json_folder"; vertexFolder.value = state.vertex_json_folder || "";
       const count = input("number"); count.min = "1"; count.max = "8"; count.value = String(state.count);
       const vibe = el("textarea", "onx2p-area"); vibe.value = state.vibe;
@@ -70,6 +98,7 @@ app.registerExtension({
       let modelsLoading = false;
       let observedBatch = "";
       let grokIds = [];
+      let autoFetched = false;
       const keyName = () => state.backend === "Grok API" ? "onx2.krea.grok" : state.backend === "Gemini API" ? "onx2.krea.gemini" : "";
       const notify = (message, kind = "") => { status.textContent = message; status.className = `onx2p-status ${kind}`.trim(); };
       const oneStep = () => state.run_mode === "One-step";
@@ -94,17 +123,23 @@ app.registerExtension({
       const invalidate = (message) => { node.properties.pose_prep_signature = ""; if (widgets.prepared_pose_list) widgets.prepared_pose_list.value = ""; updateQueue(); if (oneStep()) notify(oneStepMessage(), state.mode === "Reference Copy" ? "error" : ""); else notify(message, "wait"); save(); };
       const refreshControls = () => {
         const cloud = state.backend === "Gemini API" || state.backend === "Grok API";
-        key.disabled = !cloud; key.value = keyName() ? (sessionStorage.getItem(keyName()) || "") : "";
+        key.disabled = !cloud; key.value = readKey(keyName());
         endpoint.disabled = cloud || state.backend === "Vertex AI" || state.backend === "Transformers local";
         vertexField.classList.toggle("onx2p-hidden", state.backend !== "Vertex AI"); vertexFolder.value = state.vertex_json_folder || "";
         modelsButton.disabled = !["Grok API", "Ollama", "Transformers local"].includes(state.backend);
         model.classList.toggle("onx2p-hidden", state.backend === "Grok API"); grokModels.classList.toggle("onx2p-hidden", state.backend !== "Grok API");
         model.value = state.model_by_backend[state.backend] ?? state.model_id ?? "";
         state.model_id = model.value;
-        if (state.backend === "Grok API") { grokModels.replaceChildren(); const blank = el("option", "", "Press Models, then select Grok"); blank.value = ""; grokModels.append(blank); for (const id of [...new Set([state.model_id, ...grokIds].filter(Boolean))]) { const option = el("option", "", id); option.value = id; grokModels.append(option); } grokModels.value = state.model_id || ""; }
+        if (state.backend === "Grok API") {
+          if (!state.model_id) { state.model_id = GROK_DEFAULTS[0]; state.model_by_backend["Grok API"] = state.model_id; }
+          grokModels.replaceChildren();
+          for (const id of [...new Set([state.model_id, ...GROK_DEFAULTS, ...grokIds].filter(Boolean))]) { const option = el("option", "", id); option.value = id; grokModels.append(option); }
+          grokModels.value = state.model_id;
+          if (!grokIds.length && readKey("onx2.krea.grok") && !modelsLoading && !autoFetched) { autoFetched = true; setTimeout(() => modelsButton.click(), 0); }
+        }
         updateQueue(); save();
       };
-      const requireModel = () => { if (!state.model_id.trim()) throw new Error("Select a model before preparing the poses."); if (state.backend === "Vertex AI" && !String(state.vertex_json_folder || "").trim()) throw new Error("Vertex AI: fill in the Vertex JSON folder."); if (keyName() && !sessionStorage.getItem(keyName())) throw new Error(`The ${state.backend} API key is missing.`); };
+      const requireModel = () => { if (!state.model_id.trim()) throw new Error("Select a model before preparing the poses."); if (state.backend === "Vertex AI" && !String(state.vertex_json_folder || "").trim()) throw new Error("Vertex AI: fill in the Vertex JSON folder."); if (keyName() && !readKey(keyName())) throw new Error(`The ${state.backend} API key is missing.`); };
       const generateOne = async (imageData, generationMode, requestedCount, request) => {
         if (signature() !== request.signature) throw new Error("The source or settings changed. Prepare the list again.");
         const response = await api.fetchApi("/onyx/nf/krea2/poses/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ backend: request.backend, model_id: request.model_id, endpoint: request.endpoint, api_key: request.api_key, vertex_json_folder: request.vertex_json_folder, vibe: request.vibe, count: requestedCount, mode: generationMode, detail: request.detail, include_selfie: request.include_selfie, unload_after: request.unload_after, image_b64: imageData }) });
@@ -114,7 +149,7 @@ app.registerExtension({
         if (busy || queueing) return;
         busy = true; updateQueue(); setPrepared("");
         const requestedSignature = signature();
-        const request = { ...state, api_key: keyName() ? sessionStorage.getItem(keyName()) : "", signature: requestedSignature };
+        const request = { ...state, api_key: readKey(keyName()), signature: requestedSignature };
         node.properties.pose_prep_signature = "";
         try {
           requireModel();
@@ -184,16 +219,16 @@ app.registerExtension({
       count.addEventListener("input", () => { state.count = Math.max(1, Math.min(8, Math.trunc(Number(count.value)) || 4)); invalidate("Count changed. Prepare the list again."); });
       selfie.addEventListener("change", () => { state.include_selfie = selfie.checked; invalidate("Selfie rule changed. Prepare the list again."); });
       unload.addEventListener("change", () => { state.unload_after = unload.checked; save(); });
-      key.addEventListener("input", () => { if (keyName()) sessionStorage.setItem(keyName(), key.value); if (state.backend === "Grok API") { grokIds = []; state.model_id = ""; state.model_by_backend["Grok API"] = ""; refreshControls(); } invalidate("Key changed. Check the model and prepare the list."); });
+      key.addEventListener("input", () => { writeKey(keyName(), key.value); pushRuntimeKey(state.backend, key.value); if (state.backend === "Grok API") { grokIds = []; autoFetched = false; refreshControls(); } invalidate("Key changed. Check the model and prepare the list."); });
       poses.addEventListener("input", () => { if (widgets.prepared_pose_list) widgets.prepared_pose_list.value = node.properties.pose_prep_signature === signature() ? poseLines(poses.value).join("\n") : ""; if (widgets.prepared_count) widgets.prepared_count.value = poseLines(poses.value).length || 1; updateQueue(); node.graph?.setDirtyCanvas(true, true); });
       modelsButton.addEventListener("click", async () => {
         if (modelsLoading) return;
         modelsLoading = true; updateQueue();
         const requestedBackend = state.backend;
-        const requestedKey = sessionStorage.getItem("onx2.krea.grok") || "";
+        const requestedKey = readKey("onx2.krea.grok");
         const requestedSignature = signature();
         const unchanged = () => !busy && signature() === requestedSignature &&
-          (requestedBackend !== "Grok API" || requestedKey === (sessionStorage.getItem("onx2.krea.grok") || ""));
+          (requestedBackend !== "Grok API" || requestedKey === readKey("onx2.krea.grok"));
         try {
           let response;
           if (requestedBackend === "Grok API") response = await api.fetchApi("/onyx/nf/grok/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ api_key: requestedKey }) });
@@ -203,7 +238,7 @@ app.registerExtension({
           if (!unchanged()) return;
           if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
           const ids = (result.models || []).map((x) => x.id).filter(Boolean);
-          if (requestedBackend === "Grok API") { grokIds = ids; if (!ids.includes(state.model_id)) state.model_id = ""; }
+          if (requestedBackend === "Grok API") { grokIds = ids; if (!state.model_id) state.model_id = ids.includes(GROK_DEFAULTS[0]) ? GROK_DEFAULTS[0] : (ids[0] || ""); }
           else if (ids.length && !ids.includes(state.model_id)) state.model_id = ids[0];
           state.model_by_backend[requestedBackend] = state.model_id;
           refreshControls(); notify(`${ids.length} models available. Pick one and prepare the list.`);
@@ -211,6 +246,7 @@ app.registerExtension({
         finally { modelsLoading = false; updateQueue(); }
       });
       prepareButton.addEventListener("click", prepare);
+      pushRuntimeKey("Grok API", readKey("onx2.krea.grok")); pushRuntimeKey("Gemini API", readKey("onx2.krea.gemini"));
       const queueCarousel = async () => {
         if (!ready()) return;
         if (node.graph !== app.graph) { notify("Go back to this workflow to queue the prepared carousel.", "wait"); return; }

@@ -23,6 +23,11 @@ from .director import _llamacpp_generate, _local_endpoint, _ollama_generate
 
 BACKENDS = ("Transformers local", "Ollama", "llama.cpp", "Gemini API", "Grok API", "Vertex AI")
 VERTEX_DEFAULT_MODEL = "gemini-3.6-flash"
+
+# Cles poussees par l'UI du Pose List Prep (route /onyx/nf/runtime_key), pour le
+# mode One-step qui genere les poses pendant le run. Memoire du process
+# uniquement : rien sur disque, rien dans le workflow.
+RUNTIME_KEYS = {}
 MAX_POSES = 8
 DEFAULT_VIBE = (
     "Confident lifestyle influencer photo carousel: natural candid energy, varied hand gestures, "

@@ -99,7 +99,10 @@ class OnyxKrea2PoseListPrep:
             raise ValueError("[Onyx Pose List Prep] Master Auto needs master_image connected.")
         request = dict(config)
         request["seed"] = random.randint(0, 2**31 - 1)
-        request.pop("api_key", None)  # keys come from GEMINI_API_KEY / XAI_API_KEY in one-step
+        # Cle : celle saisie dans le node (poussee en memoire par l'UI), sinon
+        # GEMINI_API_KEY / XAI_API_KEY dans l'environnement.
+        from .pose_generator import RUNTIME_KEYS
+        request["api_key"] = RUNTIME_KEYS.get(request.get("backend"), "")
         print(f"[Onyx Pose List Prep] One-step: generating {request.get('count', 4)} poses "
               f"({mode}, {request.get('backend')})…")
         result = generate_pose_list(request, image)
