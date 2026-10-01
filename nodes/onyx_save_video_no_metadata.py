@@ -25,8 +25,11 @@ Two levels, and the difference matters:
 Neither re-encodes. The frames in the output are bit-identical to the input's.
 """
 
+import mmap
 import os
 import random
+import re
+import struct
 import shutil
 import time
 import logging
@@ -140,6 +143,160 @@ def _remux(src, dst, tag="[Save Video]"):
     finally:
         out.close()
         inp.close()
+
+
+# ---------------------------------------------------------------------------
+# What a container copy keeps and udta clearing does not reach:
+#  - encoder SEI (x264 / x265 settings string), in the bitstream and in the
+#    codec config box (avcC / hvcC)
+#  - ffmpeg's AAC signature ("Lavc60.31.102") in the first audio frame
+#  - top-level / moov-level XMP, C2PA / JUMBF ("uuid", "meta") boxes
+#  - subtitle, chapter and data tracks (their samples too)
+# Everything is done in place, same length: no box moves, no offset changes.
+# ---------------------------------------------------------------------------
+_ENCODER_SEI = (
+    (bytes.fromhex("2CA2DE09B51747DBBB55A4FE7FC2FC4E"), b"x265 (build"),
+    (bytes.fromhex("DC45E9BDE6D948B7962CD820D923EEEF"), b"x264 - core"),
+)
+_LAVC_AAC = re.compile(rb"Lavc\d{2}\.\d{1,3}\.\d{1,3}\x00")
+_LAVC_NAME = re.compile(rb"[\x04-\x1f]Lavc[\x20-\x7e]{0,27}")
+
+
+def _scrub_encoder_strings(buf):
+    """Blank encoder SEI payloads and the AAC Lavc string. -> count"""
+    n = 0
+    for uuid_b, text in _ENCODER_SEI:
+        pos = buf.find(uuid_b + text)
+        while pos != -1:
+            end = buf.find(b"\x00", pos + 16)
+            if end == -1 or end - pos > 4096:
+                end = min(len(buf), pos + 16 + len(text))
+            buf[pos:end] = b" " * (end - pos)
+            n += 1
+            pos = buf.find(uuid_b + text, end)
+    for m in list(_LAVC_AAC.finditer(buf)):
+        buf[m.start():m.end() - 1] = b" " * (m.end() - 1 - m.start())
+        n += 1
+    # the sample description's 32-byte compressor name ("Lavc60.31.102 libx264")
+    for m in list(_LAVC_NAME.finditer(buf)):
+        if m.end() - m.start() - 1 == buf[m.start()] and m.start() + 32 <= len(buf):
+            buf[m.start():m.start() + 32] = bytes(32)
+            n += 1
+    return n
+
+
+def _boxes(buf, start, end):
+    i = start
+    while i + 8 <= end:
+        size, typ = struct.unpack(">I4s", buf[i:i + 8])
+        hdr = 8
+        if size == 1:
+            if i + 16 > end:
+                return
+            size, hdr = struct.unpack(">Q", buf[i + 8:i + 16])[0], 16
+        elif size == 0:
+            size = end - i
+        if size < hdr or i + size > end:
+            return
+        yield i, size, hdr, bytes(typ)
+        i += size
+
+
+def _child(buf, start, end, path):
+    for name in path:
+        for i, size, hdr, typ in _boxes(buf, start, end):
+            if typ == name:
+                start, end = i + hdr, i + size
+                break
+        else:
+            return None
+    return start, end
+
+
+def _sample_ranges(buf, stbl):
+    """(offset, size) of every sample of a track, from stsz / stsc / stco|co64."""
+    s0, s1 = stbl
+    stsz = _child(buf, s0, s1, [b"stsz"])
+    stsc = _child(buf, s0, s1, [b"stsc"])
+    stco = _child(buf, s0, s1, [b"stco"])
+    co64 = _child(buf, s0, s1, [b"co64"])
+    if not stsz or not stsc or not (stco or co64):
+        return []
+    a = stsz[0]
+    fixed, count = struct.unpack(">II", buf[a + 4:a + 12])
+    sizes = [fixed] * count if fixed else list(struct.unpack(">%dI" % count, buf[a + 12:a + 12 + 4 * count]))
+    b = stsc[0]
+    runs = [struct.unpack(">III", buf[b + 8 + 12 * k:b + 20 + 12 * k])
+            for k in range(struct.unpack(">I", buf[b + 4:b + 8])[0])]
+    c = (co64 or stco)[0]
+    nch = struct.unpack(">I", buf[c + 4:c + 8])[0]
+    if co64:
+        offs = list(struct.unpack(">%dQ" % nch, buf[c + 8:c + 8 + 8 * nch]))
+    else:
+        offs = list(struct.unpack(">%dI" % nch, buf[c + 8:c + 8 + 4 * nch]))
+    out, si = [], 0
+    for ci, off in enumerate(offs, 1):
+        per = 0
+        for first, spc, _ in runs:
+            if first <= ci:
+                per = spc
+        for _ in range(per):
+            if si >= len(sizes):
+                return out
+            out.append((off, sizes[si]))
+            off += sizes[si]
+            si += 1
+    return out
+
+
+def _free(buf, i, size, hdr):
+    """Turn a box into 'free' and zero what it held (same size)."""
+    buf[i + 4:i + 8] = b"free"
+    buf[i + hdr:i + size] = bytes(size - hdr)
+
+
+def _neutralize_boxes(buf):
+    """uuid / meta boxes -> 'free'; non audio / video tracks -> 'free' with
+    their samples zeroed. -> count"""
+    n = 0
+    for i, size, hdr, typ in list(_boxes(buf, 0, len(buf))):
+        if typ in (b"uuid", b"meta"):
+            _free(buf, i, size, hdr)
+            n += 1
+        elif typ == b"moov":
+            for j, jsize, jhdr, jtyp in list(_boxes(buf, i + hdr, i + size)):
+                if jtyp in (b"uuid", b"meta"):
+                    _free(buf, j, jsize, jhdr)
+                    n += 1
+                elif jtyp == b"trak":
+                    t0, t1 = j + jhdr, j + jsize
+                    hd = _child(buf, t0, t1, [b"mdia", b"hdlr"])
+                    kind = bytes(buf[hd[0] + 8:hd[0] + 12]) if hd else b""
+                    if kind in (b"vide", b"soun"):
+                        for k, ksize, khdr, ktyp in list(_boxes(buf, t0, t1)):
+                            if ktyp in (b"tref", b"meta", b"uuid"):   # chapter link, per-track tags
+                                _free(buf, k, ksize, khdr)
+                                n += 1
+                        continue
+                    stbl = _child(buf, t0, t1, [b"mdia", b"minf", b"stbl"])
+                    for off, sz in (_sample_ranges(buf, stbl) if stbl else []):
+                        if 0 <= off and off + sz <= len(buf):
+                            buf[off:off + sz] = bytes(sz)
+                    _free(buf, j, jsize, jhdr)
+                    n += 1
+    return n
+
+
+def _deep_clean(path, tag="[Save Video]"):
+    """In-place pass after the copy / remux. Never raises. -> count"""
+    try:
+        with open(path, "r+b") as fh, mmap.mmap(fh.fileno(), 0) as mm:
+            n = _neutralize_boxes(mm) + _scrub_encoder_strings(mm)
+            mm.flush()
+        return n
+    except Exception as e:  # noqa: BLE001 - a cleaning pass must not lose the file
+        print(f"⚠️  {tag} deep clean skipped: {e}")
+        return 0
 
 
 class OnyxSaveVideoNoMetadata:
@@ -300,12 +457,14 @@ class OnyxSaveVideoNoMetadata:
         if used == "copy":
             shutil.copy2(src, dest)
             changed = _strip_in_place(dest, tag)
+            changed = _deep_clean(dest, tag) > 0 or changed
             print(f"🎬 {tag} byte copy — "
                   + ("udta + hdlr vendor cleared." if changed else "no tag found to clear."))
         else:
             # Le muxeur mp4 de PyAV ecrit son propre identifiant d'encodeur dans
             # hdlr : le conteneur est neuf, mais pas anonyme pour autant.
             _strip_in_place(dest, tag)
+            _deep_clean(dest, tag)
 
         size_mb = os.path.getsize(dest) / 1024 ** 2
         src_mb = os.path.getsize(src) / 1024 ** 2

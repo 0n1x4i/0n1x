@@ -24,6 +24,13 @@ _VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".mpg", ".mpeg",
 
 _EMPTY_IMAGE_SIDE = 64
 
+# Mode "MiniMax 15s limit" : MiniMax H3 ne prend pas plus de 15 s de reference.
+# Un clip qui depasse de peu (jusqu'a 16.5 s) est coupe a 15 s pile — on perd au
+# plus 1.5 s de fin, ce qui ne change pas le clip. Au-dela, couper retirerait un
+# morceau reel du contenu : le clip est ecarte plutot que mutile en silence.
+_MINIMAX_LIMIT_S = 15.0
+_MINIMAX_HARD_S = 16.5
+
 
 def _pool_dir() -> str:
     d = os.path.join(folder_paths.get_input_directory(), _POOL_SUBDIR)
@@ -147,6 +154,80 @@ def _decode_video(path: str, max_side: int = 1024):
         + "\n-> Install one of: av (recommended, same decoder as ComfyUI), "
           "opencv-python, imageio[ffmpeg]."
     )
+
+
+def _probe_video(path: str):
+    """(duration_s, fps, frame_count) read from the container, without decoding.
+
+    Cheap enough to run at upload for every file, which is what lets the node
+    show each clip's length — and flag the ones over the MiniMax limit — before
+    anything is queued. Returns zeros when no backend can tell.
+    """
+    try:
+        import av
+        with av.open(path) as container:
+            st = container.streams.video[0]
+            fps = float(st.average_rate) if st.average_rate else 0.0
+            n = int(st.frames or 0)
+            dur = 0.0
+            if n and fps:
+                dur = n / fps
+            elif st.duration is not None and st.time_base is not None:
+                dur = float(st.duration * st.time_base)
+            elif container.duration:
+                dur = container.duration / 1_000_000.0
+            if not n and dur and fps:
+                n = int(round(dur * fps))
+            return float(dur), float(fps), int(n)
+    except Exception:
+        pass
+    try:
+        import cv2
+        cap = cv2.VideoCapture(path)
+        fps = float(cap.get(cv2.CAP_PROP_FPS)) or 0.0
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        cap.release()
+        return (n / fps if fps else 0.0), fps, n
+    except Exception:
+        return 0.0, 0.0, 0
+
+
+def _effective_duration(dur, fps, trim_mode, trim_start, trim_end):
+    """Length the clip will have once the node's trim rule is applied.
+
+    Mirrors _apply_trim so the limit is judged on what actually leaves the node,
+    not on the raw file: a 20 s clip trimmed to its first 12 s is fine.
+    """
+    if dur <= 0:
+        return 0.0
+    if trim_mode == "frames":
+        if fps <= 0:
+            return dur
+        start = trim_start / fps
+        end = (trim_end / fps) if trim_end > 0 else dur
+    else:
+        start = trim_start
+        end = trim_end if trim_end > 0 else dur
+    return max(0.0, min(end, dur) - min(start, dur))
+
+
+def _slice_audio(audio, start_s: float, dur_s: float):
+    """Cut an AUDIO dict to [start_s, start_s + dur_s] so it matches the frames.
+
+    Before this, trimming a clip trimmed only its pictures: the audio output
+    still ran from 0 to the end of the file, out of sync with the video from the
+    first frame whenever trim_start was set.
+    """
+    if audio is None:
+        return None
+    sr = int(audio["sample_rate"])
+    wav = audio["waveform"]
+    total = int(wav.shape[-1])
+    a = max(0, min(total, int(round(start_s * sr))))
+    b = max(a, min(total, a + int(round(dur_s * sr))))
+    if (a, b) == (0, total):
+        return audio
+    return {"waveform": wav[..., a:b].contiguous(), "sample_rate": sr}
 
 
 def _first_frame(path: str) -> Image.Image:
@@ -286,8 +367,12 @@ class OnyxImageBatchLoader:
         return {
             "required": {
                 # Managed entirely by the JS widget — hidden from the user via JS.
-                "batch_data": ("STRING", {"default": "{}"}),
-                "video_max_side": ("INT", {
+                # socketless partout : ces reglages sont pilotes par l'UI du node et
+                # caches. Sans ca, le frontend leur cree quand meme une entree
+                # chacun, et ces entrees de widgets caches s'empilent au meme
+                # endroit en haut du node.
+                "batch_data": ("STRING", {"default": "{}", "socketless": True}),
+                "video_max_side": ("INT", { "socketless": True,
                     "default": 1024, "min": 0, "max": 4096, "step": 64,
                     "tooltip": "Longest edge of the decoded video frames. 0 keeps native size.\n"
                                "A 15 s 1080p clip is 360 frames, over 2 GB held as float32 RGB. "
@@ -298,15 +383,15 @@ class OnyxImageBatchLoader:
                 # les clips de la file, alors que leur duree differe. D'ou la
                 # convention 0 = fin de la video, qui rend la regle applicable
                 # a des longueurs quelconques sans rien recalculer a la main.
-                "trim_mode": (["seconds", "frames"], {
+                "trim_mode": (["seconds", "frames"], {"socketless": True,
                     "default": "seconds",
                     "tooltip": "Whether the trim below is expressed in seconds or in frames.",
                 }),
-                "trim_start": ("FLOAT", {
+                "trim_start": ("FLOAT", { "socketless": True,
                     "default": 0.0, "min": 0.0, "max": 100000.0, "step": 0.01,
                     "tooltip": "Where each clip starts. 0 keeps the beginning.",
                 }),
-                "trim_end": ("FLOAT", {
+                "trim_end": ("FLOAT", { "socketless": True,
                     "default": 0.0, "min": 0.0, "max": 100000.0, "step": 0.01,
                     "tooltip": "Where each clip ends. **0 means the end of the video**, so the "
                                "same setting works across clips of different lengths — which is "
@@ -315,7 +400,7 @@ class OnyxImageBatchLoader:
                                "clip, whatever its duration.",
                 }),
                 "resize_method": (
-                    ["none", "maintain aspect ratio", "stretch to fit", "pad", "crop"], {
+                    ["none", "maintain aspect ratio", "stretch to fit", "pad", "crop"], {"socketless": True,
                         "default": "none",
                         "tooltip": "How each clip is fitted to custom_width x custom_height.\n"
                                    "maintain aspect ratio: fits inside the box, output size varies "
@@ -327,15 +412,15 @@ class OnyxImageBatchLoader:
                                    "'maintain aspect ratio' does not guarantee that across a batch "
                                    "of mixed sources.",
                     }),
-                "custom_width": ("INT", {
+                "custom_width": ("INT", { "socketless": True,
                     "default": 0, "min": 0, "max": 8192, "step": 8,
                     "tooltip": "0 derives the width from the height and the source ratio.",
                 }),
-                "custom_height": ("INT", {
+                "custom_height": ("INT", { "socketless": True,
                     "default": 0, "min": 0, "max": 8192, "step": 8,
                     "tooltip": "0 derives the height from the width and the source ratio.",
                 }),
-                "force_fps": ("FLOAT", {
+                "force_fps": ("FLOAT", { "socketless": True,
                     "default": 0.0, "min": 0.0, "max": 240.0, "step": 0.01,
                     "tooltip": "Resample every clip to this frame rate. 0 keeps each clip's native "
                                "rate.\nSet 24 to normalise a batch of mixed 30 and 60 fps sources — "
@@ -345,7 +430,7 @@ class OnyxImageBatchLoader:
                 # Les deux widgets ci-dessous sont ajoutes EN DERNIER : ComfyUI
                 # serialise les valeurs par POSITION, donc les inserer plus haut
                 # decalerait tous les reglages des workflows deja enregistres.
-                "consume_on_load": ("BOOLEAN", {
+                "consume_on_load": ("BOOLEAN", { "socketless": True,
                     "default": False,
                     "label_on": "remove each item once loaded",
                     "label_off": "keep the whole list",
@@ -359,7 +444,7 @@ class OnyxImageBatchLoader:
                                "LOADED, not when the graph finishes, so anything still queued "
                                "behind a failure is lost from the list.",
                 }),
-                "queue_batch_size": ("INT", {
+                "queue_batch_size": ("INT", { "socketless": True,
                     "default": 50, "min": 1, "max": 50, "step": 1,
                     "tooltip": "How many runs 'Queue All' submits at a time.\n"
                                "50 is fastest. 1 is the safe setting: a failure then costs one "
@@ -367,6 +452,33 @@ class OnyxImageBatchLoader:
                                "With consume_on_load ON, the button waits for the queue to empty "
                                "between batches — it has to, because each run rewrites the list "
                                "the next submission is built from.",
+                }),
+            },
+            "optional": {
+                # OPTIONNEL, pas required : un workflow enregistre avant cet ajout,
+                # ou un onglet pas encore recharge apres la mise a jour, n'envoie pas
+                # ce reglage — en required, ComfyUI refusait alors TOUT le run avec
+                # 'Required input is missing: minimax_15s_limit', meme pour une
+                # simple photo. Absent = off. Reste le dernier widget : l'ordre des
+                # valeurs enregistrees ne bouge pas.
+                "minimax_15s_limit": ("BOOLEAN", {
+                    "default": False, "socketless": True,
+                    "label_on": "on", "label_off": "off",
+                    "tooltip": "MiniMax H3 takes at most 15 s of reference video.\n"
+                               "ON: a clip between 15 s and 16.5 s (after trim) is cut to 15 s "
+                               "by dropping its end. A clip longer than 16.5 s is skipped — "
+                               "cutting it would remove real content — and the next item loads "
+                               "in its place. Images are not affected.",
+                }),
+                # Optionnel et en dernier, pour les memes raisons que le precedent.
+                "video_first_frame": ("BOOLEAN", {
+                    "default": False, "socketless": True,
+                    "label_on": "on", "label_off": "off",
+                    "tooltip": "ON: when the current item is a video, its first frame also leaves "
+                               "through the `image` output, so photos and videos come out of `image` "
+                               "one after the other. It is the first frame AFTER trim and resize — "
+                               "exactly frame 0 of the `video` output. The video outputs are still "
+                               "filled as usual.\nOFF: `image` stays a 64x64 placeholder for videos.",
                 }),
             },
             "hidden": {
@@ -404,7 +516,7 @@ class OnyxImageBatchLoader:
     # ─────────────────────────────────────────────────────────────────────────
     @staticmethod
     def _apply_trim(frames, fps, trim_mode, trim_start, trim_end, force_fps):
-        """Trim then optionally resample. Returns (frames, fps).
+        """Trim then optionally resample. Returns (frames, fps, start_seconds).
 
         Resampling is nearest-neighbour on the time axis: it drops or repeats
         whole frames rather than blending them. Blending would invent motion that
@@ -412,7 +524,7 @@ class OnyxImageBatchLoader:
         """
         total = int(frames.shape[0])
         if total == 0:
-            return frames, fps
+            return frames, fps, 0.0
 
         if trim_mode == "frames":
             start = int(trim_start)
@@ -423,6 +535,7 @@ class OnyxImageBatchLoader:
 
         start = max(0, min(start, total - 1))
         end = max(start + 1, min(end, total))
+        start_s = start / fps if fps else 0.0
 
         if (start, end) != (0, total):
             frames = frames[start:end]
@@ -438,7 +551,7 @@ class OnyxImageBatchLoader:
                   f"({n_in} -> {n_out} frames)")
             fps = float(force_fps)
 
-        return frames, fps
+        return frames, fps, start_s
 
     # ─────────────────────────────────────────────────────────────────────────
     def load_next(self, batch_data: str = "{}", video_max_side: int = 1024,
@@ -446,7 +559,8 @@ class OnyxImageBatchLoader:
                   trim_end: float = 0.0, resize_method: str = "none",
                   custom_width: int = 0, custom_height: int = 0,
                   force_fps: float = 0.0, consume_on_load: bool = False,
-                  queue_batch_size: int = 50, unique_id=None):
+                  queue_batch_size: int = 50, minimax_15s_limit: bool = False,
+                  video_first_frame: bool = False, unique_id=None):
         # ── Parse data ────────────────────────────────────────────────────────
         ensure_profile_ready()
         try:
@@ -486,12 +600,37 @@ class OnyxImageBatchLoader:
             self._states[state_key] = {"current_index": 0}
 
         idx   = self._states[state_key]["current_index"] % total
+        pool  = _pool_dir()
+
+        # Mode MiniMax : un clip trop long est saute, et l'item suivant prend sa
+        # place dans CE run. Le bouton Queue All ne compte deja pas ces clips,
+        # donc N runs couvrent exactement les N items acceptables.
+        if minimax_15s_limit:
+            for _ in range(total):
+                m = flat[idx]
+                if not _is_video(m["filename"]):
+                    break
+                p = os.path.join(pool, m["filename"])
+                dur, vfps = float(m.get("duration") or 0.0), float(m.get("fps") or 0.0)
+                if dur <= 0 and os.path.exists(p):
+                    dur, vfps, _n = _probe_video(p)
+                eff = _effective_duration(dur, vfps, trim_mode,
+                                          float(trim_start), float(trim_end))
+                if eff <= _MINIMAX_HARD_S:
+                    break
+                print(f"[Onyx Batch] ⏭️  skipped '{m.get('original_name', m['filename'])}' — "
+                      f"{eff:.2f}s after trim, over the {_MINIMAX_HARD_S}s MiniMax limit.")
+                idx = (idx + 1) % total
+            else:
+                print(f"[Onyx Batch] ⚠️  every item is over the {_MINIMAX_HARD_S}s MiniMax "
+                      f"limit — nothing to load.")
+                return blank
+
         meta  = flat[idx]
         _next = (idx + 1) % total
         self._states[state_key]["current_index"] = _next
 
         # ── Load ──────────────────────────────────────────────────────────────
-        pool = _pool_dir()
         path = os.path.join(pool, meta["filename"])
         name = meta.get("original_name", meta["filename"])
 
@@ -512,21 +651,32 @@ class OnyxImageBatchLoader:
                 frames = _resize_frames(
                     frames, resize_method, int(custom_width), int(custom_height)
                 )
-                frames, fps = self._apply_trim(
+                frames, fps, start_s = self._apply_trim(
                     frames, fps, trim_mode, float(trim_start), float(trim_end), float(force_fps)
                 )
-                audio = _extract_audio(path)
                 n = int(frames.shape[0])
+                if minimax_15s_limit and fps and n / fps > _MINIMAX_LIMIT_S + 1e-6:
+                    keep = max(1, int(_MINIMAX_LIMIT_S * fps + 1e-6))
+                    print(f"[Onyx Batch] ✂️  MiniMax limit: {n / fps:.3f}s -> "
+                          f"{keep / fps:.3f}s (end dropped)")
+                    frames = frames[:keep]
+                    n = keep
                 duration = n / fps if fps else 0.0
+                audio = _slice_audio(_extract_audio(path), start_s, duration)
                 print(f"[Onyx Batch] ✅ [{idx + 1}/{total}] 🎬 {name} — "
                       f"{n} frames, {duration:.3f}s @ {fps:.2f} fps")
                 self._notify(unique_id, idx, total)
                 if consume_on_load:
                     self._consume(unique_id, meta["id"], name, total - 1)
-                # `image` reste le placeholder : cet item est une video, et
-                # renvoyer sa premiere frame sur la sortie image ferait passer
-                # une video pour une photo dans un graphe branche sur les deux.
-                return (empty, frames, float(fps), float(duration), n, audio, path)
+                # Par defaut `image` reste le placeholder : renvoyer la premiere
+                # frame ferait passer une video pour une photo dans un graphe
+                # branche sur les deux. video_first_frame le demande explicitement.
+                first = empty
+                if video_first_frame and n:
+                    first = frames[0:1].clone().contiguous()
+                    print(f"[Onyx Batch] 🖼️  first frame -> image output "
+                          f"({first.shape[2]}x{first.shape[1]})")
+                return (first, frames, float(fps), float(duration), n, audio, path)
             except Exception as e:
                 print(f"[Onyx Batch] ❌ {name}: {e}")
                 self._notify(unique_id, idx, total)
@@ -645,7 +795,7 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
                     thumb_name = f"{_THUMB_PREFIX}{os.path.splitext(safe)[0]}.png"
                     thumb.save(os.path.join(pool, thumb_name))
 
-                    results.append({
+                    item = {
                         "id":            file_id,
                         "filename":      safe,
                         "original_name": raw_name,
@@ -653,7 +803,13 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
                         "width":         w,
                         "height":        h,
                         "is_video":      is_video,
-                    })
+                        "size":          len(data),
+                    }
+                    if is_video:
+                        dur, vfps, nfr = _probe_video(path)
+                        item.update({"duration": round(dur, 3), "fps": round(vfps, 3),
+                                     "frame_count": nfr})
+                    results.append(item)
                 except Exception as e:
                     print(f"[Onyx Batch] Error processing {raw_name}: {e}")
                     if os.path.exists(path):
@@ -678,6 +834,19 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
             return web.json_response({"success": True, "deleted": deleted})
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+    @PromptServer.instance.routes.get("/onyx/batch_probe/{filename}")
+    async def _onyx_batch_probe(request):
+        """Duration / fps of a pool video. Lets the UI fill in lengths for items
+        uploaded before durations were recorded at upload time."""
+        filename = os.path.basename(request.match_info["filename"])
+        path = os.path.join(_pool_dir(), filename)
+        if not os.path.exists(path) or not _is_video(filename):
+            return web.json_response({"success": False}, status=404)
+        dur, vfps, nfr = _probe_video(path)
+        return web.json_response({"success": True, "duration": round(dur, 3),
+                                  "fps": round(vfps, 3), "frame_count": nfr})
 
 
     @PromptServer.instance.routes.get("/onyx/view/{filename}")

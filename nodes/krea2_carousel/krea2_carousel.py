@@ -266,17 +266,25 @@ class OnyxKrea2CarouselDirector:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "pose_list": ("STRING", {"default": DEFAULT_POSES, "multiline": True, "dynamicPrompts": False}),
-                "slide_count": ("INT", {"default": 4, "min": 1, "max": MAX_SLIDES, "step": 1}),
-                "output_mode": ([OUTPUT_ALL, OUTPUT_SELECTED],),
-                "slide_selector": ("INT", {"default": 1, "min": 1, "max": MAX_SLIDES, "step": 1}),
-                "camera_policy": (list(CAMERA_POLICIES),),
-                "continuity_strength": (list(CONTINUITY_LEVELS),),
+                # Les widgets sont pilotes par l'UI du node (JS) et caches : sans
+                # "socketless", le frontend leur cree quand meme une entree, et ces
+                # entrees de widgets caches s'empilent toutes au meme endroit en haut
+                # du node — impossible de savoir sur laquelle on branche.
+                "pose_list": ("STRING", {"default": DEFAULT_POSES, "multiline": True, "dynamicPrompts": False, "socketless": True}),
+                "slide_count": ("INT", {"default": 4, "min": 1, "max": MAX_SLIDES, "step": 1, "socketless": True}),
+                "output_mode": ([OUTPUT_ALL, OUTPUT_SELECTED], {"socketless": True}),
+                "slide_selector": ("INT", {"default": 1, "min": 1, "max": MAX_SLIDES, "step": 1, "socketless": True}),
+                "camera_policy": (list(CAMERA_POLICIES), {"socketless": True}),
+                "continuity_strength": (list(CONTINUITY_LEVELS), {"socketless": True}),
             },
             "optional": {
                 "master_image": ("IMAGE", {"display_name": "MASTER IMAGE · CANONICAL"}),
-                "session_direction": ("STRING", {"default": "", "multiline": True}),
-                "character_trigger": ("STRING", {"default": "", "multiline": False}),
+                # Vraies entrees, listees sous MASTER IMAGE, pour brancher le Pose
+                # List Prep. Branchees, elles remplacent les widgets correspondants.
+                "pose_list_in": ("STRING", {"forceInput": True, "display_name": "POSE LIST · FROM PREP"}),
+                "slide_count_in": ("INT", {"forceInput": True, "display_name": "SLIDE COUNT · FROM PREP"}),
+                "session_direction": ("STRING", {"default": "", "multiline": True, "socketless": True}),
+                "character_trigger": ("STRING", {"default": "", "multiline": False, "socketless": True}),
             },
         }
 
@@ -292,7 +300,13 @@ class OnyxKrea2CarouselDirector:
         session_direction="",
         character_trigger="",
         master_image=None,
+        pose_list_in=None,
+        slide_count_in=None,
     ):
+        if pose_list_in:
+            pose_list = pose_list_in
+        if slide_count_in is not None:
+            slide_count = slide_count_in
         return json.dumps(
             {
                 "pose_list": _clean(pose_list),
@@ -320,7 +334,13 @@ class OnyxKrea2CarouselDirector:
         session_direction="",
         character_trigger="",
         master_image=None,
+        pose_list_in=None,
+        slide_count_in=None,
     ):
+        if pose_list_in:
+            pose_list = pose_list_in
+        if slide_count_in is not None:
+            slide_count = slide_count_in
         result = build_krea2_carousel(
             pose_list=pose_list,
             slide_count=slide_count,
