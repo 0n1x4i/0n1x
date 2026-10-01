@@ -358,7 +358,7 @@ function setupBatchLoader(node) {
             numField("trim_end", "End (0 = clip end)", { step: 0.01, float: true })),
         group("Outputs",
             boolField("video_first_frame", "Video first frame → image output", "on", "off"),
-            hint("On: each video also sends its first frame (after trim / resize) through `image`, in sequence with the photos.")),
+            hint("On: each video outputs ONLY its first frame (at trim start, after resize) through `image` — the video itself is not loaded.")),
         group("Queue",
             boolField("consume_on_load", "After loading an item", "remove it from the list", "keep the list"),
             numField("queue_batch_size", "Runs sent per batch", { min: 1, max: 50 }),
