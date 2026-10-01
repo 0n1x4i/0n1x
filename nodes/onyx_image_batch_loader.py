@@ -230,6 +230,57 @@ def _slice_audio(audio, start_s: float, dur_s: float):
     return {"waveform": wav[..., a:b].contiguous(), "sample_rate": sr}
 
 
+def _frame_at(path: str, t: float = 0.0) -> Image.Image:
+    """The single frame shown at time t (seconds), decoded on its own.
+
+    Used by the "video first frame" mode. Decoding the whole clip to keep one
+    frame is what made that mode fail: a 10 s 1080x1920 phone video is ~300
+    frames, ~7.5 GB as float32 RGB — enough to kill the process or raise a
+    MemoryError before anything reached the `image` output. Here we seek to
+    the nearest keyframe before t and decode forward to t: a few frames at
+    most, whatever the clip length or resolution.
+    """
+    errors = []
+    try:
+        import av
+        with av.open(path) as container:
+            stream = container.streams.video[0]
+            if t > 0 and stream.time_base:
+                try:
+                    container.seek(int(t / float(stream.time_base)), stream=stream,
+                                   backward=True, any_frame=False)
+                except Exception:
+                    container.seek(0)
+            last = None
+            for frame in container.decode(stream):
+                last = frame
+                ft = frame.time if frame.time is not None else 0.0
+                if ft + 1e-3 >= t:
+                    return frame.to_image().convert("RGB")
+            if last is not None:      # t past the end: last frame
+                return last.to_image().convert("RGB")
+        errors.append("av: no video frame")
+    except ImportError:
+        errors.append("av: not installed")
+    except Exception as e:
+        errors.append(f"av: {e}")
+    try:
+        import cv2
+        cap = cv2.VideoCapture(path)
+        if t > 0:
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
+        ok, bgr = cap.read()
+        cap.release()
+        if ok:
+            return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        errors.append("cv2: could not read a frame")
+    except ImportError:
+        errors.append("cv2: not installed")
+    except Exception as e:
+        errors.append(f"cv2: {e}")
+    raise RuntimeError("no video backend could read the frame — " + "; ".join(errors))
+
+
 def _first_frame(path: str) -> Image.Image:
     """First frame of a video, for the gallery thumbnail.
 
@@ -474,11 +525,11 @@ class OnyxImageBatchLoader:
                 "video_first_frame": ("BOOLEAN", {
                     "default": False, "socketless": True,
                     "label_on": "on", "label_off": "off",
-                    "tooltip": "ON: when the current item is a video, its first frame also leaves "
-                               "through the `image` output, so photos and videos come out of `image` "
-                               "one after the other. It is the first frame AFTER trim and resize — "
-                               "exactly frame 0 of the `video` output. The video outputs are still "
-                               "filled as usual.\nOFF: `image` stays a 64x64 placeholder for videos.",
+                    "tooltip": "ON: for each video, ONLY its first frame is output, through `image` "
+                               "(photos keep coming out of `image` too, in sequence). The video is "
+                               "not decoded as a whole: one frame is read at the trim start, then "
+                               "Max side / resize are applied. `video` and `audio` stay empty.\n"
+                               "OFF: normal video loading; `image` is a 64x64 placeholder for videos.",
                 }),
             },
             "hidden": {
@@ -639,6 +690,34 @@ class OnyxImageBatchLoader:
             self._notify(unique_id, idx, total)
             return blank
 
+        if _is_video(meta["filename"]) and video_first_frame:
+            # Mode "first frame" : UNE image et rien d'autre. Pas de decodage
+            # de la video entiere (voir _frame_at) ; les sorties video restent
+            # vides. La frame est prise au debut de la decoupe et passe par le
+            # meme plafond / redimensionnement que la video l'aurait fait.
+            try:
+                dur, vfps, _nf = _probe_video(path)
+                if trim_mode == "frames":
+                    t0 = float(trim_start) / vfps if vfps else 0.0
+                else:
+                    t0 = float(trim_start)
+                pil = _fit(_frame_at(path, max(0.0, t0)), int(video_max_side))
+                frame = torch.from_numpy(
+                    np.asarray(pil, dtype=np.float32) / 255.0).unsqueeze(0)
+                frame = _resize_frames(frame, resize_method,
+                                       int(custom_width), int(custom_height))
+                frame = frame.contiguous()
+                print(f"[Onyx Batch] ✅ [{idx + 1}/{total}] 🖼️  first frame of {name} "
+                      f"at {t0:.2f}s — {frame.shape[2]}x{frame.shape[1]}")
+                self._notify(unique_id, idx, total)
+                if consume_on_load:
+                    self._consume(unique_id, meta["id"], name, total - 1)
+                return (frame, empty, float(vfps), 0.0, 0, None, path)
+            except Exception as e:
+                print(f"[Onyx Batch] ❌ first frame of {name}: {e}")
+                self._notify(unique_id, idx, total)
+                return blank
+
         if _is_video(meta["filename"]):
             try:
                 # Le plafond memoire ne doit pas descendre sous la cible de
@@ -671,12 +750,7 @@ class OnyxImageBatchLoader:
                 # Par defaut `image` reste le placeholder : renvoyer la premiere
                 # frame ferait passer une video pour une photo dans un graphe
                 # branche sur les deux. video_first_frame le demande explicitement.
-                first = empty
-                if video_first_frame and n:
-                    first = frames[0:1].clone().contiguous()
-                    print(f"[Onyx Batch] 🖼️  first frame -> image output "
-                          f"({first.shape[2]}x{first.shape[1]})")
-                return (first, frames, float(fps), float(duration), n, audio, path)
+                return (empty, frames, float(fps), float(duration), n, audio, path)
             except Exception as e:
                 print(f"[Onyx Batch] ❌ {name}: {e}")
                 self._notify(unique_id, idx, total)
