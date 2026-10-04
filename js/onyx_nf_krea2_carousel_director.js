@@ -113,7 +113,7 @@ app.registerExtension({
     chainCallback(nodeType.prototype, "onNodeCreated", function () {
       const node = this;
       const widgets = Object.fromEntries((node.widgets || []).map((w) => [w.name, w]));
-      ["pose_list", "slide_count", "output_mode", "slide_selector", "camera_policy", "continuity_strength", "session_direction", "character_trigger"].forEach((key) => hideWidget(widgets[key]));
+      ["pose_list", "slide_count", "output_mode", "slide_selector", "camera_policy", "continuity_strength", "session_direction", "character_trigger", "extra_prompt"].forEach((key) => hideWidget(widgets[key]));
       node.properties ||= {};
       const storedEngine = node.properties.krea2_pose_engine || {};
       const engine = {
@@ -222,13 +222,14 @@ app.registerExtension({
       ui.continuity = select(["Balanced", "Strong", "Maximum"]); ui.continuity.value = widgets.continuity_strength?.value || "Strong";
       ui.trigger = input(); ui.trigger.value = widgets.character_trigger?.value || ""; ui.trigger.placeholder = "Optional character LoRA trigger";
       ui.direction = make("textarea", "onx2k-area"); ui.direction.value = widgets.session_direction?.value || ""; ui.direction.placeholder = "Optional direction subordinate to continuity locks";
+      ui.extra = make("textarea", "onx2k-area"); ui.extra.value = widgets.extra_prompt?.value || ""; ui.extra.placeholder = "Optional text appended to the end of every prompt sent to the next node";
       const grid3 = make("div", "onx2k-grid3"); grid3.append(field("Slides", ui.count), field("Output", ui.output), field("Selected", ui.selector));
       const grid2 = make("div", "onx2k-grid2"); grid2.append(field("Camera", ui.camera), field("Continuity", ui.continuity));
-      controlSection.append(controlTitle, grid3, grid2, field("Character LoRA trigger", ui.trigger), field("Session direction", ui.direction));
+      controlSection.append(controlTitle, grid3, grid2, field("Character LoRA trigger", ui.trigger), field("Session direction", ui.direction), field("Extra prompt · added at the end of every prompt", ui.extra));
       ui.count.addEventListener("change", () => { setWidget("slide_count", Number(ui.count.value)); engine.count = Number(ui.count.value); saveEngine(); });
       ui.output.addEventListener("change", () => setWidget("output_mode", ui.output.value)); ui.selector.addEventListener("change", () => setWidget("slide_selector", Number(ui.selector.value)));
       ui.camera.addEventListener("change", () => setWidget("camera_policy", ui.camera.value)); ui.continuity.addEventListener("change", () => setWidget("continuity_strength", ui.continuity.value));
-      ui.trigger.addEventListener("input", () => setWidget("character_trigger", ui.trigger.value)); ui.direction.addEventListener("input", () => setWidget("session_direction", ui.direction.value));
+      ui.trigger.addEventListener("input", () => setWidget("character_trigger", ui.trigger.value)); ui.direction.addEventListener("input", () => setWidget("session_direction", ui.direction.value)); ui.extra.addEventListener("input", () => setWidget("extra_prompt", ui.extra.value));
 
       const posesSection = make("div", "onx2k-section"); const posesTitle = make("div", "onx2k-title"); posesTitle.innerHTML = "Pose List <small>editable · one frame per line</small>";
       ui.poses = make("textarea", "onx2k-area onx2k-poses"); ui.poses.value = widgets.pose_list?.value || ""; ui.poses.addEventListener("input", () => setWidget("pose_list", ui.poses.value));
@@ -249,10 +250,10 @@ app.registerExtension({
       const preview = make("details", "onx2k-section"); const summary = make("summary"); summary.textContent = "Last compiled Krea2 edit instruction"; ui.preview = make("div", "onx2k-preview"); ui.preview.textContent = "Queue the workflow to inspect the selected final instruction."; preview.append(summary, ui.preview);
       ui.status = make("div", "onx2k-status");
       wrap.append(head, source, vibeSection, engineSection, controlSection, posesSection, preview, ui.status);
-      node.addDOMWidget("onyx_nf_krea2_studio", "div", wrap, { serialize: false, hideOnZoom: false, getMinHeight: () => node.inputs?.some((item) => item.name === "pose_list_in" && item.link != null) ? 450 : 970 });
+      node.addDOMWidget("onyx_nf_krea2_studio", "div", wrap, { serialize: false, hideOnZoom: false, getMinHeight: () => node.inputs?.some((item) => item.name === "pose_list_in" && item.link != null) ? 540 : 1060 });
 
-      const updateSource = () => { const up = graphLink(node.graph, node, "master_image"); const externalPoses = !!node.inputs?.find((item) => item.name === "pose_list_in" && item.link != null); source.classList.toggle("ok", !!up); source.textContent = up ? `MASTER SOURCE · ${up.title || up.type} · connected${externalPoses ? " · POSES FROM PREP" : ""}` : "MASTER IMAGE · waiting for connection"; vibeSection.classList.toggle("onx2k-hidden", externalPoses); engineSection.classList.toggle("onx2k-hidden", externalPoses); posesSection.classList.toggle("onx2k-hidden", externalPoses); wrap.style.minHeight = externalPoses ? "450px" : "970px"; node.setSize([Math.max(node.size[0], 760), externalPoses ? 550 : Math.max(node.size[1], 1030)]); };
-      chainCallback(node, "onConfigure", () => { ui.poses.value = widgets.pose_list?.value || ui.poses.value; ui.count.value = String(widgets.slide_count?.value || 4); ui.output.value = widgets.output_mode?.value || "All active slides"; ui.camera.value = widgets.camera_policy?.value || "AUTO"; ui.continuity.value = widgets.continuity_strength?.value || "Strong"; updateSource(); refreshEngineFields(); });
+      const updateSource = () => { const up = graphLink(node.graph, node, "master_image"); const externalPoses = !!node.inputs?.find((item) => item.name === "pose_list_in" && item.link != null); source.classList.toggle("ok", !!up); source.textContent = up ? `MASTER SOURCE · ${up.title || up.type} · connected${externalPoses ? " · POSES FROM PREP" : ""}` : "MASTER IMAGE · waiting for connection"; vibeSection.classList.toggle("onx2k-hidden", externalPoses); engineSection.classList.toggle("onx2k-hidden", externalPoses); posesSection.classList.toggle("onx2k-hidden", externalPoses); wrap.style.minHeight = externalPoses ? "540px" : "1060px"; node.setSize([Math.max(node.size[0], 760), externalPoses ? 640 : Math.max(node.size[1], 1120)]); };
+      chainCallback(node, "onConfigure", () => { ui.poses.value = widgets.pose_list?.value || ui.poses.value; ui.count.value = String(widgets.slide_count?.value || 4); ui.output.value = widgets.output_mode?.value || "All active slides"; ui.camera.value = widgets.camera_policy?.value || "AUTO"; ui.continuity.value = widgets.continuity_strength?.value || "Strong"; ui.trigger.value = widgets.character_trigger?.value || ""; ui.direction.value = widgets.session_direction?.value || ""; ui.extra.value = widgets.extra_prompt?.value || ""; updateSource(); refreshEngineFields(); });
       chainCallback(node, "onExecuted", (message) => { const used = message?.pose_list_used?.[0]; if (used) ui.poses.value = used; const prompt = message?.selected_prompt?.[0]; if (prompt) ui.preview.textContent = prompt; const status = message?.status?.[0]; const report = message?.validation_report?.[0]; if (report) try { const parsed = JSON.parse(report); setStatus(`${status || "Ready"}${parsed.warnings?.length ? `\n${parsed.warnings.join("\n")}` : ""}`, parsed.warnings?.length ? "warn" : ""); } catch (_) { if (status) setStatus(status); } else if (status) setStatus(status); });
       const oldConnections = node.onConnectionsChange; node.onConnectionsChange = function () { const result = oldConnections?.apply(this, arguments); updateSource(); return result; };
       refreshEngineFields(); updateSource(); setStatus("Ready · choose a vibe, generate poses, then queue the carousel.");

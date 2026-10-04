@@ -69,6 +69,7 @@ from .nodes.image_enhancement import OnyxImageEnhancementNode
 from .nodes.image_black_check import OnyxImageBlackCheckNode
 from .nodes.grok_prompt import OnyxGrokPromptNode
 from .nodes.onyx_resolution_mp import OnyxResolutionMP
+from .nodes.onyx_scale_long_side import OnyxScaleLongSide
 from .nodes.onyx_h3_frame_snap import OnyxH3FrameSnap
 from .nodes.onyx_audio_switch import OnyxAudioSwitch
 from .nodes.h3_context_ir import OnyxH3ContextIR
@@ -176,6 +177,7 @@ NODE_CLASS_MAPPINGS["OnyxImageEnhancementNode"] = OnyxImageEnhancementNode
 NODE_CLASS_MAPPINGS["OnyxImageBlackCheckNode"] = OnyxImageBlackCheckNode
 NODE_CLASS_MAPPINGS["OnyxGrokPromptNode"] = OnyxGrokPromptNode
 NODE_CLASS_MAPPINGS["OnyxResolutionMP"] = OnyxResolutionMP
+NODE_CLASS_MAPPINGS["OnyxScaleLongSide"] = OnyxScaleLongSide
 NODE_CLASS_MAPPINGS["OnyxH3FrameSnap"] = OnyxH3FrameSnap
 NODE_CLASS_MAPPINGS["OnyxImageBlurBatched"] = OnyxImageBlurBatched
 NODE_CLASS_MAPPINGS["OnyxImageCompositeMaskedBatched"] = OnyxImageCompositeMaskedBatched
@@ -227,6 +229,7 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxImageEnhancementNode"] = "Onyx Image Enhancement
 NODE_DISPLAY_NAME_MAPPINGS["OnyxImageBlackCheckNode"] = "Onyx Image Black Check"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxGrokPromptNode"] = "Onyx Grok Prompt Generator"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxResolutionMP"] = "Onyx Resolution (MP)"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxScaleLongSide"] = "Onyx Scale Long Side (MP grid)"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3FrameSnap"] = "Onyx H3 Frame Snap"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxImageBlurBatched"] = "Onyx Image Blur (batched)"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxImageCompositeMaskedBatched"] = "Onyx Image Composite Masked (batched)"

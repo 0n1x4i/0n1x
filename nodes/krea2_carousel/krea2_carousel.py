@@ -108,6 +108,7 @@ def build_krea2_carousel(
     session_direction="",
     character_trigger="",
     has_master=True,
+    extra_prompt="",
 ):
     """Compile a pose list into Krea2Edit instructions and a continuity manifest."""
     poses = _pose_lines(pose_list)
@@ -136,6 +137,7 @@ def build_krea2_carousel(
     selector = max(1, min(max(1, active_count), int(slide_selector)))
     session_direction = _clean(session_direction)
     character_trigger = _clean(character_trigger, 1_000)
+    extra_prompt = _clean(extra_prompt, 4_000)
     if session_direction:
         warnings.extend(_contradiction_warnings(session_direction, camera_policy, "Session direction"))
 
@@ -165,6 +167,10 @@ def build_krea2_carousel(
         )
         if character_trigger:
             instruction = character_trigger + ", " + instruction
+        # Ajoute tel quel, en DERNIER, a chaque instruction : c'est le texte
+        # que l'utilisateur veut voir arriver au node suivant sans retouche.
+        if extra_prompt:
+            instruction = instruction.rstrip() + " " + extra_prompt
         all_prompts.append(instruction)
         slide_records.append(
             {
@@ -285,6 +291,10 @@ class OnyxKrea2CarouselDirector:
                 "slide_count_in": ("INT", {"forceInput": True, "display_name": "SLIDE COUNT · FROM PREP"}),
                 "session_direction": ("STRING", {"default": "", "multiline": True, "socketless": True}),
                 "character_trigger": ("STRING", {"default": "", "multiline": False, "socketless": True}),
+                # En dernier : les valeurs des widgets sont enregistrees par position.
+                "extra_prompt": ("STRING", {"default": "", "multiline": True, "socketless": True,
+                                            "tooltip": "Appended verbatim to the end of EVERY edit "
+                                                       "prompt sent to the next node."}),
             },
         }
 
@@ -302,6 +312,7 @@ class OnyxKrea2CarouselDirector:
         master_image=None,
         pose_list_in=None,
         slide_count_in=None,
+        extra_prompt="",
     ):
         if pose_list_in:
             pose_list = pose_list_in
@@ -317,6 +328,7 @@ class OnyxKrea2CarouselDirector:
                 "continuity_strength": continuity_strength,
                 "session_direction": _clean(session_direction),
                 "character_trigger": _clean(character_trigger),
+                "extra_prompt": _clean(extra_prompt),
                 "master_image": master_image is not None,
             },
             ensure_ascii=False,
@@ -336,6 +348,7 @@ class OnyxKrea2CarouselDirector:
         master_image=None,
         pose_list_in=None,
         slide_count_in=None,
+        extra_prompt="",
     ):
         if pose_list_in:
             pose_list = pose_list_in
@@ -351,6 +364,7 @@ class OnyxKrea2CarouselDirector:
             session_direction=session_direction,
             character_trigger=character_trigger,
             has_master=master_image is not None,
+            extra_prompt=extra_prompt,
         )
         return {
             "ui": {
