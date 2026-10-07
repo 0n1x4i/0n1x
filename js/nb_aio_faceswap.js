@@ -7,7 +7,7 @@
 import { app } from "../../scripts/app.js";
 // ─── Constantes mode vidéo ─────────────────────────────────────────────────
 const VIDEO_MODELS         = ["Veo 3.1 Lite", "Veo 3.1", "Veo 3.1 Fast", "Kling 3.0", "Kling 2.6", "Kling 3.0 Motion Control", "Seedance 2.0", "Seedance 2.5", "Omni Flash", "Wan 3.0"];
-const IMAGE_MODELS_DEFAULT = ["Nano Banana Pro", "Nano Banana 2", "Seedream 4.5", "Seedream 5 Pro", "GPT Image 2.0", "GPT Image 2.5 Flare", "GPT Image 2.5 Sunburst"];
+const IMAGE_MODELS_DEFAULT = ["Nano Banana Pro", "Nano Banana 2.1", "Nano Banana 2", "Seedream 4.5", "Seedream 5 Pro", "GPT Image 2.0", "GPT Image 2.5 Flare", "GPT Image 2.5 Sunburst"];
 const VIDEO_ASPECT_RATIOS  = ["16:9", "9:16"];
 const IMAGE_ASPECT_RATIOS  = ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
 const VIDEO_RESOLUTIONS    = ["480p", "720p", "1080p", "4K"];
@@ -35,7 +35,7 @@ const LOCKABLE_WIDGETS = [
     "fal_safety_tolerance",
     "fal_enable_web_search",
 ];
-const AUTOMATION_MODELS = ["Nano Banana Pro", "Nano Banana 2", "Seedream 4.5", "Seedream 5 Pro"];
+const AUTOMATION_MODELS = ["Nano Banana Pro", "Nano Banana 2.1", "Nano Banana 2", "Seedream 4.5", "Seedream 5 Pro"];
 // ─── Helpers ───────────────────────────────────────────────────────────────
 function getWidget(node, name) {
     return node.widgets?.find(w => w.name === name);

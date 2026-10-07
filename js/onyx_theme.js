@@ -51,6 +51,12 @@ const ALL_NODES = [
     "OnyxTextCarouselDirector",
     "OnyxKrea2CarouselDirector",
     "OnyxKrea2PoseListPrep",
+    // Endless Sampler (vendored HR Endless Sampler)
+    "OnyxEndlessSampler",
+    "OnyxH3SeamlessSampler",
+    "OnyxEndlessSamplerPreview",
+    "OnyxEndlessSamplerSaveVideo",
+    "OnyxEndlessSamplerLoadVideo",
 ];
  
 function applyFireTheme(node) {

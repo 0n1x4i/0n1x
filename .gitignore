@@ -50,3 +50,7 @@ desktop.ini
 # The Onyx key saved by the Onyx Session node (never commit it)
 onyx_session.key
 onyx_session.key.tmp
+
+# Local backups made before edits (*.bak, *.bak_xxx)
+*.bak
+*.bak_*

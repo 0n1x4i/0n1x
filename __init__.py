@@ -264,4 +264,16 @@ NODE_DISPLAY_NAME_MAPPINGS["Onyx_Skin_Tone"]    = "🧑 Onyx Skin Tone Line"
 NODE_CLASS_MAPPINGS.update(_K2C_NODES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_K2C_NAMES)
 
+# Onyx Endless Sampler (vendored HR Endless Sampler, Apache 2.0) — vidéo H3 de longueur illimitée.
+try:
+    from .nodes.endless_sampler import (
+        NODE_CLASS_MAPPINGS as _ENDLESS_NODES,
+        NODE_DISPLAY_NAME_MAPPINGS as _ENDLESS_NAMES,
+    )
+    NODE_CLASS_MAPPINGS.update(_ENDLESS_NODES)
+    NODE_DISPLAY_NAME_MAPPINGS.update(_ENDLESS_NAMES)
+    print(f"[Onyx] ✅ Endless Sampler chargé ({len(_ENDLESS_NODES)} nodes)")
+except Exception as _e:
+    print(f"[Onyx] ❌ Endless Sampler failed: {_e}")
+
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

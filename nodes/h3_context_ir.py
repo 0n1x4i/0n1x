@@ -97,7 +97,8 @@ def _load_guides(folder: str = "") -> str:
 TARGET_H3 = "MiniMax H3"
 TARGET_SEEDANCE = "Seedance"
 TARGET_SEEDANCE_V2 = "Seedance v2"
-_TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2]
+TARGET_H3_ENDLESS = "MiniMax H3 Endless"
+_TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2, TARGET_H3_ENDLESS]
 
 ROLE_REFERENCE = "reference"
 ROLE_FIRST = "first_frame"
@@ -117,7 +118,7 @@ _MODELS = [
     "gemini-2.5-flash",
 ]
 
-_PROVIDERS = ["Gemini", "Vertex", "Grok"]
+_PROVIDERS = ["Gemini", "Vertex", "Grok", "Kie"]   # Kie: same Gemini models / Kie Grok models, Kie.ai key
 
 # Meme liste que _GROK_MODELS dans grok_prompt.py, modeles vision en tete.
 _GROK_MODELS = [
@@ -127,6 +128,10 @@ _GROK_MODELS = [
     "grok-4-1-fast-non-reasoning",
     "grok-2-vision-1212",
 ]
+
+# Grok models sold by Kie.ai (provider=Kie only); with Kie, the Gemini models
+# above are used as they are.
+_KIE_GROK_MODELS = ["grok-4-7", "grok-4-6", "grok-4-5", "grok-4-3"]
 
 # Gemini 3 image token counts, from the media-resolution guide: 1120 at the
 # default, 280 at low - a factor of four on every keyframe. The same guide
@@ -186,6 +191,9 @@ class OnyxH3ContextIR:
                     "tooltip": "Which video model the prompt is written for.\n"
                                "MiniMax H3: compiles against the two official MiniMax guides, "
                                "verbatim, with <Picture N> / <Video N> labels.\n"
+                               "MiniMax H3 Endless: same guides, written for Onyx Endless Sampler "
+                               "(one continuous take, beats every 3-5 s, short dialogue lines "
+                               "spoken once).\n"
                                "Seedance: compiles against ByteDance's six-slot grammar with "
                                "@Image 1 / @Video 1 tags.\n"
                                "Seedance v2: same tags, but outputs one structured JSON "
@@ -201,7 +209,7 @@ class OnyxH3ContextIR:
                 # gemini_prompt.py apres la fusion des widgets grok/gemini. Le
                 # node verifie la coherence au run et le dit, plutot que de
                 # laisser partir un modele Grok vers l'endpoint Google.
-                "model": (_MODELS + _GROK_MODELS, {"default": "gemini-3.6-flash"}),
+                "model": (_MODELS + _GROK_MODELS + _KIE_GROK_MODELS, {"default": "gemini-3.6-flash"}),
                 "guide_folder": ("STRING", {
                     "default": "", "multiline": False,
                     "tooltip": "Leave empty (default): the two official MiniMax guides are "
@@ -375,6 +383,12 @@ class OnyxH3ContextIR:
                                "H3 generates the audio, so nothing else says when a line is "
                                "spoken.",
                 }),
+                # Added LAST on purpose: ComfyUI stores widget values by position,
+                # anything inserted higher would shift every saved workflow.
+                "kie_api_key": ("STRING", {
+                    "default": "", "multiline": False,
+                    "tooltip": "Kie.ai key, for provider=Kie: the Gemini models of the list, or "
+                               "grok-4-7 / 4-6 / 4-5 / 4-3, billed on your Kie.ai credits."}),
             },
         }
 
@@ -401,12 +415,14 @@ class OnyxH3ContextIR:
             grounding_override="", window_start_seconds=0.0,
             pinned_lead_seconds=0.0, transcribe_speech=False,
             motion_from_video_only=False, keyframes_match_model=False,
-            extra_prompt_rules=False):
+            extra_prompt_rules=False, kie_api_key=""):
         ensure_profile_ready()
 
         guides_text = _load_guides(guide_folder)
 
         ns = load_remote("h3_context_ir_core", extra_globals={"__file__": __file__})
+        # only sent when used: a server-side core older than Kie still runs the rest
+        kie = {"kie_api_key": kie_api_key} if (kie_api_key or "").strip() else {}
         return ns["run_impl"](
             OnyxH3ContextIR._grounding_cache, guides_text,
             intent, duration_seconds, aspect_ratio, target_model,
@@ -419,7 +435,7 @@ class OnyxH3ContextIR:
             grounding_override, window_start_seconds,
             pinned_lead_seconds, transcribe_speech,
             motion_from_video_only, keyframes_match_model,
-            extra_prompt_rules,
+            extra_prompt_rules, **kie,
         )
 
 

@@ -15,7 +15,7 @@ import numpy as np
 # ─────────────────────────────────────────────────────────────────────────────
 
 from .onyx_render_profile import ensure_profile_ready
-_MODELS = ["Nano Banana Pro", "Nano Banana 2"]
+_MODELS = ["Nano Banana Pro", "Nano Banana 2.1", "Nano Banana 2"]
 
 # SOFT mode: input ratio -> ratio we crop the image to before generation
 _SOFT_CROP_MAP = {

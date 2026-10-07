@@ -21,7 +21,7 @@ REPOSE_PRESETS = [
 ]
 
 # Image models available for this node (image-only, no video)
-_IMAGE_MODELS = ["Nano Banana Pro", "Nano Banana 2", "Seedream 5 Pro", "GPT Image 2.0"]
+_IMAGE_MODELS = ["Nano Banana Pro", "Nano Banana 2.1", "Nano Banana 2", "Seedream 5 Pro", "GPT Image 2.0"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -80,12 +80,12 @@ class OnyxReposeCarouselNode:
                 "vertex_json_folder": ("STRING", {"default": "", "multiline": False,
                                        "tooltip": "[VERTEX] Path to service account JSON folder."}),
                 "disable_safety_threshold": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Disable the safety filter.",
+                    "default": True,
+                    "tooltip": "Disable the safety filter (on by default).",
                 }),
                 "fal_safety_tolerance": (["1", "2", "3", "4", "5", "6"], {
-                    "default": "4",
-                    "tooltip": "[FAL] 1 = strict | 6 = permissive",
+                    "default": "6",
+                    "tooltip": "[FAL] 1 = strict | 6 = permissive (default)",
                 }),
                 "gpt2_image_quality": (["high", "medium", "low"], {
                     "default": "high",
@@ -134,8 +134,8 @@ class OnyxReposeCarouselNode:
         kie_api_key              = "",
         fal_api_key              = "",
         vertex_json_folder       = "",
-        disable_safety_threshold = False,
-        fal_safety_tolerance     = "4",
+        disable_safety_threshold = True,
+        fal_safety_tolerance     = "6",
         aspect_ratio             = "auto",
         temperature              = 1.0,
         gpt2_image_quality       = "high",

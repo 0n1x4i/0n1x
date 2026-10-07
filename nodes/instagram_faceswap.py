@@ -208,7 +208,7 @@ def _do_face_swap(
     GPT2 / Seedream → manual routing using the same masked_image + fs_prompt.
     """
     # ── NB Pro / NB2 use the existing automation (unless Auto expression) ────────
-    if model_name in ("Nano Banana Pro", "Nano Banana 2") and face_expression != "Auto":
+    if model_name in ("Nano Banana Pro", "Nano Banana 2", "Nano Banana 2.1") and face_expression != "Auto":
         return aio._run_face_swap_automation(
             yunet_score_threshold  = yunet_score_threshold,
             provider               = provider,
@@ -257,8 +257,12 @@ def _do_face_swap(
     auto_ratio = aio._detect_aspect_ratio(target_tensor)
 
     # ── NB Pro / NB2 (Auto expression only) ──────────────────────────────────
-    if model_name in ("Nano Banana Pro", "Nano Banana 2"):
-        is_nb2 = (model_name == "Nano Banana 2")
+    if model_name in ("Nano Banana Pro", "Nano Banana 2", "Nano Banana 2.1"):
+        is_nb2 = (model_name in ("Nano Banana 2", "Nano Banana 2.1"))
+        # These direct calls bypass generate(): pick 2.1 vs 2 explicitly.
+        _set_variant = getattr(aio, "set_nb_variant", None)
+        if callable(_set_variant):
+            _set_variant(model_name == "Nano Banana 2.1")
         if provider == "WAVESPEED":
             return aio._generate_wavespeed(
                 fs_prompt, image_tensors, image_size, "jpeg",
@@ -280,7 +284,7 @@ def _do_face_swap(
                 batch_size        = 1,
                 fal_api_key       = fal_api_key,
                 is_nb2            = is_nb2,
-                safety_tolerance  = "4",
+                safety_tolerance  = "6",
                 enable_web_search = False,
             )
         elif provider == "GOOGLE":
@@ -493,7 +497,7 @@ class OnyxInstagramFaceSwapNode:
                     ),
                 }),
                 "disable_safety": ("BOOLEAN", {
-                    "default": False,
+                    "default": True,
                     "label_on":  "Safety OFF",
                     "label_off": "Safety ON",
                 }),
@@ -516,6 +520,13 @@ class OnyxInstagramFaceSwapNode:
                 "fal_api_key":         ("STRING", {"default": ""}),
                 "kie_api_key":         ("STRING", {"default": ""}),
                 "vertex_json_folder":  ("STRING", {"default": ""}),
+                # Appended last on purpose: saved workflows store widget values by position.
+                "use_nano_banana_2_1": ("BOOLEAN", {
+                    "default": False,
+                    "label_on":  "Nano Banana 2.1 ✅",
+                    "label_off": "Nano Banana 2.1 ❌",
+                    "tooltip": "Runs just before Nano Banana 2 in the fallback chain.",
+                }),
             },
         }
 
@@ -528,7 +539,7 @@ class OnyxInstagramFaceSwapNode:
         "Onyx Content Remaker\n"
         "Downloads posts from Instagram, Threads or Pinterest and runs the face swap automation "
         "on every image.\n"
-        "Fallback chain: Nano Banana Pro → Nano Banana 2 → Seedream 5 Pro → GPT Image 2.\n"
+        "Fallback chain: Nano Banana Pro → Nano Banana 2.1 → Nano Banana 2 → Seedream 5 Pro → GPT Image 2.\n"
         "Low-light + blurry images can be routed to GPT Image 2 first.\n"
         "Already processed images are skipped on re-run (resume support)."
     )
@@ -561,6 +572,7 @@ class OnyxInstagramFaceSwapNode:
         vertex_json_folder,
         cookies_file,
         custom_prompt,
+        use_nano_banana_2_1=False,
     ):
         ensure_profile_ready()
         from .nano_banana_aio import OnyxNanoBananaAIO, _load_vertex_json_folder
@@ -572,6 +584,7 @@ class OnyxInstagramFaceSwapNode:
             auto_quality_routing, retry_count, image_size, face_expression,
             disable_safety, gemini_api_key, wavespeed_api_key, kie_api_key,
             fal_api_key, vertex_json_folder, cookies_file, custom_prompt,
+            use_nano_banana_2_1=use_nano_banana_2_1,
             OnyxNanoBananaAIO=OnyxNanoBananaAIO,
             ensure_gallery_dl=_ensure_gallery_dl,
             force_upgrade_gallery_dl=_force_upgrade_gallery_dl,

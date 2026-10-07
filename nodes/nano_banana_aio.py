@@ -69,6 +69,7 @@ from .onyx_remote_exec import load_remote
 
 _MODEL_MAP = {
     "Nano Banana Pro": "gemini-3-pro-image",
+    "Nano Banana 2.1": "gemini-nano-banana-2.1",
     "Nano Banana 2":   "gemini-3.1-flash-image",
     "Seedream 4.5":    "seedream-v4.5",
     "Seedream 5 Pro":  "seedream-5-pro",       # KIE uniquement pour l'instant
@@ -512,8 +513,8 @@ class OnyxNanoBananaAIO:
                 # vertex_location : hardcodé "us-central1" — masqué du node
                 # vertex_gcs_bucket : valeur vide par défaut — masqué du node
                 "disable_safety_threshold": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Disable the safety filter.",
+                    "default": True,
+                    "tooltip": "Disable the safety filter (on by default). Turn off to use the provider's stricter default thresholds.",
                 }),
                 "model": (model_names, {
                     "default": model_names[0],
@@ -558,8 +559,8 @@ class OnyxNanoBananaAIO:
                     "tooltip": "[GOOGLE / VERTEX] Nucleus sampling",
                 }),
                 "fal_safety_tolerance": (["1", "2", "3", "4", "5", "6"], {
-                    "default": "4",
-                    "tooltip": "[FAL NB] 1 = strict | 6 = permissive",
+                    "default": "6",
+                    "tooltip": "[FAL NB] 1 = strict | 6 = permissive (default)",
                 }),
                 "fal_enable_web_search": ("BOOLEAN", {
                     "default": False,
