@@ -742,6 +742,13 @@ class OnyxImageBatchLoader:
                     n = keep
                 duration = n / fps if fps else 0.0
                 audio = _slice_audio(_extract_audio(path), start_s, duration)
+                if audio is None and duration > 0:
+                    # Silent clip: a silent track instead of nothing. Switches downstream
+                    # (RvTools Any Multi-Switch, TrimAudioDuration) stop the whole run when
+                    # their only input is empty, so a video without sound failed MiniMax MC.
+                    audio = {"waveform": torch.zeros(1, 2, max(1, int(round(duration * 44100)))),
+                             "sample_rate": 44100}
+                    print("[Onyx Batch] 🔇 no audio track: silent audio output")
                 print(f"[Onyx Batch] ✅ [{idx + 1}/{total}] 🎬 {name} — "
                       f"{n} frames, {duration:.3f}s @ {fps:.2f} fps")
                 self._notify(unique_id, idx, total)
