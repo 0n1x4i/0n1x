@@ -192,6 +192,40 @@ def _probe_video(path: str):
         return 0.0, 0.0, 0
 
 
+def _probe_dims(path: str):
+    """(width, height) of the first video stream, without decoding. (0, 0) if unknown."""
+    try:
+        import av
+        with av.open(path) as container:
+            st = container.streams.video[0]
+            return int(st.codec_context.width or 0), int(st.codec_context.height or 0)
+    except Exception:
+        pass
+    try:
+        import cv2
+        cap = cv2.VideoCapture(path)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        cap.release()
+        return w, h
+    except Exception:
+        return 0, 0
+
+
+def _video_info(src_fps=0.0, src_n=0, src_dur=0.0, src_w=0, src_h=0,
+                fps=0.0, n=0, dur=0.0, w=0, h=0):
+    """Same dict as VideoHelperSuite's VHS_VIDEOINFO (load_video_nodes.py), so the
+    output plugs straight into VHS Video Info / Video Info (Source) / (Loaded)."""
+    return {
+        "source_fps": float(src_fps), "source_frame_count": int(src_n),
+        "source_duration": float(src_dur), "source_width": int(src_w),
+        "source_height": int(src_h),
+        "loaded_fps": float(fps), "loaded_frame_count": int(n),
+        "loaded_duration": float(dur), "loaded_width": int(w),
+        "loaded_height": int(h),
+    }
+
+
 def _effective_duration(dur, fps, trim_mode, trim_start, trim_end):
     """Length the clip will have once the node's trim rule is applied.
 
@@ -531,6 +565,23 @@ class OnyxImageBatchLoader:
                                "Max side / resize are applied. `video` and `audio` stay empty.\n"
                                "OFF: normal video loading; `image` is a 64x64 placeholder for videos.",
                 }),
+                # Widget ajoute EN DERNIER (ordre de serialisation).
+                "max_frames": ("INT", {
+                    "default": 0, "min": 0, "max": 100000, "step": 1, "socketless": True,
+                    "tooltip": "Frame load cap: maximum number of frames kept per clip, after "
+                               "trim and force_fps. 0 = no limit. Same role as frame_load_cap "
+                               "in VHS Load Video.",
+                }),
+                # Vraies entrees (pas des widgets) : branchees, elles remplacent la
+                # valeur du reglage correspondant dans l'UI du node.
+                "width": ("INT", {"forceInput": True,
+                    "tooltip": "Overrides Width (custom_width) when connected."}),
+                "height": ("INT", {"forceInput": True,
+                    "tooltip": "Overrides Height (custom_height) when connected."}),
+                "fps": ("FLOAT", {"forceInput": True,
+                    "tooltip": "Overrides Force fps when connected (0 = native)."}),
+                "frame_load_cap": ("INT", {"forceInput": True,
+                    "tooltip": "Overrides Frame load cap when connected (0 = no limit)."}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -540,19 +591,19 @@ class OnyxImageBatchLoader:
     # `video` is a separate output on purpose. It is an IMAGE batch like `image`,
     # so ComfyUI would happily let them be swapped, and a frame sequence wired
     # into a single-image input fails much later with a confusing error.
-    # `path` is the absolute path of the current item in the pool. LoadVideoUI
-    # resolves its `video` argument with `video_path = video` before trying any
-    # ComfyUI lookup, and its VALIDATE_INPUTS returns True unconditionally, so an
-    # absolute path fed there loads the file directly — which is what turns a
-    # batch of videos into a dynamic source for a workflow built around it.
+    # `video_info` is the same dict as VideoHelperSuite's VHS_VIDEOINFO: source_*
+    # (the file as stored) and loaded_* (what actually leaves this node, after
+    # resize / trim / force_fps / frame load cap). Plug it into VHS Video Info.
     # duration / frame_count / video_fps are OUTPUTS, not refreshed widgets.
     # LoadVideoUI needs its browser to probe the file and fill its widgets because
     # they are editable trim controls; that refresh only fires on a manual click,
     # which is precisely what a queue cannot do. Reading the real values in Python
     # at execution time gives the correct figures for every item in the batch,
     # with no round trip through the frontend.
-    RETURN_TYPES  = ("IMAGE", "IMAGE", "FLOAT", "FLOAT", "INT", "AUDIO", _ANY)
-    RETURN_NAMES  = ("image", "video", "video_fps", "duration", "frame_count", "audio", "path")
+    # Le 7e slot etait `path` ; il devient `video_info` (VHS_VIDEOINFO), au meme
+    # index pour ne pas decaler les liens des autres sorties.
+    RETURN_TYPES  = ("IMAGE", "IMAGE", "FLOAT", "FLOAT", "INT", "AUDIO", "VHS_VIDEOINFO")
+    RETURN_NAMES  = ("image", "video", "video_fps", "duration", "frame_count", "audio", "video_info")
     OUTPUT_NODE   = False
     FUNCTION      = "load_next"
     CATEGORY      = "Onyx"
@@ -611,9 +662,20 @@ class OnyxImageBatchLoader:
                   custom_width: int = 0, custom_height: int = 0,
                   force_fps: float = 0.0, consume_on_load: bool = False,
                   queue_batch_size: int = 50, minimax_15s_limit: bool = False,
-                  video_first_frame: bool = False, unique_id=None):
+                  video_first_frame: bool = False, max_frames: int = 0,
+                  width=None, height=None, fps=None, frame_load_cap=None,
+                  unique_id=None):
         # ── Parse data ────────────────────────────────────────────────────────
         ensure_profile_ready()
+        # Entrees branchees = priorite sur les reglages de l'UI.
+        if width is not None:
+            custom_width = int(width)
+        if height is not None:
+            custom_height = int(height)
+        if fps is not None:
+            force_fps = float(fps)
+        cap_frames = int(frame_load_cap) if frame_load_cap is not None else int(max_frames or 0)
+        cap_frames = max(0, cap_frames)
         try:
             data = json.loads(batch_data) if batch_data else {}
         except (json.JSONDecodeError, TypeError):
@@ -629,7 +691,7 @@ class OnyxImageBatchLoader:
         # Le placeholder image reste 64x64 noir : grok_prompt.py le detecte par
         # cette taille exacte pour ne pas facturer une analyse vision sur du vide.
         # Ne pas changer sans mettre a jour _is_placeholder_frame la-bas.
-        blank = (empty, empty, 0.0, 0.0, 0, None, "")
+        blank = (empty, empty, 0.0, 0.0, 0, None, _video_info())
 
         if not images_meta or not order:
             return blank
@@ -712,7 +774,11 @@ class OnyxImageBatchLoader:
                 self._notify(unique_id, idx, total)
                 if consume_on_load:
                     self._consume(unique_id, meta["id"], name, total - 1)
-                return (frame, empty, float(vfps), 0.0, 0, None, path)
+                sw, sh = _probe_dims(path)
+                info = _video_info(vfps, _nf, dur, sw, sh,
+                                   vfps, 1, (1.0 / vfps if vfps else 0.0),
+                                   int(frame.shape[2]), int(frame.shape[1]))
+                return (frame, empty, float(vfps), 0.0, 0, None, info)
             except Exception as e:
                 print(f"[Onyx Batch] ❌ first frame of {name}: {e}")
                 self._notify(unique_id, idx, total)
@@ -734,6 +800,10 @@ class OnyxImageBatchLoader:
                     frames, fps, trim_mode, float(trim_start), float(trim_end), float(force_fps)
                 )
                 n = int(frames.shape[0])
+                if cap_frames and n > cap_frames:
+                    print(f"[Onyx Batch] ✂️  frame load cap: {n} -> {cap_frames} frames")
+                    frames = frames[:cap_frames]
+                    n = cap_frames
                 if minimax_15s_limit and fps and n / fps > _MINIMAX_LIMIT_S + 1e-6:
                     keep = max(1, int(_MINIMAX_LIMIT_S * fps + 1e-6))
                     print(f"[Onyx Batch] ✂️  MiniMax limit: {n / fps:.3f}s -> "
@@ -757,7 +827,12 @@ class OnyxImageBatchLoader:
                 # Par defaut `image` reste le placeholder : renvoyer la premiere
                 # frame ferait passer une video pour une photo dans un graphe
                 # branche sur les deux. video_first_frame le demande explicitement.
-                return (empty, frames, float(fps), float(duration), n, audio, path)
+                s_dur, s_fps, s_n = _probe_video(path)
+                s_w, s_h = _probe_dims(path)
+                info = _video_info(s_fps, s_n, s_dur, s_w, s_h,
+                                   fps, n, duration,
+                                   int(frames.shape[2]), int(frames.shape[1]))
+                return (empty, frames, float(fps), float(duration), n, audio, info)
             except Exception as e:
                 print(f"[Onyx Batch] ❌ {name}: {e}")
                 self._notify(unique_id, idx, total)
@@ -779,7 +854,9 @@ class OnyxImageBatchLoader:
         # et sans qu'on sache lequel c'etait.
         if consume_on_load:
             self._consume(unique_id, meta["id"], name, total - 1)
-        return (tensor, empty, 0.0, 0.0, 0, None, path)
+        ih, iw = int(tensor.shape[1]), int(tensor.shape[2])
+        info = _video_info(0.0, 1, 0.0, iw, ih, 0.0, 1, 0.0, iw, ih)
+        return (tensor, empty, 0.0, 0.0, 0, None, info)
 
     @staticmethod
     def _consume(node_id, img_id: str, name: str, left: int):

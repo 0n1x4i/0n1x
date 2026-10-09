@@ -76,7 +76,7 @@ const THUMB_SIZES = { S: 92, M: 128, L: 172 };
 const SETTING_WIDGETS = [
     "video_max_side", "trim_mode", "trim_start", "trim_end", "resize_method",
     "custom_width", "custom_height", "force_fps", "consume_on_load",
-    "queue_batch_size", "minimax_15s_limit", "video_first_frame",
+    "queue_batch_size", "minimax_15s_limit", "video_first_frame", "max_frames",
 ];
 
 // ── Styles ──────────────────────────────────────────────────────────────────
@@ -347,6 +347,7 @@ function setupBatchLoader(node) {
         group("Decode",
             numField("video_max_side", "Max side (px, 0 = native)", { step: 64, max: 4096 }),
             numField("force_fps", "Force fps (0 = native)", { step: 0.01, max: 240, float: true }),
+            numField("max_frames", "Frame load cap (0 = all)", { step: 1, max: 100000 }),
             boolField("minimax_15s_limit", "MiniMax 15 s limit", "on", "off")),
         group("Resize",
             selField("resize_method", "Method", ["none", "maintain aspect ratio", "stretch to fit", "pad", "crop"]),
@@ -403,6 +404,7 @@ function setupBatchLoader(node) {
         const ms = Number(getVal("video_max_side", 1024));
         parts.push(ms ? `≤${ms}px` : "native size");
         const ff = Number(getVal("force_fps", 0)); parts.push(ff ? `${ff} fps` : "native fps");
+        const mf = Number(getVal("max_frames", 0)); if (mf) parts.push(`≤${mf} frames`);
         const rm = getVal("resize_method", "none");
         if (rm !== "none") parts.push(`${rm} ${getVal("custom_width", 0) || "auto"}×${getVal("custom_height", 0) || "auto"}`);
         const ts = Number(getVal("trim_start", 0)), te = Number(getVal("trim_end", 0));

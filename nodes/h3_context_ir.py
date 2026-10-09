@@ -98,7 +98,8 @@ TARGET_H3 = "MiniMax H3"
 TARGET_SEEDANCE = "Seedance"
 TARGET_SEEDANCE_V2 = "Seedance v2"
 TARGET_H3_ENDLESS = "MiniMax H3 Endless"
-_TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2, TARGET_H3_ENDLESS]
+TARGET_SEEDANCE_SEVERED = "Seedance Severed"
+_TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2, TARGET_H3_ENDLESS, TARGET_SEEDANCE_SEVERED]
 
 ROLE_REFERENCE = "reference"
 ROLE_FIRST = "first_frame"
@@ -198,7 +199,12 @@ class OnyxH3ContextIR:
                                "@Image 1 / @Video 1 tags.\n"
                                "Seedance v2: same tags, but outputs one structured JSON "
                                "object (people, scene_events with measured dialogue, a single "
-                               "continuous shot, negative_prompt, reference_images).\n\n"
+                               "continuous shot, negative_prompt, reference_images).\n"
+                               "Seedance Severed: universal prose template for swapping the woman of a "
+                               "reel with ANY character, no audio and no dialogue (the original "
+                               "soundtrack is put back afterwards). Wire image_1 = three-view face sheet "
+                               "(front / three-quarter / profile) and image_2 = body + outfit sheet with "
+                               "the head masked, plus the video (color-inverted copy recommended).\n\n"
                                "The two are not interchangeable. H3's guide asks for an "
                                "exhaustive description; ByteDance's says a long paragraph fights "
                                "itself and that two or three sentences is the target. Pass A does "
