@@ -120,7 +120,7 @@ def _pose_prompts(vibe, count, include_selfie=True, mode="Vibe List", detail="Si
     return system, user
 
 
-def _extract_poses(text, count, strict=False):
+def _extract_poses(text, count, strict=False, pad=True):
     text = re.sub(r"<think>.*?</think>", "", str(text or ""), flags=re.I | re.S).strip()
     text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
     text = re.sub(r"\s*```$", "", text).strip()
@@ -160,7 +160,7 @@ def _extract_poses(text, count, strict=False):
             f"The model returned {len(cleaned)} unique poses; {count} were expected. "
             "Prepare the list again. No generic poses were added."
         )
-    if not strict:
+    if not strict and pad:
         for fallback in FALLBACK_POSES:
             if len(cleaned) >= count:
                 break
@@ -182,7 +182,7 @@ def _gemini_generate(api_key, model_id, system, user, image, timeout):
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {
             "temperature": 0.8,
-            "maxOutputTokens": 1200,
+            "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
         },
     }
@@ -225,7 +225,7 @@ def _grok_generate(api_key, model_id, system, user, image, timeout):
             {"role": "user", "content": content},
         ],
         "temperature": 0.8,
-        "max_tokens": 1200,
+        "max_tokens": 6000,
         "stream": False,
     }
     try:
@@ -314,7 +314,7 @@ def _vertex_generate(json_folder, model_id, system, user, image, timeout):
     config = types.GenerateContentConfig(
         system_instruction=system,
         temperature=0.8,
-        max_output_tokens=1200,
+        max_output_tokens=8192,
         response_mime_type="application/json",
     )
     try:
@@ -354,43 +354,68 @@ def generate_pose_list(config, image=None):
         user = "Inspect the attached master image for feasible poses; allow new camera framing.\n\n" + user
     image_label = "POSE REFERENCE" if mode == "Reference Copy" else "MASTER IMAGE"
 
-    if backend == "Transformers local":
-        text = local_vlm.generate_text(
-            system,
-            user,
-            pil_images=[image] if image is not None else [],
-            image_labels=[image_label] if image is not None else [],
-            model_id=model_id or None,
-            four_bit=bool(config.get("four_bit", False)),
-            unload_after=bool(config.get("unload_after", True)),
-            attn=_bounded(config.get("attention"), 30, "auto"),
-            temperature=0.8,
-            max_new_tokens=1200,
-            seed=seed,
-        )
-    elif backend in ("Ollama", "llama.cpp"):
-        state = {
-            "creativity": "Creative",
-            "prompt_length": "Detailed",
-            "seed": seed,
-            "unload_after": bool(config.get("unload_after", True)),
-            "timeout": timeout,
-        }
-        items = [(image_label, image)] if image is not None else []
-        if backend == "Ollama":
-            _local_endpoint(endpoint, "http://127.0.0.1:11434")
-            text = _ollama_generate(endpoint, model_id, system, user, items, state)
-        else:
-            _local_endpoint(endpoint, "http://127.0.0.1:8080")
-            text = _llamacpp_generate(endpoint, model_id, system, user, items, state)
-    elif backend == "Gemini API":
-        text = _gemini_generate(config.get("api_key"), model_id, system, user, image, timeout)
-    elif backend == "Vertex AI":
-        text = _vertex_generate(config.get("vertex_json_folder"), model_id, system, user, image, timeout)
-    else:
-        text = _grok_generate(config.get("api_key"), model_id, system, user, image, timeout)
+    def _call(user):
+      if backend == "Transformers local":
+          text = local_vlm.generate_text(
+              system,
+              user,
+              pil_images=[image] if image is not None else [],
+              image_labels=[image_label] if image is not None else [],
+              model_id=model_id or None,
+              four_bit=bool(config.get("four_bit", False)),
+              unload_after=bool(config.get("unload_after", True)),
+              attn=_bounded(config.get("attention"), 30, "auto"),
+              temperature=0.8,
+              max_new_tokens=2400,
+              seed=seed,
+          )
+      elif backend in ("Ollama", "llama.cpp"):
+          state = {
+              "creativity": "Creative",
+              "prompt_length": "Detailed",
+              "seed": seed,
+              "unload_after": bool(config.get("unload_after", True)),
+              "timeout": timeout,
+          }
+          items = [(image_label, image)] if image is not None else []
+          if backend == "Ollama":
+              _local_endpoint(endpoint, "http://127.0.0.1:11434")
+              text = _ollama_generate(endpoint, model_id, system, user, items, state)
+          else:
+              _local_endpoint(endpoint, "http://127.0.0.1:8080")
+              text = _llamacpp_generate(endpoint, model_id, system, user, items, state)
+      elif backend == "Gemini API":
+          text = _gemini_generate(config.get("api_key"), model_id, system, user, image, timeout)
+      elif backend == "Vertex AI":
+          text = _vertex_generate(config.get("vertex_json_folder"), model_id, system, user, image, timeout)
+      else:
+          text = _grok_generate(config.get("api_key"), model_id, system, user, image, timeout)
+      return text
 
-    poses = _extract_poses(text, count, strict=True)
+    # Les modeles "reasoning" (Grok 4.x reasoning, Gemini thinking) rendent
+    # parfois moins de poses que demande. Au lieu d'echouer tout de suite, on
+    # redemande UNIQUEMENT les poses manquantes (2 relances max), en donnant
+    # celles deja obtenues pour qu'il n'en repete aucune. Toujours aucune pose
+    # generique ajoutee : si ca manque encore apres les relances, erreur.
+    text = _call(user)
+    poses = _extract_poses(text, count, strict=False, pad=False)
+    for attempt in range(2):
+        if len(poses) >= count:
+            break
+        missing = count - len(poses)
+        print(f"[Onyx Pose Prep] model returned {len(poses)}/{count} poses - "
+              f"asking for the {missing} missing (retry {attempt + 1}/2)")
+        topup = (
+            user + "\n\nThese poses are ALREADY USED - do not repeat or paraphrase any of them:\n"
+            + "\n".join(f"- {p}" for p in poses)
+            + f"\n\nReturn strict JSON {{\"poses\": [...]}} with exactly {missing} NEW, different "
+              "pose directions."
+        )
+        extra = _extract_poses(_call(topup), missing, strict=False, pad=False)
+        for p in extra:
+            if p not in poses:
+                poses.append(p)
+    poses = _extract_poses(json.dumps({"poses": poses[:count]}), count, strict=True)
     return {
         "poses": poses,
         "pose_list": "\n".join(poses),
