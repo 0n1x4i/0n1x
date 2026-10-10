@@ -102,7 +102,10 @@ class OnyxKrea2PoseListPrep:
         # Cle : celle saisie dans le node (poussee en memoire par l'UI), sinon
         # GEMINI_API_KEY / XAI_API_KEY dans l'environnement.
         from .pose_generator import RUNTIME_KEYS
-        request["api_key"] = RUNTIME_KEYS.get(request.get("backend"), "")
+        # Onyx serverless sends the member's key inside the config (no UI there): it wins
+        # over the key pushed by the node UI, which stays the desktop path.
+        request["api_key"] = (str(config.get("api_key") or "").strip()
+                              or RUNTIME_KEYS.get(request.get("backend"), ""))
         print(f"[Onyx Pose List Prep] One-step: generating {request.get('count', 4)} poses "
               f"({mode}, {request.get('backend')})…")
         result = generate_pose_list(request, image)
