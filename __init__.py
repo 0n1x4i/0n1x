@@ -72,6 +72,9 @@ from .nodes.onyx_resolution_mp import OnyxResolutionMP
 from .nodes.onyx_scale_long_side import OnyxScaleLongSide
 from .nodes.onyx_h3_frame_snap import OnyxH3FrameSnap
 from .nodes.onyx_audio_switch import OnyxAudioSwitch
+from .nodes.onyx_lora_trigger import OnyxLoraTrigger
+from .nodes.onyx_lora_trigger_stack import OnyxLoraTriggerStack
+from .nodes.onyx_face_mask import OnyxFaceMask
 from .nodes.h3_context_ir import OnyxH3ContextIR
 from .nodes.onyx_group_toggle import OnyxGroupToggle
 from .nodes.onyx_image_blur_batched import OnyxImageBlurBatched, OnyxImageCompositeMaskedBatched
@@ -193,6 +196,9 @@ NODE_CLASS_MAPPINGS["OnyxVideoChainJoin"] = OnyxVideoChainJoin
 NODE_CLASS_MAPPINGS["OnyxVideoChainPrepare"] = OnyxVideoChainPrepare
 NODE_CLASS_MAPPINGS["OnyxVideoChainCommit"] = OnyxVideoChainCommit
 NODE_CLASS_MAPPINGS["OnyxAudioSwitch"] = OnyxAudioSwitch
+NODE_CLASS_MAPPINGS["OnyxLoraTrigger"] = OnyxLoraTrigger
+NODE_CLASS_MAPPINGS["OnyxLoraTriggerStack"] = OnyxLoraTriggerStack
+NODE_CLASS_MAPPINGS["OnyxFaceMask"] = OnyxFaceMask
 NODE_CLASS_MAPPINGS["OnyxH3ContextIR"] = OnyxH3ContextIR
 NODE_CLASS_MAPPINGS["OnyxGroupToggle"] = OnyxGroupToggle
 NODE_CLASS_MAPPINGS["OnyxSaveImageNoMetadataNode"] = OnyxSaveImageNoMetadataNode
@@ -245,6 +251,9 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainJoin"] = "Onyx Video Chain — Join"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainPrepare"] = "Onyx Video Chain — Prepare"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainCommit"] = "Onyx Video Chain — Commit"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxAudioSwitch"] = "Onyx Audio Switch"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxLoraTrigger"] = "Onyx LoRA Trigger"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxLoraTriggerStack"] = "Onyx LoRA Trigger Stack"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxFaceMask"] = "Onyx Face Mask"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3ContextIR"] = "H3 Context-IR (Gemini)"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxGroupToggle"] = "Onyx Group Toggle"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxSaveImageNoMetadataNode"] = "Onyx Save Image No Metadata"
@@ -277,3 +286,15 @@ except Exception as _e:
     print(f"[Onyx] ❌ Endless Sampler failed: {_e}")
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
+
+# ── Onyx licence notice (console, once per start) ────────────────────────────
+try:
+    print("\n" + "=" * 64 +
+          "\n  Onyx — proprietary software, licensed and not sold."
+          "\n  Copyright (c) 2026 ONYX-AI. All rights reserved."
+          "\n  Use is governed by LICENSE.txt. Contact: onyxskool@gmail.com Copying, resale, extraction of the"
+          "\n  protected code or bypassing the licence verification is prohibited."
+          "\n" + "=" * 64 + "\n")
+except Exception:
+    pass
