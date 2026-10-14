@@ -105,12 +105,16 @@ TARGET_SEEDANCE = "Seedance"
 TARGET_SEEDANCE_V2 = "Seedance v2"
 TARGET_H3_ENDLESS = "MiniMax H3 Endless"
 TARGET_SEEDANCE_SEVERED = "Seedance Severed"
-TARGET_SEEDANCE_RECREATE_2 = "Seedance 2 Recreate"
-TARGET_SEEDANCE_RECREATE_25 = "Seedance 2.5 Recreate"
-TARGET_SEEDANCE_RECREATE_2_OUTFIT = "Seedance 2 Recreate (keep outfit from ref)"
-TARGET_SEEDANCE_RECREATE_25_OUTFIT = "Seedance 2.5 Recreate (keep outfit from ref)"
-_RECREATE_ALL = (TARGET_SEEDANCE_RECREATE_2, TARGET_SEEDANCE_RECREATE_25,
-                 TARGET_SEEDANCE_RECREATE_2_OUTFIT, TARGET_SEEDANCE_RECREATE_25_OUTFIT)
+# Seedance Recreate: 3 body-physics registers x 2 Seedance versions x (outfit from the video | from the reference).
+_RECREATE_ALL = tuple(
+    f"Seedance {_v} Recreate ({_k} jiggle" + (", outfit from ref)" if _o else ")")
+    for _k in ("extreme", "strong", "normal")
+    for _v in ("2", "2.5")
+    for _o in (False, True)
+)
+# Second pass: proofreads the JSON of a first Recreate pass (wired / pasted in grounding_override) against the video.
+TARGET_RECREATE_VERIFY = "Seedance Recreate Second pass (verify JSON)"
+_RECREATE_ALL = _RECREATE_ALL + (TARGET_RECREATE_VERIFY,)
 _TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2, TARGET_H3_ENDLESS, TARGET_SEEDANCE_SEVERED,
             *_RECREATE_ALL]
 
@@ -218,16 +222,20 @@ class OnyxH3ContextIR:
                                "soundtrack is put back afterwards). Wire image_1 = three-view face sheet "
                                "(front / three-quarter / profile) and image_2 = body + outfit sheet with "
                                "the head masked, plus the video (color-inverted copy recommended).\n"
-                               "Seedance 2 Recreate / Seedance 2.5 Recreate: ONE pass. The model watches "
+                               "Seedance Recreate Second pass (verify JSON): proofreads a first-pass Recreate JSON (in "
+                               "grounding_override) against the video and returns the corrected JSON; "
+                               "no reference images needed.\n"
+                               "Seedance 2 / 2.5 Recreate (12 modes): ONE pass. The model watches "
                                "the video itself (sent natively at video_analysis_fps on Gemini / Vertex) "
                                "and writes the finished Seedance JSON that recreates it with another "
                                "person: timing, dialogue, camera, light. Wire video (+ video_audio), "
                                "image_1 = the new person's head (face + hair), image_2 = body "
                                "(a single image is used for both). intent = optional extra notes; "
                                "duration_seconds is ignored (the real video length is used). 2 = compact "
-                               "prompt, 15 s parts; 2.5 = full prompt, 30 s parts. \"(keep outfit from ref)\" "
-                               "variants: the subject wears the outfit of image_2 (image_1 if single) "
-                               "instead of the source video's outfit. Best on Gemini 3.1 Pro "
+                               "prompt, 15 s parts; 2.5 = full prompt, 30 s parts. Jiggle register: extreme = maximum "
+                               "soft-tissue physics, strong = pronounced but believable, normal = real "
+                               "intensity, no push. \"outfit from ref\" = the subject wears the outfit of "
+                               "image_2 (image_1 if single) instead of the source video's outfit. Best on Gemini 3.1 Pro "
                                "with provider Gemini or Vertex.\n\n"
                                "The two are not interchangeable. H3's guide asks for an "
                                "exhaustive description; ByteDance's says a long paragraph fights "
@@ -323,7 +331,12 @@ class OnyxH3ContextIR:
                 "grounding_override": ("STRING", {
                     "multiline": True, "default": "",
                     "tooltip": "Paste a corrected grounding JSON to skip pass A entirely and "
-                               "recompile without another vision call.",
+                               "recompile without another vision call.\n\n"
+                               "Seedance Recreate Second pass (verify JSON): put the JSON produced by "
+                               "the first Recreate pass HERE (paste it, or wire the first node's text "
+                               "output into this widget). It is proofread against the video; the same "
+                               "video / video_audio / provider / model must be connected. Reference "
+                               "images and intent are not needed (intent = optional notes).",
                 }),
                 "window_start_seconds": ("FLOAT", {
                     "default": 0.0, "min": 0.0, "max": 3600.0, "step": 0.001,
@@ -427,7 +440,7 @@ class OnyxH3ContextIR:
                                "gestures, hair flips and lip movement; 8 is a good balance, 12-24 for "
                                "very fast action (more tokens). Gemini / Vertex only: Grok and Kie "
                                "receive up to 40 timestamped frames instead."}),
-                # Last widget, on purpose (positional values). The frontend adds the
+                # Positional values: new widgets go AFTER this one (remove_observations, gemini_thinking_mode). The frontend adds the
                 # fixed / randomize / increment control to any INT named "seed".
                 "seed": ("INT", {
                     "default": 0, "min": 0, "max": 0xffffffffffffffff,
@@ -437,6 +450,20 @@ class OnyxH3ContextIR:
                                "different prompt on every run, or 'fixed' to compare settings "
                                "with the same seed.\n0 = legacy behaviour: results are cached per "
                                "media, nothing is sent to the API."}),
+                # Added AFTER seed so every saved workflow keeps its values (positional).
+                "remove_observations": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "remove _observations", "label_off": "keep _observations",
+                    "tooltip": "Seedance Recreate modes write an \"_observations\" log first (one line per "
+                               "event seen, with its timestamp). It is for YOU to check what the model saw; "
+                               "Seedance must not receive it.\nOn: the key is removed from the JSON before it "
+                               "leaves the node. Off: kept (read it, then delete it yourself)."}),
+                "gemini_thinking_mode": (["high", "medium", "low", "minimal"], {
+                    "default": "high",
+                    "tooltip": "Gemini 3 thinkingLevel (Gemini and Vertex providers; ignored by other "
+                               "providers and by models older than Gemini 3). high = deepest analysis. A "
+                               "model that does not accept the chosen level is retried with its own "
+                               "default."}),
             },
         }
 
@@ -463,7 +490,8 @@ class OnyxH3ContextIR:
             grounding_override="", window_start_seconds=0.0,
             pinned_lead_seconds=0.0, transcribe_speech=False,
             motion_from_video_only=False, keyframes_match_model=False,
-            extra_prompt_rules=False, kie_api_key="", video_analysis_fps=8.0, seed=0):
+            extra_prompt_rules=False, kie_api_key="", video_analysis_fps=8.0, seed=0,
+            remove_observations=True, gemini_thinking_mode="high"):
         ensure_profile_ready()
 
         guides_text = _load_guides(guide_folder)
@@ -475,6 +503,10 @@ class OnyxH3ContextIR:
             kie["seed"] = seed                   # new core only; never sent while the seed is 0
         if target_model in _RECREATE_ALL:
             kie["video_analysis_fps"] = video_analysis_fps   # new core only; other modes never send it
+            if remove_observations:
+                kie["remove_observations"] = True            # new core only
+        if gemini_thinking_mode != "high":
+            kie["gemini_thinking_mode"] = gemini_thinking_mode   # new core only; "high" = the model's own default
         return ns["run_impl"](
             OnyxH3ContextIR._grounding_cache, guides_text,
             intent, duration_seconds, aspect_ratio, target_model,
