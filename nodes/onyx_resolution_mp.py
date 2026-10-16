@@ -23,6 +23,14 @@ widget showing 0.98 while the model receives 1.04 is worse than no widget.
 
 import math
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('utils_bundle', 'onyx_resolution_mp', __package__)
+    return ns
+
+
 
 _ASPECT_PRESETS = {
     "from image (input)": None,
@@ -39,71 +47,14 @@ _ASPECT_PRESETS = {
 }
 
 
-def _nearest_ratio_label(ar: float) -> str:
-    """Closest named ratio to `ar`, compared in log space.
-
-    Log space, not a plain difference: 21:9 and 16:9 sit 0.55 apart in raw value
-    while 3:4 and 2:3 sit 0.08 apart, so a linear metric would treat the second
-    pair as nearly identical and always favour the wide end of the list.
-    """
-    best = None
-    for label, wh in _ASPECT_PRESETS.items():
-        if wh is None:
-            continue
-        cand = wh[0] / wh[1]
-        err = abs(math.log(cand / ar))
-        if best is None or err < best[0]:
-            best = (err, label, cand)
-    return best[1]
+def _nearest_ratio_label(*args, **kwargs):
+    return _onyx_core()['_nearest_ratio_label'](*args, **kwargs)
 
 
-def _snap_to_budget(megapixels: float, ar: float, multiple: int,
-                    min_side: int = 64, max_side: int = 16384) -> tuple:
-    """Best (width, height) on the `multiple` grid for a MP budget and ratio.
 
-    Searches candidate heights around the ideal rather than rounding once. For
-    each candidate height the matching width is derived from the ratio and
-    snapped, then the pair is scored on how far it lands from the requested
-    megapixels, with the aspect-ratio error as a tie-breaker.
+def _snap_to_budget(*args, **kwargs):
+    return _onyx_core()['_snap_to_budget'](*args, **kwargs)
 
-    Megapixel accuracy is weighted far above ratio accuracy on purpose: the MP
-    budget is what governs VRAM and how close you stay to the model's training
-    regime, whereas a fraction of a percent of ratio drift is invisible.
-    """
-    target_px = max(1.0, megapixels * 1_000_000.0)
-    ideal_h = math.sqrt(target_px / ar)
-
-    def snap(v):
-        return max(multiple, int(round(v / multiple)) * multiple)
-
-    best = None
-    base_h = snap(ideal_h)
-    # Both sides are searched, not just the height. Deriving a single width per
-    # height (w = snap(h * ar)) looks natural but leaves the best cells of the
-    # grid unvisited: at 0.20 MP in 16:9 it can only reach 576x320, which is 7.8%
-    # short of budget, while 608x320 sits within 2.7% for a ratio error nobody
-    # sees. On a coarse grid the exact ratio is a luxury; the pixel budget is not.
-    for kh in range(-3, 4):
-        h = base_h + kh * multiple
-        if h < min_side or h > max_side:
-            continue
-        base_w = snap(h * ar)
-        for kw in range(-3, 4):
-            w = base_w + kw * multiple
-            if w < min_side or w > max_side:
-                continue
-            px = w * h
-            mp_err = abs(px - target_px) / target_px
-            ar_err = abs((w / h) - ar) / ar
-            score = mp_err + 0.25 * ar_err
-            if best is None or score < best[0]:
-                best = (score, w, h)
-
-    if best is None:  # ratio so extreme that nothing fits the bounds
-        h = max(min_side, min(max_side, snap(ideal_h)))
-        w = max(min_side, min(max_side, snap(h * ar)))
-        return w, h
-    return best[1], best[2]
 
 
 class OnyxResolutionMP:
@@ -155,43 +106,9 @@ class OnyxResolutionMP:
         "valid multiple. The resolution actually produced is printed to the console."
     )
 
-    def compute(self, megapixels, aspect_ratio, multiple_of, image=None):
-        ensure_profile_ready()
-        preset = _ASPECT_PRESETS.get(aspect_ratio)
+    def compute(self, *args, **kwargs):
+        return _onyx_core()['OnyxResolutionMP'].compute(self, *args, **kwargs)
 
-        if preset is None:
-            if image is None:
-                raise RuntimeError(
-                    "[Onyx Resolution] 'from image (input)' is selected but no image is "
-                    "connected.\n-> Connect an image, or pick a fixed ratio."
-                )
-            # ComfyUI IMAGE is [B, H, W, C]
-            src_h, src_w = int(image.shape[1]), int(image.shape[2])
-            if src_h <= 0 or src_w <= 0:
-                raise RuntimeError(f"[Onyx Resolution] Invalid image dimensions: {src_w}x{src_h}")
-            ar = src_w / src_h
-            ar_label = f"{src_w}x{src_h}"
-            ratio_out = _nearest_ratio_label(ar)
-        else:
-            ar = preset[0] / preset[1]
-            ar_label = aspect_ratio
-            ratio_out = aspect_ratio
-
-        width, height = _snap_to_budget(float(megapixels), ar, int(multiple_of))
-
-        # Toujours imprimé, même sans sortie dédiée : snapper sur la grille déplace
-        # le budget réel, et une valeur de 0.98 affichée dans le widget pendant que
-        # le modèle reçoit 1.03 se remarque tard, sur la qualité, sans rien à lire.
-        actual_mp = (width * height) / 1_000_000.0
-        drift = (actual_mp - megapixels) / megapixels * 100.0
-        print(
-            f"📐 [Onyx Resolution] {ar_label} -> {width}x{height} | "
-            f"{actual_mp:.3f} MP ({drift:+.1f}% vs {megapixels:.2f} requested) | "
-            f"ratio {width / height:.4f} (target {ar:.4f}) | /{multiple_of} | "
-            f"aspect_ratio out: {ratio_out}"
-        )
-
-        return (width, height, ratio_out)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

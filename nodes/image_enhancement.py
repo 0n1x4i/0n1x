@@ -21,6 +21,14 @@ import numpy as np
 # ─────────────────────────────────────────────────────────────────────────────
 
 from .onyx_render_profile import ensure_profile_ready
+
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('h3_tools_bundle', 'image_enhancement', __package__)
+    return ns
+
 _MODELS = ["Nano Banana Pro", "Nano Banana 2.1", "Nano Banana 2"]
 
 # SOFT mode: input ratio -> ratio we crop the image to before generation
@@ -73,57 +81,24 @@ _ENHANCE_PROMPT = (
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _detect_soft_ratio(h, w):
-    """Return the closest accepted ratio string, or None if not close enough."""
-    r = w / h
-    best, best_diff = None, float("inf")
-    for name, val in _RATIO_VALUES.items():
-        diff = abs(r - val)
-        if diff < best_diff:
-            best_diff = diff
-            best = name
-    return best if best_diff < 0.08 else None
+def _detect_soft_ratio(*args, **kwargs):
+    return _onyx_core()['_detect_soft_ratio'](*args, **kwargs)
 
 
-def _center_crop_to_ratio(tensor, ratio_str):
-    """Center-crop [1, H, W, C] tensor to the given 'W:H' ratio string."""
-    num, den = map(int, ratio_str.split(":"))
-    target_r = num / den          # width / height
-    _, H, W, _ = tensor.shape
-    current_r = W / H
-    if current_r > target_r:     # too wide -> crop width
-        new_W = int(H * target_r)
-        off = (W - new_W) // 2
-        return tensor[:, :, off:off + new_W, :]
-    elif current_r < target_r:   # too tall -> crop height
-        new_H = int(W / target_r)
-        off = (H - new_H) // 2
-        return tensor[:, off:off + new_H, :, :]
-    return tensor
+
+def _center_crop_to_ratio(*args, **kwargs):
+    return _onyx_core()['_center_crop_to_ratio'](*args, **kwargs)
 
 
-def _tiny_crop(tensor, factor=0.99):
-    """Shrink both dimensions by factor via center crop to force pixel mismatch."""
-    _, H, W, _ = tensor.shape
-    new_H = int(H * factor)
-    new_W = int(W * factor)
-    oh = (H - new_H) // 2
-    ow = (W - new_W) // 2
-    return tensor[:, oh:oh + new_H, ow:ow + new_W, :]
+
+def _tiny_crop(*args, **kwargs):
+    return _onyx_core()['_tiny_crop'](*args, **kwargs)
 
 
-def _extract_tensors(result):
-    imgs = []
-    t = result[0]
-    if t is None or t.shape[-1] != 3:
-        return imgs
-    if t.dim() == 4:
-        for b in range(t.shape[0]):
-            if float(t[b].max()) > 0.01:
-                imgs.append(t[b])
-    elif float(t.max()) > 0.01:
-        imgs.append(t)
-    return imgs
+
+def _extract_tensors(*args, **kwargs):
+    return _onyx_core()['_extract_tensors'](*args, **kwargs)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,128 +156,5 @@ class OnyxImageEnhancementNode:
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
-    def run(
-        self,
-        image,
-        mode               = "Soft",
-        model              = "Nano Banana Pro",
-        provider           = "GOOGLE",
-        resolution         = "2K",
-        batch_size         = 1,
-        prompt             = "",
-        gemini_api_key     = "",
-        wavespeed_api_key  = "",
-        kie_api_key        = "",
-        fal_api_key        = "",
-        vertex_json_folder = "",
-    ):
-        ensure_profile_ready()
-        from .nano_banana_aio import OnyxNanoBananaAIO
-        aio = OnyxNanoBananaAIO()
-
-        batch_size = max(1, min(batch_size, 10))
-
-        extra        = prompt.strip()
-        final_prompt = (_ENHANCE_PROMPT + "\n\n" + extra) if extra else _ENHANCE_PROMPT
-
-        _, H, W, _ = image.shape
-
-        shared = dict(
-            provider                 = provider,
-            negative_prompt          = "",
-            image_size               = resolution,
-            gemini_api_key           = gemini_api_key,
-            wavespeed_api_key        = wavespeed_api_key,
-            kie_api_key              = kie_api_key,
-            fal_api_key              = fal_api_key,
-            vertex_json_folder       = vertex_json_folder,
-            disable_safety_threshold = True,
-            model                    = model,
-            batch_size               = batch_size,
-            use_search               = False,
-            system_instructions      = None,
-            temperature              = 1.0,
-            top_p                    = 0.95,
-            fal_safety_tolerance     = "6",
-            fal_enable_web_search    = False,
-            image_2                  = None,
-            video_mode_enabled       = False,
-            face_swap_enabled        = False,
-            breast_refiner_enabled   = False,
-            low_neck_enabled         = False,
-            face_expression          = "Neutral",
-            gpt2_image_quality       = "high",
-        )
-
-        # ── SOFT mode ─────────────────────────────────────────────────────────
-        if mode == "Soft":
-            ratio_str = _detect_soft_ratio(H, W)
-            if ratio_str is None:
-                raise ValueError(
-                    f"[Enhancement] Unsupported input ratio ({W}x{H}). "
-                    "Accepted ratios: 3:4, 9:16, 4:5, 1:1."
-                )
-            crop_ratio = _SOFT_CROP_MAP[ratio_str]
-            print(f"[Enhancement] Soft | detected={ratio_str} | crop_to={crop_ratio} | generate_as={ratio_str}")
-
-            # Crop to mismatched ratio, then apply 1% pixel crop
-            prepped = _center_crop_to_ratio(image, crop_ratio)
-            prepped = _tiny_crop(prepped, 0.99)
-            print(f"[Enhancement] Prepped shape: {prepped.shape}")
-
-            result = aio.generate_unified(
-                prompt       = final_prompt,
-                aspect_ratio = ratio_str,
-                image_1      = prepped,
-                **shared,
-            )
-            imgs = _extract_tensors(result)
-
-        # ── HARD mode ─────────────────────────────────────────────────────────
-        else:
-            original_ar = OnyxNanoBananaAIO._detect_aspect_ratio(image)
-
-            if W > H:
-                orientation = "landscape"
-                first_ar    = "9:16"
-            elif W == H:
-                orientation = "square"
-                first_ar    = "16:9"
-                original_ar = "1:1"
-            else:
-                orientation = "portrait"
-                first_ar    = "16:9"
-
-            print(f"[Enhancement] Hard | orientation={orientation} | pass1={first_ar} | pass2={original_ar}")
-
-            # Pass 1: generate in opposite ratio
-            result1 = aio.generate_unified(
-                prompt       = final_prompt,
-                aspect_ratio = first_ar,
-                image_1      = image,
-                **shared,
-            )
-            pass1 = _extract_tensors(result1)
-            if not pass1:
-                raise RuntimeError("[Enhancement] Hard mode pass 1 produced no images.")
-
-            intermediate = torch.stack(pass1, dim=0)
-            print(f"[Enhancement] Pass 1 done ({len(pass1)} image(s)). Starting pass 2...")
-
-            # Pass 2: generate back in original ratio
-            result2 = aio.generate_unified(
-                prompt       = final_prompt,
-                aspect_ratio = original_ar,
-                image_1      = intermediate,
-                **shared,
-            )
-            imgs = _extract_tensors(result2)
-
-        # ── Output ────────────────────────────────────────────────────────────
-        if not imgs:
-            print("[Enhancement] No images generated.")
-            return (torch.zeros(1, 64, 64, 3),)
-
-        batch = torch.stack(imgs, dim=0)
-        print(f"[Enhancement] Done — {len(imgs)} image(s).")
-        return (batch,)
+    def run(self, *args, **kwargs):
+        return _onyx_core()['OnyxImageEnhancementNode'].run(self, *args, **kwargs)

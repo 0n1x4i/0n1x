@@ -26,93 +26,41 @@ import torch.nn.functional as F
 # correct sur un clip court, mais "you tried to allocate 46581350400 bytes"
 # des qu'un batch un peu long rencontre un rayon de flou/dilate un peu large.
 from .onyx_render_profile import ensure_profile_ready
+
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('h3_tools_bundle', 'onyx_temporal_mask_smooth', __package__)
+    return ns
+
 _SAFE_ELEMENTS = int((2 ** 31) * 0.90)
 _TARGET_BYTES_PER_SLICE = 1024 ** 3  # 1 GiB par tranche
 
 
-def _auto_slice_size(total: int, h: int, w: int, radius: int, frames_per_slice: int = 0) -> int:
-    if frames_per_slice > 0:
-        return max(1, min(frames_per_slice, total))
-    padded = (h + 2 * radius) * (w + 2 * radius)
-    by_elements = _SAFE_ELEMENTS // max(1, padded)
-    by_bytes = _TARGET_BYTES_PER_SLICE // max(1, padded * 4)
-    return max(1, min(total, by_elements, by_bytes))
+def _auto_slice_size(*args, **kwargs):
+    return _onyx_core()['_auto_slice_size'](*args, **kwargs)
 
 
-def _temporal_median(masks: torch.Tensor, radius: int, chunk_size: int = 32) -> torch.Tensor:
-    """
-    Median filter along the frame axis. masks: [B, H, W].
-    Edges are handled by clamping indices, so the first and last frames
-    replicate rather than fade out.
-    Processed in chunks - a full [B, window, H, W] stack blows up VRAM on long clips.
-    """
-    if radius < 1:
-        return masks
 
-    frame_count = masks.shape[0]
-    window = torch.arange(-radius, radius + 1, device=masks.device)
-    output = torch.empty_like(masks)
-
-    for start in range(0, frame_count, chunk_size):
-        end = min(start + chunk_size, frame_count)
-        centers = torch.arange(start, end, device=masks.device).unsqueeze(1)
-        indices = (centers + window.unsqueeze(0)).clamp(0, frame_count - 1)
-        stack = masks[indices]                      # [chunk, window, H, W]
-        output[start:end] = stack.median(dim=1).values
-
-    return output
+def _temporal_median(*args, **kwargs):
+    return _onyx_core()['_temporal_median'](*args, **kwargs)
 
 
-def _dilate(masks: torch.Tensor, radius: int, frames_per_slice: int = 0) -> torch.Tensor:
-    """masks: [B, 1, H, W]. Chunked along B — one max_pool2d call over the
-    whole batch is what produced the 46 GB allocation on a long clip."""
-    if radius < 1:
-        return masks
-    size = 2 * radius + 1
-    total, _, h, w = masks.shape
-    slice_size = _auto_slice_size(total, h, w, radius, frames_per_slice)
-    if slice_size >= total:
-        return F.max_pool2d(masks, kernel_size=size, stride=1, padding=radius)
-    out = []
-    for start in range(0, total, slice_size):
-        part = masks[start:start + slice_size]
-        out.append(F.max_pool2d(part, kernel_size=size, stride=1, padding=radius))
-    return torch.cat(out, dim=0)
+
+def _dilate(*args, **kwargs):
+    return _onyx_core()['_dilate'](*args, **kwargs)
 
 
-def _erode(masks: torch.Tensor, radius: int, frames_per_slice: int = 0) -> torch.Tensor:
-    if radius < 1:
-        return masks
-    return -_dilate(-masks, radius, frames_per_slice)
+
+def _erode(*args, **kwargs):
+    return _onyx_core()['_erode'](*args, **kwargs)
 
 
-def _gaussian_blur(masks: torch.Tensor, radius: int, frames_per_slice: int = 0) -> torch.Tensor:
-    """Separable gaussian. sigma derived from radius so one knob controls both.
-    Chunked along B for the same reason as _dilate."""
-    if radius < 1:
-        return masks
 
-    size = 2 * radius + 1
-    sigma = radius / 2.0
-    coords = torch.arange(size, dtype=masks.dtype, device=masks.device) - radius
-    kernel = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
-    kernel = kernel / kernel.sum()
-    kh = kernel.view(1, 1, 1, size)
-    kv = kernel.view(1, 1, size, 1)
+def _gaussian_blur(*args, **kwargs):
+    return _onyx_core()['_gaussian_blur'](*args, **kwargs)
 
-    def _pass(chunk):
-        blurred = F.conv2d(F.pad(chunk, (radius, radius, 0, 0), mode="replicate"), kh)
-        blurred = F.conv2d(F.pad(blurred, (0, 0, radius, radius), mode="replicate"), kv)
-        return blurred
-
-    total, _, h, w = masks.shape
-    slice_size = _auto_slice_size(total, h, w, radius, frames_per_slice)
-    if slice_size >= total:
-        return _pass(masks)
-    out = []
-    for start in range(0, total, slice_size):
-        out.append(_pass(masks[start:start + slice_size]))
-    return torch.cat(out, dim=0)
 
 
 class OnyxTemporalMaskSmooth:
@@ -156,49 +104,9 @@ class OnyxTemporalMaskSmooth:
                    "closing, dilate, gaussian blur — in that order. Processed in memory-bounded "
                    "chunks, so long clips don't blow up RAM/VRAM.")
 
-    def process(self, masks, temporal_radius, closing_radius, dilate_radius, blur_radius,
-                threshold, frames_per_slice=0, opening_radius=2):
-        ensure_profile_ready()
-        if masks.dim() == 2:
-            masks = masks.unsqueeze(0)
+    def process(self, *args, **kwargs):
+        return _onyx_core()['OnyxTemporalMaskSmooth'].process(self, *args, **kwargs)
 
-        total, h, w = int(masks.shape[0]), int(masks.shape[1]), int(masks.shape[2])
-        widest_radius = max(closing_radius, dilate_radius, blur_radius, opening_radius, 1)
-        print(f"[Aiorbust Temporal Mask Smooth] {total} frame(s) at {w}x{h} — "
-              f"processing dilate/erode/blur in memory-bounded chunks "
-              f"({'auto' if frames_per_slice <= 0 else 'manual=' + str(frames_per_slice)}, "
-              f"widest radius {widest_radius}).")
-        if temporal_radius >= 3:
-            print(f"   ↳ temporal_radius={temporal_radius} melange {2 * temporal_radius + 1} "
-                  f"frames par position : sur un sujet qui bouge vite, ca peut donner un effet "
-                  f"de mouvement lisse/interpole. Baisse-le (1, voire 0) si le masque semble "
-                  f"'glisser' entre les positions plutot que suivre le mouvement reel.")
-
-        working = masks.float()
-
-        # Binarize first. SAM3 confidence gradients make the median unstable,
-        # and morphology on soft values smears the boundary.
-        working = (working > threshold).float()
-
-        working = _temporal_median(working, temporal_radius)
-
-        # Opening = erode puis dilate, AVANT le closing. Un blob isole plus
-        # petit que opening_radius disparait a l'erosion et ne revient pas au
-        # dilate : c'est ce qui manquait pour nettoyer les rares faux positifs
-        # de detection SAM3 que la mediane temporelle seule ne filtre pas.
-        # Le closing (dilate puis erode, ci-dessous) fait l'inverse : il
-        # reconnecte/comble, il ne supprime jamais un blob isole.
-        working = _dilate(_erode(working.unsqueeze(1), opening_radius, frames_per_slice),
-                           opening_radius, frames_per_slice).squeeze(1)
-
-        # Closing = dilate then erode. Fills holes without growing the shape.
-        working = _erode(_dilate(working.unsqueeze(1), closing_radius, frames_per_slice),
-                          closing_radius, frames_per_slice).squeeze(1)
-
-        working = _dilate(working.unsqueeze(1), dilate_radius, frames_per_slice).squeeze(1)
-        working = _gaussian_blur(working.unsqueeze(1), blur_radius, frames_per_slice).squeeze(1)
-
-        return (working.clamp(0.0, 1.0),)
 
 
 NODE_CLASS_MAPPINGS = {"OnyxTemporalMaskSmooth": OnyxTemporalMaskSmooth}

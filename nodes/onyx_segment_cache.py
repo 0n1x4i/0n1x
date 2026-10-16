@@ -61,6 +61,14 @@ import time
 import numpy as np
 import torch
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('utils_bundle', 'onyx_segment_cache', __package__)
+    return ns
+
+
 
 _HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CACHE_ROOT = os.path.join(_HERE, "_cache", "segments")
@@ -77,32 +85,19 @@ _MODES = {
 }
 
 
-def _safe(name: str, fallback: str) -> str:
-    out = "".join(c for c in str(name or "") if c.isalnum() or c in "-_")
-    return out or fallback
+def _safe(*args, **kwargs):
+    return _onyx_core()['_safe'](*args, **kwargs)
 
 
-def _digest_image(tensor) -> str:
-    """Short digest of an IMAGE batch, from a strided subsample.
 
-    Strided on purpose: two different renders differ everywhere, not in one
-    pixel, so reading every value to tell them apart would cost seconds per
-    segment for no extra certainty. Shape is folded in, which is what catches a
-    resolution or length change even if the sampled pixels happen to match.
-    """
-    if tensor is None:
-        return ""
-    h = hashlib.sha256()
-    h.update(str(tuple(tensor.shape)).encode())
-    sub = tensor[::4, ::16, ::16, :].detach().cpu().contiguous()
-    h.update(sub.numpy().astype(np.float32).tobytes())
-    return h.hexdigest()[:16]
+def _digest_image(*args, **kwargs):
+    return _onyx_core()['_digest_image'](*args, **kwargs)
 
 
-def _digest_text(text) -> str:
-    if not text:
-        return ""
-    return hashlib.sha256(str(text).encode("utf-8")).hexdigest()[:16]
+
+def _digest_text(*args, **kwargs):
+    return _onyx_core()['_digest_text'](*args, **kwargs)
+
 
 
 class OnyxSegmentCache:
@@ -172,38 +167,24 @@ class OnyxSegmentCache:
     _LLM_TEXT_CHARS = 1500
 
     @classmethod
-    def _key(cls, session, segment_index, fingerprint_image=None, fingerprint_text=None,
-             cache_version=1):
-        # Le filtre est ICI et nulle part ailleurs. Le mettre dans run() laissait
-        # check_lazy_status calculer une clef differente de celle qui avait ete
-        # ecrite - donc un miss permanent, exactement le bug qu'il corrige.
-        if fingerprint_text and len(str(fingerprint_text)) > cls._LLM_TEXT_CHARS:
-            fingerprint_text = None
-        parts = [
-            _safe(session, "chain"),
-            f"seg{int(segment_index or 0):02d}",
-            f"v{int(cache_version or 1)}",
-            _digest_image(fingerprint_image),
-            _digest_text(fingerprint_text),
-        ]
-        return "_".join(p for p in parts if p)
+    def _key(cls, *args, **kwargs):
+        return _onyx_core()['OnyxSegmentCache']._key.__func__(cls, *args, **kwargs)
+
 
     @classmethod
-    def _dir(cls, session):
-        return os.path.join(_CACHE_ROOT, _safe(session, "chain"))
+    def _dir(cls, *args, **kwargs):
+        return _onyx_core()['OnyxSegmentCache']._dir.__func__(cls, *args, **kwargs)
+
 
     @classmethod
-    def _paths(cls, session, key):
-        base = os.path.join(cls._dir(session), key)
-        return base + ".meta.json", base + ".images.npy", base + ".audio.npy"
+    def _paths(cls, *args, **kwargs):
+        return _onyx_core()['OnyxSegmentCache']._paths.__func__(cls, *args, **kwargs)
+
 
     @classmethod
-    def _hit(cls, session, key):
-        meta_p, img_p, _ = cls._paths(session, key)
-        # Le .meta.json est ecrit EN DERNIER, apres les tableaux : sa presence
-        # est donc la preuve que l'ecriture est allee jusqu'au bout. Une coupure
-        # de courant en plein milieu laisse un .npy orphelin, jamais un faux hit.
-        return os.path.isfile(meta_p) and os.path.isfile(img_p)
+    def _hit(cls, *args, **kwargs):
+        return _onyx_core()['OnyxSegmentCache']._hit.__func__(cls, *args, **kwargs)
+
 
     # ── evaluation paresseuse ────────────────────────────────────────────────
 
@@ -232,151 +213,24 @@ class OnyxSegmentCache:
         return wanted
 
     @classmethod
-    def _explain_miss(cls, session, segment_index, key):
-        idx = int(segment_index or 0)
-        print(f"🔍 [Segment Cache] miss for segment {idx} — this sampler WILL run.")
-        print(f"     looked for : {key}")
-        d = cls._dir(session)
-        if not os.path.isdir(d):
-            print(f"     nothing stored yet for session '{_safe(session, 'chain')}'.")
-            return
-        stored = sorted(f[:-len(".meta.json")] for f in os.listdir(d) if f.endswith(".meta.json"))
-        same_seg = [k for k in stored if f"_seg{idx:02d}_" in k or k.endswith(f"_seg{idx:02d}")]
-        if not same_seg:
-            print(f"     no entry for segment {idx} ({len(stored)} stored for other segments).")
-            return
-        want = key.split("_")
-        for k in same_seg[:3]:
-            have = k.split("_")
-            diff = []
-            for a, b in zip(want, have):
-                if a != b:
-                    what = ("version" if a.startswith("v") and b.startswith("v")
-                            else "fingerprint")
-                    diff.append(f"{what}: {b} -> {a}")
-            print(f"     stored     : {k}"
-                  + (f"\n                  differs by {', '.join(diff)}" if diff else ""))
+    def _explain_miss(cls, *args, **kwargs):
+        return _onyx_core()['OnyxSegmentCache']._explain_miss.__func__(cls, *args, **kwargs)
+
 
     # ── execution ────────────────────────────────────────────────────────────
 
-    def run(self, segment_index, session, mode, precision, cache_version=1,
-            images=None, audio=None, fingerprint_image=None, fingerprint_text=None):
-        ensure_profile_ready()
-        m = _MODES.get(mode, "rw")
-        idx = int(segment_index or 0)
-        if fingerprint_text and len(str(fingerprint_text)) > self._LLM_TEXT_CHARS:
-            print(f"⚠️  [Segment Cache] fingerprint_text is {len(str(fingerprint_text))} chars — "
-                  f"that looks like a compiled Context-IR prompt.\n"
-                  f"     LLM output differs on every run, so it is IGNORED for the key "
-                  f"(_key drops it). Use cache_version instead, and unplug it to save the call.")
-        key = self._key(session, segment_index, fingerprint_image, fingerprint_text, cache_version)
-        meta_p, img_p, aud_p = self._paths(session, key)
+    def run(self, *args, **kwargs):
+        return _onyx_core()['OnyxSegmentCache'].run(self, *args, **kwargs)
 
-        if m == "off":
-            if images is None:
-                raise ValueError("[Segment Cache] mode is 'off' but no images arrived. "
-                                 "Connect the sampler to `images`.")
-            return (images, audio, False, "cache off — passthrough")
-
-        # ── lecture ──────────────────────────────────────────────────────────
-        if m == "rw" and self._hit(session, key) and images is None:
-            with open(meta_p, "r", encoding="utf-8") as fh:
-                meta = json.load(fh)
-            arr = np.load(img_p, mmap_mode="r")
-            out = torch.from_numpy(np.ascontiguousarray(arr))
-            if out.dtype == torch.uint8:
-                out = out.float() / 255.0
-            else:
-                out = out.float()
-
-            aud = None
-            if os.path.isfile(aud_p) and meta.get("audio_rate"):
-                wav = torch.from_numpy(np.ascontiguousarray(np.load(aud_p))).float()
-                aud = {"waveform": wav.unsqueeze(0), "sample_rate": int(meta["audio_rate"])}
-
-            age = (time.time() - float(meta.get("saved", 0))) / 3600.0
-            info = (f"segment {idx} restored from cache — {int(out.shape[0])} frame(s) "
-                    f"{int(out.shape[2])}x{int(out.shape[1])}, stored {age:.1f} h ago")
-            print(f"⚡ [Segment Cache] {info}\n     key: {key}")
-            return (out, aud, True, info)
-
-        # ── ecriture ─────────────────────────────────────────────────────────
-        if images is None:
-            raise ValueError(
-                f"[Segment Cache] segment {idx}: nothing cached and no images arrived.\n"
-                f"-> Connect the sampler's IMAGE output to `images`."
-            )
-
-        os.makedirs(self._dir(session), exist_ok=True)
-        want = _PRECISION.get(precision, "uint8")
-        src = images.detach().cpu()
-        if want == "uint8":
-            arr = (src.clamp(0, 1) * 255.0).round().to(torch.uint8).numpy()
-        else:
-            arr = src.to(torch.float16).numpy()
-
-        try:
-            np.save(img_p, arr)
-            rate = None
-            if audio is not None and audio.get("waveform") is not None:
-                wav = audio["waveform"]
-                if wav.ndim == 3:
-                    wav = wav[0]
-                np.save(aud_p, wav.detach().cpu().float().numpy())
-                rate = int(audio.get("sample_rate", 44100))
-
-            meta = {
-                "session": _safe(session, "chain"), "segment_index": idx, "key": key,
-                "frames": int(images.shape[0]),
-                "height": int(images.shape[1]), "width": int(images.shape[2]),
-                "precision": want, "audio_rate": rate, "saved": time.time(),
-                "cache_version": int(cache_version or 1),
-            }
-            # Ecrit en dernier : voir _hit(). Tant que ce fichier n'existe pas,
-            # l'entree n'est pas consideree comme valide.
-            tmp = meta_p + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(meta, fh, indent=2)
-            os.replace(tmp, meta_p)
-        except Exception as e:
-            # Un cache qui echoue ne doit jamais faire perdre le rendu qu'on
-            # vient de payer : on signale et on laisse passer les images.
-            for p in (img_p, aud_p, meta_p):
-                if os.path.isfile(p):
-                    try:
-                        os.remove(p)
-                    except Exception:
-                        pass
-            print(f"⚠️  [Segment Cache] could not store segment {idx} ({e}) — "
-                  f"the render itself is fine and passes through.")
-            return (images, audio, False, f"not cached: {e}")
-
-        size_mb = os.path.getsize(img_p) / 1024 ** 2
-        warn = ""
-        if not (fingerprint_image is not None or fingerprint_text):
-            warn = ("\n     ⚠️  no fingerprint connected: this entry is keyed on the segment "
-                    "index alone.\n"
-                    "        Change the source video without changing the session name and it "
-                    "will be served anyway.")
-        info = (f"segment {idx} cached — {int(images.shape[0])} frame(s) as {want}, "
-                f"{size_mb:.0f} MB")
-        print(f"💾 [Segment Cache] {info}\n     key: {key}{warn}")
-        return (images, audio, False, info)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Entretien
 # ─────────────────────────────────────────────────────────────────────────────
 
-def clear_session(session: str) -> tuple:
-    """Delete one session's cache. Returns (files removed, MB freed)."""
-    path = OnyxSegmentCache._dir(session)
-    if not os.path.isdir(path):
-        return 0, 0.0
-    total = sum(os.path.getsize(os.path.join(path, f)) for f in os.listdir(path))
-    count = len(os.listdir(path))
-    shutil.rmtree(path, ignore_errors=True)
-    return count, total / 1024 ** 2
+def clear_session(*args, **kwargs):
+    return _onyx_core()['clear_session'](*args, **kwargs)
+
 
 
 try:

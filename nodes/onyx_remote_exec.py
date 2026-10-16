@@ -29,6 +29,14 @@ Design:
     no second place for the user to paste a key.
 """
 
+import ast
+import hashlib
+import os
+import sys
+import threading
+import time
+import types
+
 import requests
 
 from .onyx_render_profile import _read_cache, _get_node_id
@@ -83,3 +91,148 @@ def load_remote(name: str, extra_globals: dict = None) -> dict:
         ns.update(extra_globals)
     exec(compile(source, f"<onyx-remote:{name}>", "exec"), ns)
     return ns
+
+
+# ---------------------------------------------------------------------------
+# Persistent loading + bundles
+#
+# load_remote() above re-executes the source on every call, which is right for
+# a self-contained function but wrong for code that keeps state between runs
+# (module-level caches, classes other modules compare against). The functions
+# below keep the executed namespace in memory for as long as the server keeps
+# returning the same code, while still asking the server on every run, so a
+# revoked or blocked key stops working on its very next run.
+#
+# A "bundle" is one KV entry that holds several modules of one node family
+# (MODULES = {"director": "<source>", ...}). It counts as ONE protected name
+# for the server-side harvesting detection, however many modules it holds.
+# ---------------------------------------------------------------------------
+
+_VALIDATION_TTL = 20  # seconds: a helper called in a tight loop does not hit the network each time
+_lock = threading.RLock()
+_ENTRIES: dict = {}   # name -> {"hash", "ns", "checked"}
+_MODULES: dict = {}   # (bundle, key, package) -> {"hash", "ns"}
+
+
+def _request(name: str, have_hash: str = None) -> dict:
+    cache = _read_cache()
+    token = (cache.get("token") or "").strip()
+    if not token:
+        raise RuntimeError(
+            "Sync error SS-205: place the Onyx Session node anywhere in this "
+            "workflow and run it once, then retry."
+        )
+    payload = {"token": token, "node_id": _get_node_id(), "name": name}
+    if have_hash:
+        payload["have_hash"] = have_hash
+    try:
+        resp = requests.post(_CODE_URL, json=payload, timeout=_REQUEST_TIMEOUT)
+        data = resp.json()
+    except Exception as e:
+        raise RuntimeError(f"Sync error SS-205: could not reach the server ({e}).")
+    if not data.get("valid"):
+        raise RuntimeError(
+            f"Sync error SS-205: {data.get('reason', 'unknown')} — this node "
+            f"could not load its implementation. Check your Onyx Session key."
+        )
+    return data
+
+
+def load_persistent(name: str) -> dict:
+    """Like load_remote(), but keeps the executed namespace while the code is
+    unchanged. Returns {"hash", "ns", "checked"}."""
+    with _lock:
+        ent = _ENTRIES.get(name)
+        if ent and time.time() - ent["checked"] < _VALIDATION_TTL:
+            return ent
+
+        data = _request(name, ent["hash"] if ent else None)
+        if data.get("unchanged") and ent:
+            ent["checked"] = time.time()
+            return ent
+
+        source = data.get("source") or ""
+        digest = data.get("hash") or hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
+        if ent and ent["hash"] == digest:  # older server without "unchanged": same code, keep the state
+            ent["checked"] = time.time()
+            return ent
+
+        ns: dict = {"__name__": f"onyx_remote_{name}"}
+        exec(compile(source, f"<onyx-remote:{name}>", "exec", dont_inherit=True), ns)
+        ent = {"hash": digest, "ns": ns, "checked": time.time()}
+        _ENTRIES[name] = ent
+        return ent
+
+
+class _SiblingImports(ast.NodeTransformer):
+    """Inside a bundle, `from .other import X` where `other` is another module
+    of the same bundle must reach the bundle's own copy of `other` (its full
+    original code), not the local stub, so classes, constants and state are the
+    same objects on both sides of the import."""
+
+    def __init__(self, bundle: str, keys):
+        self.bundle, self.keys, self.found = bundle, set(keys), set()
+
+    def _synthetic(self, key: str) -> str:
+        return f"_onyx_{self.bundle}_{key}"
+
+    def visit_ImportFrom(self, node):
+        if node.level == 1:
+            if node.module in self.keys:
+                self.found.add(node.module)
+                node.module = self._synthetic(node.module)
+            elif node.module is None:
+                for alias in node.names:
+                    if alias.name in self.keys:
+                        self.found.add(alias.name)
+                        alias.asname = alias.asname or alias.name
+                        alias.name = self._synthetic(alias.name)
+        return node
+
+
+_IN_PROGRESS: set = set()
+_PACK_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # this file lives in <pack>/nodes/
+
+
+def load_bundle_module(bundle: str, key: str, package: str) -> dict:
+    """Namespace of module `key` of KV bundle `bundle`, executed as if it lived
+    in `package` (so its relative imports resolve against the real pack)."""
+    ent = load_persistent(bundle)
+    mk = (bundle, key, package)
+    with _lock:
+        cached = _MODULES.get(mk)
+        if cached and cached["hash"] == ent["hash"]:
+            return cached["ns"]
+        if mk in _IN_PROGRESS:  # circular import between two bundle modules: Python's usual rules apply
+            return sys.modules[f"{package}._onyx_{bundle}_{key}"].__dict__
+
+        modules = ent["ns"].get("MODULES") or {}
+        source = modules.get(key)
+        if source is None:
+            raise RuntimeError(f"Sync error SS-205: module '{key}' missing from the server bundle.")
+
+        filename = f"<onyx-remote:{bundle}:{key}>"
+        rel = (ent["ns"].get("FILES") or {}).get(key)
+        real_file = os.path.normpath(os.path.join(_PACK_ROOT, rel)) if rel else filename
+        tree = ast.parse(source, filename)
+        siblings = _SiblingImports(bundle, modules.keys())
+        tree = ast.fix_missing_locations(siblings.visit(tree))
+        code = compile(tree, filename, "exec", dont_inherit=True)
+
+        modname = f"{package}._onyx_{bundle}_{key}"
+        mod = types.ModuleType(modname)
+        mod.__package__ = package
+        mod.__file__ = real_file  # same value the original module had: paths derived from it keep working
+        sys.modules[modname] = mod  # dataclasses/typing look their own module up here
+        _IN_PROGRESS.add(mk)
+        try:
+            for sib in sorted(siblings.found - {key}):  # load the modules this one imports first
+                load_bundle_module(bundle, sib, package)
+            exec(code, mod.__dict__)
+        except BaseException:
+            sys.modules.pop(modname, None)
+            raise
+        finally:
+            _IN_PROGRESS.discard(mk)
+        _MODULES[mk] = {"hash": ent["hash"], "ns": mod.__dict__}
+        return mod.__dict__

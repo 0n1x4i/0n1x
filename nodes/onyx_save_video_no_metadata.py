@@ -56,99 +56,33 @@ except Exception:
 
 from . import metadata_spoof as _spoof
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('utils_bundle', 'onyx_save_video_no_metadata', __package__)
+    return ns
+
+
 _METHODS = {
     "remux (rebuild container, most thorough)": "remux",
     "byte copy + strip tags": "copy",
 }
 
 
-def _resolve(video, video_path):
-    """The single source path, from whichever input is connected."""
-    for candidate in (video, video_path):
-        if candidate is None:
-            continue
-        text = str(candidate).strip().strip('"')
-        if not text or text == "(not saved)":
-            continue
-        return text
-    return None
+def _resolve(*args, **kwargs):
+    return _onyx_core()['_resolve'](*args, **kwargs)
 
 
-def _strip_in_place(path, tag="[Save Video]"):
-    """Clear udta / hdlr vendor on an mp4 already on disk. Returns True if changed."""
-    if _mp4_strip_metadata is None:
-        print(f"⚠️  {tag} binary strip unavailable (nano_banana_aio not importable) — "
-              f"container tags left as the muxer wrote them.")
-        return False
-    try:
-        with open(path, "rb") as fh:
-            data = bytearray(fh.read())
-        if _mp4_strip_metadata(data, 0, len(data)):
-            with open(path, "wb") as fh:
-                fh.write(bytes(data))
-            return True
-        return False
-    except Exception as e:
-        print(f"⚠️  {tag} binary strip failed: {e}")
-        return False
+
+def _strip_in_place(*args, **kwargs):
+    return _onyx_core()['_strip_in_place'](*args, **kwargs)
 
 
-def _remux(src, dst, tag="[Save Video]"):
-    """Stream-copy src into a fresh container at dst. No re-encode.
 
-    Raises on failure so the caller can fall back to a byte copy rather than
-    silently leaving a truncated file behind.
-    """
-    import av
+def _remux(*args, **kwargs):
+    return _onyx_core()['_remux'](*args, **kwargs)
 
-    inp = av.open(src)
-    out = av.open(dst, mode="w")
-    try:
-        mapping = {}
-        # Tous les flux sont declares avant le premier mux : le conteneur ecrit
-        # son en-tete au premier paquet, et un flux ajoute ensuite n'y figure pas.
-        for stream in inp.streams:
-            if stream.type not in ("video", "audio"):
-                # Les pistes de donnees et de sous-titres sont precisement la ou
-                # se logent les tags d'appareil et de logiciel. Ne pas les
-                # recopier fait partie du travail.
-                continue
-            # add_stream_from_template n'existe qu'a partir de PyAV 12 ; avant,
-            # le meme service passait par le mot-cle template. Une seule des
-            # deux formes existe selon la version installee.
-            if hasattr(out, "add_stream_from_template"):
-                new = out.add_stream_from_template(stream)
-            else:
-                new = out.add_stream(template=stream)
-            # add_stream_from_template recopie aussi le dictionnaire de
-            # metadonnees du flux ; on le vide.
-            try:
-                new.metadata.clear()
-            except Exception:
-                pass
-            mapping[stream.index] = new
-
-        if not mapping:
-            raise ValueError("the source has no video or audio stream to copy.")
-
-        try:
-            out.metadata.clear()
-        except Exception:
-            pass
-
-        copied = 0
-        for packet in inp.demux(list(mapping)):
-            # Un paquet de vidage (dts nul) marque la fin d'un flux et n'a rien
-            # a muxer.
-            if packet.dts is None:
-                continue
-            packet.stream = mapping[packet.stream.index]
-            out.mux(packet)
-            copied += 1
-        return copied, len(mapping)
-    finally:
-        out.close()
-        inp.close()
 
 
 # ---------------------------------------------------------------------------
@@ -168,141 +102,39 @@ _LAVC_AAC = re.compile(rb"Lavc\d{2}\.\d{1,3}\.\d{1,3}\x00")
 _LAVC_NAME = re.compile(rb"[\x04-\x1f]Lavc[\x20-\x7e]{0,27}")
 
 
-def _scrub_encoder_strings(buf):
-    """Blank encoder SEI payloads and the AAC Lavc string. -> count"""
-    n = 0
-    for uuid_b, text in _ENCODER_SEI:
-        pos = buf.find(uuid_b + text)
-        while pos != -1:
-            end = buf.find(b"\x00", pos + 16)
-            if end == -1 or end - pos > 4096:
-                end = min(len(buf), pos + 16 + len(text))
-            buf[pos:end] = b" " * (end - pos)
-            n += 1
-            pos = buf.find(uuid_b + text, end)
-    for m in list(_LAVC_AAC.finditer(buf)):
-        buf[m.start():m.end() - 1] = b" " * (m.end() - 1 - m.start())
-        n += 1
-    # the sample description's 32-byte compressor name ("Lavc60.31.102 libx264")
-    for m in list(_LAVC_NAME.finditer(buf)):
-        if m.end() - m.start() - 1 == buf[m.start()] and m.start() + 32 <= len(buf):
-            buf[m.start():m.start() + 32] = bytes(32)
-            n += 1
-    return n
+def _scrub_encoder_strings(*args, **kwargs):
+    return _onyx_core()['_scrub_encoder_strings'](*args, **kwargs)
 
 
-def _boxes(buf, start, end):
-    i = start
-    while i + 8 <= end:
-        size, typ = struct.unpack(">I4s", buf[i:i + 8])
-        hdr = 8
-        if size == 1:
-            if i + 16 > end:
-                return
-            size, hdr = struct.unpack(">Q", buf[i + 8:i + 16])[0], 16
-        elif size == 0:
-            size = end - i
-        if size < hdr or i + size > end:
-            return
-        yield i, size, hdr, bytes(typ)
-        i += size
+
+def _boxes(*args, **kwargs):
+    return _onyx_core()['_boxes'](*args, **kwargs)
 
 
-def _child(buf, start, end, path):
-    for name in path:
-        for i, size, hdr, typ in _boxes(buf, start, end):
-            if typ == name:
-                start, end = i + hdr, i + size
-                break
-        else:
-            return None
-    return start, end
+
+def _child(*args, **kwargs):
+    return _onyx_core()['_child'](*args, **kwargs)
 
 
-def _sample_ranges(buf, stbl):
-    """(offset, size) of every sample of a track, from stsz / stsc / stco|co64."""
-    s0, s1 = stbl
-    stsz = _child(buf, s0, s1, [b"stsz"])
-    stsc = _child(buf, s0, s1, [b"stsc"])
-    stco = _child(buf, s0, s1, [b"stco"])
-    co64 = _child(buf, s0, s1, [b"co64"])
-    if not stsz or not stsc or not (stco or co64):
-        return []
-    a = stsz[0]
-    fixed, count = struct.unpack(">II", buf[a + 4:a + 12])
-    sizes = [fixed] * count if fixed else list(struct.unpack(">%dI" % count, buf[a + 12:a + 12 + 4 * count]))
-    b = stsc[0]
-    runs = [struct.unpack(">III", buf[b + 8 + 12 * k:b + 20 + 12 * k])
-            for k in range(struct.unpack(">I", buf[b + 4:b + 8])[0])]
-    c = (co64 or stco)[0]
-    nch = struct.unpack(">I", buf[c + 4:c + 8])[0]
-    if co64:
-        offs = list(struct.unpack(">%dQ" % nch, buf[c + 8:c + 8 + 8 * nch]))
-    else:
-        offs = list(struct.unpack(">%dI" % nch, buf[c + 8:c + 8 + 4 * nch]))
-    out, si = [], 0
-    for ci, off in enumerate(offs, 1):
-        per = 0
-        for first, spc, _ in runs:
-            if first <= ci:
-                per = spc
-        for _ in range(per):
-            if si >= len(sizes):
-                return out
-            out.append((off, sizes[si]))
-            off += sizes[si]
-            si += 1
-    return out
+
+def _sample_ranges(*args, **kwargs):
+    return _onyx_core()['_sample_ranges'](*args, **kwargs)
 
 
-def _free(buf, i, size, hdr):
-    """Turn a box into 'free' and zero what it held (same size)."""
-    buf[i + 4:i + 8] = b"free"
-    buf[i + hdr:i + size] = bytes(size - hdr)
+
+def _free(*args, **kwargs):
+    return _onyx_core()['_free'](*args, **kwargs)
 
 
-def _neutralize_boxes(buf):
-    """uuid / meta boxes -> 'free'; non audio / video tracks -> 'free' with
-    their samples zeroed. -> count"""
-    n = 0
-    for i, size, hdr, typ in list(_boxes(buf, 0, len(buf))):
-        if typ in (b"uuid", b"meta"):
-            _free(buf, i, size, hdr)
-            n += 1
-        elif typ == b"moov":
-            for j, jsize, jhdr, jtyp in list(_boxes(buf, i + hdr, i + size)):
-                if jtyp in (b"uuid", b"meta"):
-                    _free(buf, j, jsize, jhdr)
-                    n += 1
-                elif jtyp == b"trak":
-                    t0, t1 = j + jhdr, j + jsize
-                    hd = _child(buf, t0, t1, [b"mdia", b"hdlr"])
-                    kind = bytes(buf[hd[0] + 8:hd[0] + 12]) if hd else b""
-                    if kind in (b"vide", b"soun"):
-                        for k, ksize, khdr, ktyp in list(_boxes(buf, t0, t1)):
-                            if ktyp in (b"tref", b"meta", b"uuid"):   # chapter link, per-track tags
-                                _free(buf, k, ksize, khdr)
-                                n += 1
-                        continue
-                    stbl = _child(buf, t0, t1, [b"mdia", b"minf", b"stbl"])
-                    for off, sz in (_sample_ranges(buf, stbl) if stbl else []):
-                        if 0 <= off and off + sz <= len(buf):
-                            buf[off:off + sz] = bytes(sz)
-                    _free(buf, j, jsize, jhdr)
-                    n += 1
-    return n
+
+def _neutralize_boxes(*args, **kwargs):
+    return _onyx_core()['_neutralize_boxes'](*args, **kwargs)
 
 
-def _deep_clean(path, tag="[Save Video]"):
-    """In-place pass after the copy / remux. Never raises. -> count"""
-    try:
-        with open(path, "r+b") as fh, mmap.mmap(fh.fileno(), 0) as mm:
-            n = _neutralize_boxes(mm) + _scrub_encoder_strings(mm)
-            mm.flush()
-        return n
-    except Exception as e:  # noqa: BLE001 - a cleaning pass must not lose the file
-        print(f"⚠️  {tag} deep clean skipped: {e}")
-        return 0
+
+def _deep_clean(*args, **kwargs):
+    return _onyx_core()['_deep_clean'](*args, **kwargs)
+
 
 
 class OnyxSaveVideoNoMetadata:
@@ -377,108 +209,9 @@ class OnyxSaveVideoNoMetadata:
         # parce que les widgets, eux, n'ont pas change.
         return float("nan")
 
-    def save(self, filename_prefix, method, video=None, video_path=None,
-             add_timestamp=True, metadata_profile=_spoof.PROFILE_NONE,
-             iphone_model="random", country="US"):
-        ensure_profile_ready()
-        tag = "[Save Video]"
-        src = _resolve(video, video_path)
+    def save(self, *args, **kwargs):
+        return _onyx_core()['OnyxSaveVideoNoMetadata'].save(self, *args, **kwargs)
 
-        if src is None:
-            # Pas une erreur : l'AIO node en amont renvoie systematiquement une
-            # valeur sur sa sortie `video`, meme en mode image ("" ou
-            # "(not saved)") — c'est la meme sortie qui contiendrait le mp4 si
-            # le node etait en mode video. Sans ce garde-fou, brancher ce node
-            # de sauvegarde faisait echouer TOUT le graphe des qu'une simple
-            # image etait generee, meme quand personne ne voulait de video.
-            print(f"ℹ️  {tag} no video to save (the upstream node ran in image mode) — skipped.")
-            return ("(no video)", "(no video)")
-        if not os.path.isfile(src):
-            raise FileNotFoundError(
-                f"{tag} the file no longer exists:\n   {src}\n"
-                f"-> The AIO node writes to ComfyUI's temp folder, which is emptied on "
-                f"restart. Re-run the generation, then save in the same session.")
-
-        out_root = (folder_paths.get_output_directory() if folder_paths
-                    else os.path.join(os.path.dirname(os.path.dirname(
-                        os.path.abspath(__file__))), "_output"))
-
-        prefix = (filename_prefix or "onyx").strip().replace("\\", "/")
-        subdir, _, stem = prefix.rpartition("/")
-        stem = "".join(c for c in stem if c.isalnum() or c in "-_") or "onyx"
-        # Les segments de dossier sont filtres un par un : sans cela un ".." dans
-        # le prefixe ecrirait hors de output/.
-        parts = [p for p in subdir.split("/") if p and p not in (".", "..")]
-        dest_dir = os.path.join(out_root, *parts) if parts else out_root
-        os.makedirs(dest_dir, exist_ok=True)
-
-        existing = [f for f in os.listdir(dest_dir)
-                    if f.startswith(stem + "_") and f.lower().endswith((".mp4", ".mov"))]
-        counter = len(existing) + 1
-        ext = os.path.splitext(src)[1].lower() or ".mp4"
-        name = f"{stem}_{counter:05d}"
-        if add_timestamp:
-            name += f"_{int(time.time())}"
-        dest = os.path.join(dest_dir, name + ext)
-
-        if metadata_profile and metadata_profile != _spoof.PROFILE_NONE:
-            # Spoof : copie du flux par ffmpeg dans un conteneur neuf porteur
-            # de l'identite choisie. Aucun re-encodage, comme le mode remux.
-            dest = os.path.join(dest_dir, name + _spoof.video_extension(metadata_profile))
-            try:
-                desc = _spoof.spoof_video(src, dest, metadata_profile, iphone_model,
-                                          country, seed=random.getrandbits(64))
-            except Exception:
-                if os.path.isfile(dest):
-                    try:
-                        os.remove(dest)
-                    except Exception:
-                        pass
-                raise
-            size_mb = os.path.getsize(dest) / 1024 ** 2
-            print(f"🎭 {tag} {metadata_profile}: {desc}\n     → {dest}\n"
-                  f"     {size_mb:.1f} MB — stream copy, no frame re-encoded.")
-            logging.info("Onyx Save Video (%s): %s", metadata_profile, dest)
-            return (dest, dest)
-
-        mode = _METHODS[method]
-        used = mode
-        if mode == "remux":
-            try:
-                packets, streams = _remux(src, dest, tag)
-                print(f"🎬 {tag} remuxed {packets} packet(s) across {streams} stream(s) — "
-                      f"container rebuilt, no metadata carried over.")
-            except Exception as e:
-                # Un remux rate laisse un fichier partiel : il doit disparaitre
-                # avant la reprise, sinon on garderait une video tronquee sous
-                # un nom qui annonce un succes.
-                if os.path.isfile(dest):
-                    try:
-                        os.remove(dest)
-                    except Exception:
-                        pass
-                print(f"⚠️  {tag} remux failed ({e}) — falling back to a byte copy.")
-                used = "copy"
-
-        if used == "copy":
-            shutil.copy2(src, dest)
-            changed = _strip_in_place(dest, tag)
-            changed = _deep_clean(dest, tag) > 0 or changed
-            print(f"🎬 {tag} byte copy — "
-                  + ("udta + hdlr vendor cleared." if changed else "no tag found to clear."))
-        else:
-            # Le muxeur mp4 de PyAV ecrit son propre identifiant d'encodeur dans
-            # hdlr : le conteneur est neuf, mais pas anonyme pour autant.
-            _strip_in_place(dest, tag)
-            _deep_clean(dest, tag)
-
-        size_mb = os.path.getsize(dest) / 1024 ** 2
-        src_mb = os.path.getsize(src) / 1024 ** 2
-        print(f"     → {dest}\n"
-              f"     {size_mb:.1f} MB (source {src_mb:.1f} MB) — no frame re-encoded.")
-        logging.info("Onyx Save Video (no metadata): %s", dest)
-
-        return (dest, dest)
 
 
 NODE_CLASS_MAPPINGS = {"OnyxSaveVideoNoMetadata": OnyxSaveVideoNoMetadata}

@@ -3,6 +3,14 @@ import torch.nn.functional as F
 import math
 
 import os as _onyx_os, importlib.util as _onyx_ilu
+
+from .nodes.onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('postfx_bundle', 'renoise', __package__)
+    return ns
+
 _onyx_prof_path = _onyx_os.path.join(_onyx_os.path.dirname(_onyx_os.path.dirname(_onyx_os.path.abspath(__file__))), "nodes", "onyx_render_profile.py")
 _onyx_prof_spec = _onyx_ilu.spec_from_file_location("onyx_render_profile_pp", _onyx_prof_path)
 _onyx_prof_mod = _onyx_ilu.module_from_spec(_onyx_prof_spec)
@@ -83,83 +91,17 @@ class Onyx_Renoise:
         "Night Mode adds chroma-heavy noise for a low-light look."
     )
 
-    # ------------------------------------------------------------------
-    def _blur(self, tensor: torch.Tensor, sigma: float) -> torch.Tensor:
-        """Apply Gaussian blur if sigma > 0."""
-        if sigma <= 0:
-            return tensor
-        ks = 2 * math.ceil(3.0 * sigma) + 1
-        return kfilters.gaussian_blur2d(tensor, (ks, ks), (sigma, sigma))
+    def _blur(self, *args, **kwargs):
+        return _onyx_core()['Onyx_Renoise']._blur(self, *args, **kwargs)
 
-    # ------------------------------------------------------------------
-    def _gen_grain_noise(self, B: int, C: int, H: int, W: int, grain_size: float, device) -> torch.Tensor:
-        """Random noise at (B,C,H,W). grain_size == 1 -> per-pixel noise
-        (original behavior). grain_size > 1 -> noise generated at a reduced
-        resolution then upscaled with nearest-neighbor, producing visibly
-        bigger noise blobs. grain_size < 1 -> noise generated at a higher
-        resolution then averaged down (area), producing a finer/tighter
-        texture than plain per-pixel noise. Neither direction changes
-        intensity (see ISO preset)."""
-        if grain_size == 1.0:
-            return torch.randn(B, C, H, W, device=device)
-        rh = max(1, round(H / grain_size))
-        rw = max(1, round(W / grain_size))
-        small = torch.randn(B, C, rh, rw, device=device)
-        mode = "nearest" if grain_size > 1.0 else "area"
-        return F.interpolate(small, size=(H, W), mode=mode)
 
-    # ------------------------------------------------------------------
-    def renoise(
-        self,
-        image:      torch.Tensor,
-        seed:       int,
-        iso_preset: str,
-        grain_size: float = 1.0,
-    ):
-        ensure_profile_ready()
-        if not KORNIA_AVAILABLE:
-            raise ImportError("Kornia is required. Install with: pip install kornia")
+    def _gen_grain_noise(self, *args, **kwargs):
+        return _onyx_core()['Onyx_Renoise']._gen_grain_noise(self, *args, **kwargs)
 
-        preset_values = ISO_PRESETS.get(iso_preset)
-        if preset_values is None:
-            return (image,)
-        sensor_grain, color_scatter, grain_softness, color_softness, shadow_emphasis = preset_values
 
-        # Short-circuit if nothing to do
-        if sensor_grain == 0.0 and color_scatter == 0.0:
-            return (image,)
+    def renoise(self, *args, **kwargs):
+        return _onyx_core()['Onyx_Renoise'].renoise(self, *args, **kwargs)
 
-        torch.manual_seed(seed)
-
-        B, H, W, _ = image.shape
-        img = image.permute(0, 3, 1, 2).to(DEVICE)   # BCHW
-
-        noise = torch.zeros_like(img)
-
-        # --- Luminance grain (same pattern on all 3 channels) ---
-        if sensor_grain > 0:
-            luma_noise = self._gen_grain_noise(B, 1, H, W, grain_size, DEVICE).expand(B, 3, H, W).clone()
-            luma_noise = self._blur(luma_noise, grain_softness)
-            noise = noise + luma_noise * sensor_grain
-
-        # --- Chroma scatter (independent per channel) ---
-        if color_scatter > 0:
-            chroma_noise = self._gen_grain_noise(B, 3, H, W, grain_size, DEVICE)
-            chroma_noise = self._blur(chroma_noise, color_softness)
-            noise = noise + chroma_noise * color_scatter
-
-        # --- Shadow emphasis mask (noise strongest in darks, fades in highlights) ---
-        if shadow_emphasis > 0:
-            luminance = kcolor.rgb_to_grayscale(img)   # (B, 1, H, W)
-            # mask = 1 in pure black, 0 in pure white, transition at shadow_emphasis threshold
-            mask = 1.0 - torch.clamp(
-                (luminance - shadow_emphasis) / (1.0 - shadow_emphasis + 1e-6),
-                0.0, 1.0
-            )
-            noise = noise * mask
-
-        out = torch.clamp(img + noise, 0.0, 1.0)
-        return (out.permute(0, 2, 3, 1).to(image.device),)
 
 
 NODE_CLASS_MAPPINGS = {

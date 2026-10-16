@@ -39,6 +39,14 @@ and recreate the exact gap this node removes.
 
 import math
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('h3_tools_bundle', 'onyx_h3_frame_snap', __package__)
+    return ns
+
+
 
 # Grille du VAE video H3 : 5, 22, 39, 56, ... (17k + 5).
 _VIDEO_OFFSET = 5
@@ -65,81 +73,24 @@ ROUND_DOWN = "down (never exceed source)"
 _ROUNDINGS = [ROUND_NEAREST, ROUND_DOWN]
 
 
-def reference_floor(frames: int) -> int:
-    """Length H3 truncates a reference video to: the 17k+5 run at or below `frames`.
-
-    This is the real ceiling for the target, not the source frame count. H3 aligns
-    the target UP to the grid and the reference DOWN to it, so an off-grid source
-    silently loses frames on the reference side before the target is even chosen.
-    A 188-frame source becomes a 175-frame reference; asking for 192 then leaves
-    17 frames with nothing to follow, which is where the picture jumps.
-    """
-    n = int(frames)
-    if n < _VIDEO_OFFSET:
-        return 0
-    return n - ((n - _VIDEO_OFFSET) % _VIDEO_STEP)
+def reference_floor(*args, **kwargs):
+    return _onyx_core()['reference_floor'](*args, **kwargs)
 
 
-def _snap_down(frames: int, offset: int, step: int) -> int:
-    """Largest value of the form offset + step*j that is <= frames."""
-    if frames < offset:
-        return 0
-    return offset + ((frames - offset) // step) * step
+
+def _snap_down(*args, **kwargs):
+    return _onyx_core()['_snap_down'](*args, **kwargs)
 
 
-def _snap_nearest(frames: int, offset: int, step: int) -> int:
-    """Closest value of the form offset + step*j, above or below `frames`.
 
-    Overshoot is bounded by step/2 by construction - 25 frames (~1.0 s at 24 fps)
-    on the audio-aligned grid, 8 frames (~0.35 s) on the video grid. That upper
-    bound is what makes rounding up acceptable here: the tail beyond the source
-    is short enough to trim away, whereas rounding down can cost a full grid
-    step - 51 frames, over two seconds - for the sake of four missing frames.
-    """
-    if frames <= offset:
-        return offset
-    j = int(round((frames - offset) / float(step)))
-    value = offset + max(0, j) * step
-    return min(value, _MAX_FRAMES)
+def _snap_nearest(*args, **kwargs):
+    return _onyx_core()['_snap_nearest'](*args, **kwargs)
 
 
-def snap_h3_frames(frames: int, audio_aligned: bool = True,
-                   allow_overshoot: bool = True) -> tuple:
-    """Return (snapped_frames, note).
 
-    With allow_overshoot the result may exceed `frames`. That is deliberate: the
-    audio-aligned grid steps by 51 frames, so landing four frames short of a run
-    costs two seconds of video when rounding down. Generating slightly past the
-    source and trimming the result is the cheaper trade - the frames past the
-    reference are unconditioned, but there are at most 25 of them and they are
-    discarded anyway.
-    """
-    n = max(0, int(frames))
-    if n > _MAX_FRAMES:
-        n = _MAX_FRAMES
+def snap_h3_frames(*args, **kwargs):
+    return _onyx_core()['snap_h3_frames'](*args, **kwargs)
 
-    if n < _VIDEO_OFFSET:
-        raise RuntimeError(
-            f"[Onyx H3 Frame Snap] {frames} frame(s) is below H3's minimum of "
-            f"{_VIDEO_OFFSET}.\n-> Feed a longer video."
-        )
-
-    snap = _snap_nearest if allow_overshoot else _snap_down
-
-    if audio_aligned:
-        snapped = snap(n, _AV_OFFSET, _AV_STEP)
-        if snapped >= _AV_OFFSET:
-            return snapped, ""
-        # Sous 39 frames aucune longueur ne satisfait les deux grilles. Plutot
-        # que d'echouer, on retombe sur la grille video seule : le rendu reste
-        # valide, seul le calage audio de fin est approximatif.
-        fallback = snap(n, _VIDEO_OFFSET, _VIDEO_STEP)
-        return fallback, (
-            f"under {_AV_OFFSET} frames no length satisfies both grids -> "
-            f"video grid only, audio boundary is approximate"
-        )
-
-    return snap(n, _VIDEO_OFFSET, _VIDEO_STEP), ""
 
 
 class OnyxH3FrameSnap:
@@ -190,65 +141,9 @@ class OnyxH3FrameSnap:
         "Prevents the tail H3 invents when it rounds the target up and the reference down."
     )
 
-    def snap(self, frame_count, alignment, rounding=ROUND_NEAREST):
-        ensure_profile_ready()
-        requested = int(frame_count)
-        snapped, note = snap_h3_frames(
-            requested,
-            audio_aligned=(alignment == MODE_AV),
-            allow_overshoot=(rounding == ROUND_NEAREST),
-        )
+    def snap(self, *args, **kwargs):
+        return _onyx_core()['OnyxH3FrameSnap'].snap(self, *args, **kwargs)
 
-        # Imprime systematiquement : la valeur corrigee ne s'affiche nulle part
-        # dans l'interface, et l'ecart entre ce que la video contient et ce qui
-        # part reellement dans H3 est exactement l'information qui manquait
-        # quand la fin des rendus partait en vrille.
-        delta = snapped - requested
-        # Le chiffre qui compte n'est pas snapped - requested, mais
-        # snapped - reference_floor : H3 tronque la reference vers le bas sur la
-        # grille avant meme de comparer. Une source de 188 frames ne conditionne
-        # que 175 frames, donc viser 192 laisse 17 frames a l'aveugle et non 4.
-        floor = reference_floor(requested)
-        gap = snapped - floor
-        msg = (
-            f"🎬 [Onyx H3 Frame Snap] {requested} -> {snapped} frames "
-            f"({snapped / _FPS:.3f}s @ {_FPS:.0f}fps) | {delta:+d} frame(s) vs source "
-            f"| {alignment} | {rounding}"
-        )
-        if gap > 0:
-            msg += (
-                f"\n⚠️  [Onyx H3 Frame Snap] H3 truncates the {requested}-frame source "
-                f"to a {floor}-frame reference, so the last {gap} frame(s) "
-                f"({gap / _FPS:.3f}s) generate with no reference to follow — expect the "
-                f"picture to drift there, and trim them.\n"
-                f"   Zero-gap alternatives: {floor} frames ({floor / _FPS:.3f}s) on the "
-                f"video grid"
-            )
-            av_safe = _snap_down(floor, _AV_OFFSET, _AV_STEP)
-            if av_safe >= _AV_OFFSET:
-                msg += f", {av_safe} frames ({av_safe / _FPS:.3f}s) audio-aligned"
-            msg += "."
-        elif delta == 0:
-            msg += "\n   Already on the grid — nothing to trim."
-        if note:
-            msg += f"\n⚠️  [Onyx H3 Frame Snap] {note}"
-
-        # Le mode 'down' peut couter un pas de grille entier. Quand la perte
-        # depasse un pas de la grille video, c'est presque toujours un reglage
-        # subi plutot que choisi — d'ou l'avertissement chiffre.
-        if delta < 0 and -delta > _VIDEO_STEP:
-            alt, _ = snap_h3_frames(
-                requested, audio_aligned=(alignment == MODE_AV), allow_overshoot=True
-            )
-            if alt != snapped:
-                msg += (
-                    f"\n⚠️  [Onyx H3 Frame Snap] dropping {-delta} frames "
-                    f"({-delta / _FPS:.3f}s). 'nearest' would give {alt} frames "
-                    f"({alt / _FPS:.3f}s)."
-                )
-        print(msg)
-
-        return (snapped, snapped / _FPS)
 
 
 NODE_CLASS_MAPPINGS = {"OnyxH3FrameSnap": OnyxH3FrameSnap}

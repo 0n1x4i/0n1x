@@ -12,6 +12,14 @@ from __future__ import annotations
 import json
 import re
 
+from ..onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('krea2_bundle', 'krea2_carousel', __package__)
+    return ns
+
+
 
 
 MAX_SLIDES = 8
@@ -40,215 +48,24 @@ def _pose_lines(value):
     return result[:MAX_SLIDES]
 
 
-def _camera_contract(policy):
-    if policy == "LOCK":
-        return (
-            "Keep the original camera position, lens perspective, crop, framing and subject scale. "
-            "Adapt the requested pose to that unchanged camera setup."
-        )
-    if policy == "FREE":
-        return (
-            "The camera angle, distance, crop and framing may change as requested by the pose direction, "
-            "while every continuity lock remains mandatory."
-        )
-    return (
-        "Keep the established camera and framing unless the requested pose physically requires a different "
-        "viewpoint or crop; permit only that necessary camera change."
-    )
+def _camera_contract(*args, **kwargs):
+    return _onyx_core()['_camera_contract'](*args, **kwargs)
 
 
-def _continuity_contract(level):
-    if level == "Maximum":
-        return (
-            "Preserve the exact same adult identity, facial geometry and details, body proportions, skin marks, "
-            "hairstyle, every garment, fabric detail, accessory, location, background geometry, lighting direction, "
-            "color grade, texture and photographic finish from the reference image."
-        )
-    if level == "Balanced":
-        return (
-            "Keep the same recognizable adult person, hairstyle, complete outfit, location, lighting and overall "
-            "photographic session from the reference image."
-        )
-    return (
-        "Preserve the same adult identity, facial features, body proportions, hairstyle, complete outfit and "
-        "accessories, location, background, lighting, color palette and photographic appearance from the reference."
-    )
+
+def _continuity_contract(*args, **kwargs):
+    return _onyx_core()['_continuity_contract'](*args, **kwargs)
 
 
-def _contradiction_warnings(text, camera_policy, label):
-    lowered = text.lower()
-    warnings = []
-    locked_topics = {
-        "identity": r"\b(?:different|another|new|change|replace|swap)\b.{0,36}\b(?:person|face|identity|woman|man)\b",
-        "outfit": r"\b(?:change|replace|different|new|remove)\b.{0,36}\b(?:outfit|clothes|clothing|dress|shirt|wardrobe|bikini)\b",
-        "scene": r"\b(?:change|replace|different|new|move)\b.{0,36}\b(?:scene|background|location|room|beach|street)\b",
-        "lighting": r"\b(?:change|replace|different|new|relight)\b.{0,36}\b(?:light|lighting|shadow|sunset|night)\b",
-    }
-    for topic, pattern in locked_topics.items():
-        if re.search(pattern, lowered):
-            warnings.append(f"{label}: instruction may contradict locked {topic}.")
-    if camera_policy == "LOCK" and re.search(
-        r"\b(?:selfie|close[- ]?up|wide shot|from behind|rear view|profile|overhead|low angle|high angle|"
-        r"camera|reframe|zoom|first-person|pov)\b",
-        lowered,
-    ):
-        warnings.append(
-            f"{label}: camera policy LOCK conflicts with a camera/viewpoint request; the original framing wins."
-        )
-    return warnings
+
+def _contradiction_warnings(*args, **kwargs):
+    return _onyx_core()['_contradiction_warnings'](*args, **kwargs)
 
 
-def build_krea2_carousel(
-    pose_list,
-    slide_count=4,
-    output_mode=OUTPUT_ALL,
-    slide_selector=1,
-    camera_policy="AUTO",
-    continuity_strength="Strong",
-    session_direction="",
-    character_trigger="",
-    has_master=True,
-    extra_prompt="",
-):
-    """Compile a pose list into Krea2Edit instructions and a continuity manifest."""
-    poses = _pose_lines(pose_list)
-    requested_count = max(1, min(MAX_SLIDES, int(slide_count)))
-    camera_policy = camera_policy if camera_policy in CAMERA_POLICIES else "AUTO"
-    continuity_strength = (
-        continuity_strength if continuity_strength in CONTINUITY_LEVELS else "Strong"
-    )
-    output_mode = output_mode if output_mode in (OUTPUT_ALL, OUTPUT_SELECTED) else OUTPUT_ALL
 
-    warnings = []
-    errors = []
-    if not has_master:
-        warnings.append(
-            "Master image is not connected to the Director; it must still feed both Krea2EditGroundedEncode "
-            "and Krea2EditModelPatch in the workflow."
-        )
-    if not poses:
-        errors.append("Pose list is empty.")
-    if len(poses) < requested_count:
-        warnings.append(
-            f"slide_count requests {requested_count} slides but only {len(poses)} non-empty pose lines exist."
-        )
+def build_krea2_carousel(*args, **kwargs):
+    return _onyx_core()['build_krea2_carousel'](*args, **kwargs)
 
-    active_count = min(requested_count, len(poses)) if poses else 0
-    selector = max(1, min(max(1, active_count), int(slide_selector)))
-    session_direction = _clean(session_direction)
-    character_trigger = _clean(character_trigger, 1_000)
-    extra_prompt = _clean(extra_prompt, 4_000)
-    if session_direction:
-        warnings.extend(_contradiction_warnings(session_direction, camera_policy, "Session direction"))
-
-    master_parts = [
-        "Edit the reference image and re-stage the same person; do not generate an unrelated person.",
-        _continuity_contract(continuity_strength),
-        _camera_contract(camera_policy),
-        (
-            "Only the requested body pose, expression, hand gesture and the camera adjustment permitted above may "
-            "change. Reconstruct the arms, hands and body naturally instead of copying limb positions that conflict "
-            "with the new pose. Produce one coherent photorealistic frame with one person, never a collage, grid or "
-            "character sheet."
-        ),
-    ]
-    if session_direction:
-        master_parts.append("Additional session direction, subordinate to the locks: " + session_direction)
-    master_instruction = " ".join(master_parts)
-
-    all_prompts = []
-    slide_records = []
-    for index, pose in enumerate(poses[:active_count], start=1):
-        warnings.extend(_contradiction_warnings(pose, camera_policy, f"Slide {index}"))
-        instruction = (
-            master_instruction
-            + f" Requested change for slide {index}: {pose}. Apply this change decisively while preserving all "
-            "locked attributes."
-        )
-        if character_trigger:
-            instruction = character_trigger + ", " + instruction
-        # Ajoute tel quel, en DERNIER, a chaque instruction : c'est le texte
-        # que l'utilisateur veut voir arriver au node suivant sans retouche.
-        if extra_prompt:
-            instruction = instruction.rstrip() + " " + extra_prompt
-        all_prompts.append(instruction)
-        slide_records.append(
-            {
-                "index": index,
-                "pose_instruction": pose,
-                "allowed_changes": ["pose", "expression", "hand_gesture", "camera_if_policy_allows"],
-            }
-        )
-
-    selected_prompt = all_prompts[selector - 1] if all_prompts else ""
-    if output_mode == OUTPUT_SELECTED and selected_prompt:
-        prompts = [selected_prompt]
-        emitted_indices = [selector]
-    else:
-        prompts = all_prompts
-        emitted_indices = list(range(1, active_count + 1))
-
-    manifest = {
-        "schema": 1,
-        "target": "Krea 2 Turbo + Krea 2 Identity Edit v1.2",
-        "conditioning": "dual: in-context VAE tokens + image-grounded Qwen3-VL",
-        "topology": "one_master_reference_plus_text_pose_list",
-        "recommended_settings": {
-            "steps": 10,
-            "cfg": 1.0,
-            "identity_edit_lora_strength": 1.0,
-            "ref_boost": 4.0,
-            "grounding_px": 768,
-            "fit_mode": "fit",
-            "max_output_megapixels": 2.0,
-        },
-        "output_mode": output_mode,
-        "camera_policy": camera_policy,
-        "continuity_strength": continuity_strength,
-        "requested_slide_count": requested_count,
-        "active_slide_count": active_count,
-        "selected_slide": selector,
-        "emitted_slides": emitted_indices,
-        "locked_attributes": [
-            "identity",
-            "facial_geometry",
-            "body_proportions",
-            "hairstyle",
-            "outfit",
-            "accessories",
-            "location",
-            "background",
-            "lighting",
-            "color_palette",
-            "photographic_finish",
-        ],
-        "slides": slide_records,
-    }
-    report = {
-        "ok": not errors,
-        "errors": errors,
-        "warnings": warnings,
-        "locked_attributes": manifest["locked_attributes"],
-        "allowed_to_change": ["pose", "expression", "hand gesture", "camera/framing per camera_policy"],
-        "active_slide_count": active_count,
-    }
-    if errors:
-        raise ValueError("[Onyx Krea2 Carousel] " + " ".join(errors))
-
-    # CFG 1 does not use negative guidance, but a same-length empty list keeps
-    # list execution aligned if the user later raises CFG and grounds negatives.
-    negatives = ["" for _ in prompts]
-    return {
-        "prompts": prompts,
-        "negative_prompts": negatives,
-        "selected_prompt": selected_prompt,
-        "master_instruction": master_instruction,
-        "manifest": json.dumps(manifest, ensure_ascii=False, indent=2),
-        "validation_report": json.dumps(report, ensure_ascii=False, indent=2),
-        "slide_count": active_count,
-        "selected_index": selector,
-        "status": f"{len(prompts)} Krea2 edit instruction(s) · {camera_policy} camera · {len(warnings)} warning(s)",
-    }
 
 class OnyxKrea2CarouselDirector:
     """Krea2 Identity Edit carousel director (V1 port of NodoForgeLab2 Beta)."""

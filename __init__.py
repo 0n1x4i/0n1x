@@ -101,6 +101,7 @@ def _load_pp(filename, modname):
     _path = _os.path.join(_pack_root, "post processing", filename)
     _spec = _ilu.spec_from_file_location(modname, _path)
     _mod  = _ilu.module_from_spec(_spec)
+    _mod.__package__ = __package__  # lets the module reach the pack's protected-code loader
     _spec.loader.exec_module(_mod)
     return _mod
 

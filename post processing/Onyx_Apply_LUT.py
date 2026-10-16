@@ -4,6 +4,14 @@ import torch
 
 # LUTS_DIR : dossier "luts/" à la racine du pack (un niveau au-dessus de "post processing/")
 import os as _onyx_os, importlib.util as _onyx_ilu
+
+from .nodes.onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('postfx_bundle', 'apply_lut', __package__)
+    return ns
+
 _onyx_prof_path = _onyx_os.path.join(_onyx_os.path.dirname(_onyx_os.path.dirname(_onyx_os.path.abspath(__file__))), "nodes", "onyx_render_profile.py")
 _onyx_prof_spec = _onyx_ilu.spec_from_file_location("onyx_render_profile_pp", _onyx_prof_path)
 _onyx_prof_mod = _onyx_ilu.module_from_spec(_onyx_prof_spec)
@@ -53,60 +61,9 @@ class Onyx_Apply_LUT:
         "strength: 1.0 = full effect, 0.0 = original image."
     )
 
-    def execute(self, image, lut_file, gamma_correction, clip_values, strength):
-        ensure_profile_ready()
-        from colour.io.luts.iridas_cube import read_LUT_IridasCube
+    def execute(self, *args, **kwargs):
+        return _onyx_core()['Onyx_Apply_LUT'].execute(self, *args, **kwargs)
 
-        lut_path = os.path.join(LUTS_DIR, lut_file)
-        if not os.path.isfile(lut_path):
-            raise FileNotFoundError(f"[Onyx Apply LUT] LUT file not found: {lut_path}")
-
-        device = image.device
-        lut = read_LUT_IridasCube(lut_path)
-        lut.name = lut_file
-
-        # --- Clip des valeurs dans le domaine ---
-        if clip_values:
-            if lut.domain[0].max() == lut.domain[0].min() and lut.domain[1].max() == lut.domain[1].min():
-                lut.table = np.clip(lut.table, lut.domain[0, 0], lut.domain[1, 0])
-            else:
-                if len(lut.table.shape) == 2:  # LUT 3×1D
-                    for dim in range(3):
-                        lut.table[:, dim] = np.clip(lut.table[:, dim], lut.domain[0, dim], lut.domain[1, dim])
-                else:  # LUT 3D
-                    for dim in range(3):
-                        lut.table[:, :, :, dim] = np.clip(lut.table[:, :, :, dim], lut.domain[0, dim], lut.domain[1, dim])
-
-        out = []
-        for img in image:
-            lut_img = img.cpu().numpy().copy()
-
-            is_non_default_domain = not np.array_equal(lut.domain, np.array([[0., 0., 0.], [1., 1., 1.]]))
-            dom_scale = None
-            if is_non_default_domain:
-                dom_scale = lut.domain[1] - lut.domain[0]
-                lut_img = lut_img * dom_scale + lut.domain[0]
-
-            if gamma_correction:
-                lut_img = lut_img ** (1 / 2.2)
-
-            lut_img = lut.apply(lut_img)
-
-            if gamma_correction:
-                lut_img = lut_img ** 2.2
-
-            if is_non_default_domain:
-                lut_img = (lut_img - lut.domain[0]) / dom_scale
-
-            lut_img = torch.from_numpy(lut_img).to(device)
-
-            if strength < 1.0:
-                lut_img = strength * lut_img + (1.0 - strength) * img
-
-            out.append(lut_img)
-
-        out = torch.stack(out)
-        return (out,)
 
 
 NODE_CLASS_MAPPINGS = {

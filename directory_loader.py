@@ -14,6 +14,14 @@ import folder_paths
 
 
 from .nodes.onyx_render_profile import ensure_profile_ready
+
+from .nodes.onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('utils_bundle', 'directory_loader', __package__)
+    return ns
+
 _SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif"}
 
 
@@ -86,66 +94,5 @@ class OnyxDirectoryImageLoaderNode:
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
-    def load_image(self, use_absolute_path, run_count, input_folder=None, absolute_path=""):
-        ensure_profile_ready()
-        if use_absolute_path:
-            directory = absolute_path.strip()
-            if not directory:
-                raise RuntimeError("Directory Image Loader: absolute path is required.")
-        else:
-            if not input_folder or input_folder == "(no folders found)":
-                raise RuntimeError("Directory Image Loader: no input folder selected. Create a subfolder in ComfyUI/input/.")
-            directory = os.path.join(folder_paths.get_input_directory(), input_folder)
-
-        if not os.path.isdir(directory):
-            raise RuntimeError(f"Directory Image Loader: '{directory}' is not a valid directory.")
-
-        files = []
-        for f in os.listdir(directory):
-            ext = os.path.splitext(f)[1].lower()
-            if ext in _SUPPORTED_EXTENSIONS:
-                files.append(f)
-
-        if not files:
-            raise RuntimeError(f"Directory Image Loader: no images found in '{directory}'.")
-
-        files.sort(key=str.lower)
-        total = len(files)
-        actual_run_count = min(run_count, total)
-
-        key = directory
-
-        # Track which image index we're on
-        if key not in OnyxDirectoryImageLoaderNode._counters:
-            OnyxDirectoryImageLoaderNode._counters[key] = 0
-        current = OnyxDirectoryImageLoaderNode._counters[key] % total
-        OnyxDirectoryImageLoaderNode._counters[key] = current + 1
-
-        # Track how many runs done in this batch
-        if key not in OnyxDirectoryImageLoaderNode._batch_runs:
-            OnyxDirectoryImageLoaderNode._batch_runs[key] = 0
-        OnyxDirectoryImageLoaderNode._batch_runs[key] += 1
-        batch_done = OnyxDirectoryImageLoaderNode._batch_runs[key]
-        remaining = actual_run_count - batch_done
-
-        filename = files[current]
-        filepath = os.path.join(directory, filename)
-
-        img = Image.open(filepath)
-        img = ImageOps.exif_transpose(img)
-        img = img.convert("RGB")
-
-        arr = np.array(img).astype(np.float32) / 255.0
-        tensor = torch.from_numpy(arr)[None, ...]
-
-        logging.info("Directory Image Loader: [%d/%d] %s (batch %d/%d, %d remaining)",
-                     current + 1, total, filename, batch_done, actual_run_count, max(0, remaining))
-
-        # Reset batch counter when done
-        if remaining <= 0:
-            OnyxDirectoryImageLoaderNode._batch_runs[key] = 0
-
-        return {"ui": {"current_index": [current], "total_count": [total],
-                       "run_count": [actual_run_count], "remaining": [max(0, remaining)],
-                       "filename": [filename]},
-                "result": (tensor, filename, filepath, current, total)}
+    def load_image(self, *args, **kwargs):
+        return _onyx_core()['OnyxDirectoryImageLoaderNode'].load_image(self, *args, **kwargs)

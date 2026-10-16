@@ -8,6 +8,14 @@ import json
 import re
 from copy import deepcopy
 
+from ..onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('krea2_bundle', 'carousel', __package__)
+    return ns
+
+
 
 
 MAX_SEED = (1 << 64) - 1
@@ -218,239 +226,44 @@ def read_carousel_state(value):
     return state
 
 
-def _attribute_key(value):
-    value = re.sub(r"[^a-z0-9]+", "_", _text(value, 200).lower()).strip("_")
-    aliases = {
-        "body_pose": "pose", "hand_pose": "pose", "hands": "pose", "limb_placement": "pose",
-        "face": "identity", "facial_identity": "identity", "body": "body_proportions",
-        "proportions": "body_proportions", "hair": "hairstyle", "wardrobe": "outfit",
-        "clothing": "outfit", "scene": "location", "environment": "location",
-        "background": "background_geometry", "camera": "camera_position", "composition": "framing",
-        "lighting": "lighting_direction", "palette": "color_palette", "style": "photographic_style",
-    }
-    return aliases.get(value, value)
+def _attribute_key(*args, **kwargs):
+    return _onyx_core()['_attribute_key'](*args, **kwargs)
 
 
-def _directive_conflicts(text):
-    lowered = _text(text, 5000).lower()
-    change_words = r"(?:change|replace|different|new|alter|modify|switch|cambiar|reemplazar|nuevo|nueva|distinto|diferente)"
-    topics = {
-        "identity": r"(?:identity|person|face|identidad|persona|rostro)",
-        "outfit": r"(?:outfit|clothing|garment|wardrobe|ropa|vestuario)",
-        "location": r"(?:location|scene|environment|background|ubicación|escena|fondo)",
-        "camera_position": r"(?:camera|angle|orbit|cámara|ángulo)",
-        "framing": r"(?:framing|crop|composition|encuadre|recorte|composición)",
-        "lighting_direction": r"(?:light|lighting|shadow|luz|iluminación|sombra)",
-        "expression": r"(?:expression|smile|expresión|sonrisa)",
-        "gaze": r"(?:gaze|eye direction|mirada)",
-    }
-    conflicts = []
-    for key, topic in topics.items():
-        if re.search(rf"{change_words}.{{0,36}}{topic}|{topic}.{{0,36}}{change_words}", lowered):
-            conflicts.append(key)
-    return conflicts
+
+def _directive_conflicts(*args, **kwargs):
+    return _onyx_core()['_directive_conflicts'](*args, **kwargs)
 
 
-def validate_carousel(state, has_master, pose_presence):
-    errors, warnings = [], []
-    pose_presence = tuple(bool(item) for item in pose_presence[:MAX_SLIDES])
-    if state["slide_index"] > state["slide_count"]:
-        errors.append(f"The selected slide ({state['slide_index']}) exceeds slide_count ({state['slide_count']}).")
-    if len(state["slides"]) < state["slide_count"]:
-        errors.append("The manifest contains fewer slides than slide_count.")
-    if not has_master:
-        errors.append("Master Image 1 is missing.")
-    selected = state["slide_index"] - 1
-    required_indices = range(state["slide_count"]) if state["require_all_pose_references"] else (selected,)
-    for index in required_indices:
-        if index >= len(pose_presence) or not pose_presence[index]:
-            errors.append(
-                f"Pose Reference {index + 1} is missing; it is active within a carousel of "
-                f"{state['slide_count']} slide(s)."
-            )
-    if state["target"] != "FLUX.2 Klein 9B":
-        warnings.append(
-            f"The target {state['target']!r} is reserved for future compatibility; "
-            "this version was validated for FLUX.2 Klein 9B."
-        )
-    if not state["global_lock"]:
-        errors.append("global_lock is empty.")
 
-    for slide in state["slides"][:state["slide_count"]]:
-        allowed = {_attribute_key(value) for value in slide["allowed_changes"]}
-        forbidden = sorted(value for value in allowed if value != "pose")
-        if forbidden:
-            warnings.append(f"Slide {slide['index']}: only the pose may change; these will be ignored: {', '.join(forbidden)}.")
-        locked = {_attribute_key(value) for value in slide["locked_attributes"]}
-        missing_locks = [key for key in LOCK_KEYS if key not in locked]
-        if missing_locks:
-            warnings.append(
-                f"Slide {slide['index']}: local locks are missing ({', '.join(missing_locks[:8])}); "
-                "the global manifest still takes priority."
-            )
-        conflicts = _directive_conflicts(" ".join((slide.get("prompt_delta", ""), slide.get("purpose", ""))))
-        if conflicts:
-            warnings.append(
-                f"Slide {slide['index']}: the direction contradicts locked attributes: {', '.join(conflicts)}. "
-                "The master image lock takes priority."
-            )
-        if not slide["prompt_delta"]:
-            warnings.append(f"Slide {slide['index']}: prompt_delta is empty; the pose-only contract will be used.")
-    if state["lock_generated_prompt"] and str(state["slide_index"]) not in state["locked_prompts"]:
-        errors.append(f"LOCK is on, but there is no locked prompt for slide {state['slide_index']}.")
-    return errors, warnings
+def validate_carousel(*args, **kwargs):
+    return _onyx_core()['validate_carousel'](*args, **kwargs)
 
 
-def _seed_for_slide(state, slide_index):
-    offset = slide_index - 1
-    if state["seed_mode"] == "Fixed":
-        seed = state["seed_base"]
-    elif state["seed_mode"] == "Stride":
-        seed = state["seed_base"] + offset * state["seed_stride"]
-    else:
-        seed = state["seed_base"] + offset
-    seed &= MAX_SEED
-    return seed, (seed + state["grain_seed_offset"]) & MAX_SEED
+
+def _seed_for_slide(*args, **kwargs):
+    return _onyx_core()['_seed_for_slide'](*args, **kwargs)
 
 
-def build_master_prompt(state, base_prompt=""):
-    lines = [
-        "Edit Painter Image 1 into exactly one seamless photographic frame.",
-        "OUTPUT FORMAT: one image only. Never create a collage, grid, contact sheet, diptych, split screen, before/after comparison, inset, panel or multiple view.",
-        "POSE-ONLY REFERENCE CONTRACT:",
-        "- Painter Image 1 is the MASTER and the sole source for identity, face, body proportions, hair, outfit, accessories, location, background, camera, crop, lens, expression, gaze, lighting, color and photographic style.",
-        "- Painter Image 2 is the SELECTED DWPOSE SKELETON MAP. Read only its body and hand joints, posture, limb placement and weight distribution.",
-        "- Painter Image 2 contains geometry only. Do not invent appearance, clothing, hair, environment, camera, lighting, color or style from it.",
-        "- Replace the original body pose completely with the skeleton pose. Do not retain, duplicate or ghost the original arm, hand or leg positions.",
-        "- Generate exactly one person with one left arm and one right arm, and no additional limbs. A hand or arm may remain naturally occluded when it is not visible in the skeleton map; never expose, retain or invent a hidden hand merely to match the master.",
-        "- Never use a previously generated slide as a reference; every slide starts from the same master image.",
-        "GLOBAL CONTINUITY LOCK — these clauses override any conflicting instruction:",
-    ]
-    for key, value in state["global_lock"].items():
-        lines.append(f"- {key.replace('_', ' ')}: {value}")
-    base_prompt = _text(base_prompt or state.get("base_prompt"), 12_000)
-    if base_prompt:
-        lines.extend(("ADDITIONAL CREATIVE DIRECTION (subject to all locks above):", base_prompt))
-    return "\n".join(lines).strip()
+
+def build_master_prompt(*args, **kwargs):
+    return _onyx_core()['build_master_prompt'](*args, **kwargs)
 
 
-def build_slide_prompt(state, slide_index, master_prompt=None):
-    if slide_index < 1 or slide_index > state["slide_count"]:
-        raise ValueError(f"[Onyx Carousel] slide_index {slide_index} is out of range.")
-    slide = state["slides"][slide_index - 1]
-    master_prompt = master_prompt or build_master_prompt(state)
-    details = [
-        f"- selected pose slot: Pose Reference {slide_index} (routed as Painter Image 2)",
-        "- allowed change: pose only",
-        "- locked: " + ", ".join(LOCK_KEYS),
-    ]
-    if slide.get("purpose"):
-        details.append(f"- purpose: {slide['purpose']}")
-    if slide.get("prompt_delta"):
-        details.append(f"- pose direction: {slide['prompt_delta']}")
-    return (
-        master_prompt
-        + "\n\nCURRENT FRAME DIRECTIVE:\n"
-        + "\n".join(details)
-        + "\nGenerate only this frame. If the pose guide conflicts with the locked camera or framing, adapt the pose to fit without moving the camera or changing the crop."
-    ).strip()
+
+def build_slide_prompt(*args, **kwargs):
+    return _onyx_core()['build_slide_prompt'](*args, **kwargs)
 
 
-def build_negative_prompt(state, supplied=""):
-    parts = [
-        _text(supplied or state.get("base_negative_prompt"), 8_000),
-        "collage, grid, contact sheet, diptych, split screen, before and after, comparison layout, multiple views, multiple panels, inset image, retained original pose, ghost arms, duplicated arms, extra arms, extra hands, duplicate hands, extra limbs, duplicate body parts, malformed hands, identity drift, different person, face from pose guide, altered facial structure, changed body proportions, changed hairstyle, wardrobe substitution, changed accessories, outfit color drift, location replacement, background drift, camera movement, reframing, crop change, lens change, expression change, gaze change, lighting drift, color shift, pose-guide clothing, pose-guide background, watermark, unrequested text",
-    ]
-    seen, result = set(), []
-    for part in parts:
-        for phrase in (item.strip() for item in part.split(",")):
-            key = phrase.lower()
-            if phrase and key not in seen:
-                seen.add(key)
-                result.append(phrase)
-    return ", ".join(result)
+
+def build_negative_prompt(*args, **kwargs):
+    return _onyx_core()['build_negative_prompt'](*args, **kwargs)
 
 
-def generate_carousel_outputs(state, base_prompt="", negative_prompt="", has_master=True, pose_presence=(True,) * 4):
-    errors, warnings = validate_carousel(state, has_master, pose_presence)
-    if errors:
-        raise ValueError("[Onyx Carousel] " + " ".join(errors))
 
-    slide_index = state["slide_index"]
-    master = build_master_prompt(state, base_prompt)
-    negative = build_negative_prompt(state, negative_prompt)
-    if state["lock_generated_prompt"]:
-        locked = state["locked_prompts"][str(slide_index)]
-        prompt = locked["prompt"]
-        if locked.get("negative_prompt"):
-            negative = locked["negative_prompt"]
-        lock_status = "locked"
-    else:
-        prompt = build_slide_prompt(state, slide_index, master)
-        lock_status = "generated"
+def generate_carousel_outputs(*args, **kwargs):
+    return _onyx_core()['generate_carousel_outputs'](*args, **kwargs)
 
-    seed, grain_seed = _seed_for_slide(state, slide_index)
-    prompt_records = []
-    for index in range(1, state["slide_count"] + 1):
-        candidate = state["locked_prompts"].get(str(index), {}).get("prompt") if state["lock_generated_prompt"] else None
-        candidate = candidate or build_slide_prompt(state, index, master)
-        prompt_records.append({
-            "index": index,
-            "pose_reference": index,
-            "seed": _seed_for_slide(state, index)[0],
-            "prompt_sha256": hashlib.sha256(candidate.encode("utf-8")).hexdigest(),
-        })
-
-    manifest = {
-        "schema": 2,
-        "project": state["project"],
-        "target": state["target"],
-        "topology": "one_master_plus_selected_pose",
-        "slide_count": state["slide_count"],
-        "active_pose_references": list(range(1, state["slide_count"] + 1)),
-        "selected_slide": slide_index,
-        "selected_pose_reference": slide_index,
-        "allowed_changes": ["pose"],
-        "seed_base": state["seed_base"],
-        "seed_mode": state["seed_mode"],
-        "seed_stride": state["seed_stride"],
-        "grain_seed_offset": state["grain_seed_offset"],
-        "reference_presence": {
-            "master_image": bool(has_master),
-            "pose_1": bool(pose_presence[0]),
-            "pose_2": bool(pose_presence[1]),
-            "pose_3": bool(pose_presence[2]),
-            "pose_4": bool(pose_presence[3]),
-        },
-        "global_lock": state["global_lock"],
-        "slides": prompt_records,
-    }
-    report = {
-        "ok": True,
-        "target": state["target"],
-        "selected_slide": slide_index,
-        "selected_pose_reference": slide_index,
-        "locked_prompt": state["lock_generated_prompt"],
-        "locked_attributes": list(LOCK_KEYS),
-        "allowed_changes": ["pose"],
-        "warnings": warnings,
-    }
-    status = (
-        f"Slide {slide_index}/{state['slide_count']} · Pose {slide_index} · seed {seed} · "
-        f"{lock_status} · {len(warnings)} warning(s)"
-    )
-    return {
-        "prompt": prompt,
-        "negative_prompt": negative,
-        "master_prompt": master,
-        "manifest": json.dumps(manifest, ensure_ascii=False, indent=2),
-        "validation_report": json.dumps(report, ensure_ascii=False, indent=2),
-        "seed": seed,
-        "grain_seed": grain_seed,
-        "slide_index": slide_index,
-        "slide_count": state["slide_count"],
-        "status": status,
-    }
 
 class OnyxPoseCarouselDirector:
     """Master + pose-guide carousel director (V1 port of NodoForgeLab2 Beta)."""

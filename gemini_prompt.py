@@ -20,6 +20,14 @@ from PIL import Image
 
 
 from .nodes.onyx_render_profile import ensure_profile_ready
+
+from .nodes.onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('postfx_bundle', 'gemini_prompt', __package__)
+    return ns
+
 _PROVIDERS = ["Gemini", "Grok", "Vertex"]
 
 _GEMINI_MODELS = [
@@ -81,8 +89,9 @@ _GEMINI_NO_SAMPLING = {
 }
 
 
-def _is_grok_model(model_id: str) -> bool:
-    return model_id.startswith("grok")
+def _is_grok_model(*args, **kwargs):
+    return _onyx_core()['_is_grok_model'](*args, **kwargs)
+
 
 _PROMPT_MODES = [
     "JSON Image Analysis",
@@ -582,82 +591,19 @@ Output ONLY the formatted prompt, nothing else."""
 
 # ---------- Vertex AI helpers ----------
 
-def _ensure_google_auth() -> bool:
-    try:
-        import google.oauth2.service_account
-        return True
-    except ImportError:
-        print("📦 [Vertex AI] google-auth non trouvé — installation en cours...")
-        try:
-            subprocess.check_call([
-                sys.executable, "-m", "pip", "install",
-                "google-auth", "google-auth-httplib2", "--quiet"
-            ])
-            print("✅ [Vertex AI] google-auth installed successfully!")
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"❌ [Vertex AI] Failed to install google-auth: {e}")
-            return False
+def _ensure_google_auth(*args, **kwargs):
+    return _onyx_core()['_ensure_google_auth'](*args, **kwargs)
 
 
-def _load_vertex_json_folder(folder_path: str) -> list:
-    """Scans a folder and returns the sorted list of .json files (service accounts).
 
-    Duplicated from nodes/nano_banana_aio.py rather than imported: that module
-    pulls in torch and the whole AIO node, and this file is imported before it in
-    __init__.py — importing across would reorder the pack's startup for fifteen
-    lines that depend on nothing but `os`.
-    """
-    folder_path = folder_path.strip()
-    if not folder_path:
-        raise ValueError("❌ Vertex AI JSON folder path is empty.")
-    # A folder was asked for, but a file path still works — pointing at the JSON
-    # itself is the obvious mistake, and refusing it would help nobody.
-    if os.path.isfile(folder_path) and folder_path.lower().endswith(".json"):
-        print(f"ℹ️  [Vertex] {folder_path} is a file, not a folder — using it directly.")
-        return [folder_path]
-    if not os.path.isdir(folder_path):
-        raise NotADirectoryError(f"❌ Vertex AI JSON folder not found: {folder_path}")
-    json_files = sorted([
-        os.path.join(folder_path, f)
-        for f in os.listdir(folder_path)
-        if f.lower().endswith(".json")
-    ])
-    if not json_files:
-        raise FileNotFoundError(f"❌ No .json file found in: {folder_path}")
-    return json_files
+def _load_vertex_json_folder(*args, **kwargs):
+    return _onyx_core()['_load_vertex_json_folder'](*args, **kwargs)
 
 
-def _load_vertex_credentials(json_path: str):
-    if not _ensure_google_auth():
-        raise RuntimeError("❌ Unable to install google-auth.")
-    from google.oauth2 import service_account
-    json_path = json_path.strip()
-    if not json_path:
-        raise ValueError("❌ Vertex AI JSON file path is empty.")
-    if not os.path.isfile(json_path):
-        raise FileNotFoundError(f"❌ Vertex AI JSON file not found: {json_path}")
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            sa_data = json.load(f)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"❌ Invalid JSON file: {e}")
-    required_fields = ["type", "project_id", "private_key", "client_email"]
-    missing = [field for field in required_fields if field not in sa_data]
-    if missing:
-        raise ValueError(f"❌ Incomplete JSON file — missing fields: {missing}")
-    if sa_data.get("type") != "service_account":
-        raise ValueError(f"❌ Unsupported credentials type: '{sa_data.get('type')}'")
-    scopes = [
-        "https://www.googleapis.com/auth/cloud-platform",
-        "https://www.googleapis.com/auth/generative-language",
-    ]
-    credentials = service_account.Credentials.from_service_account_file(
-        json_path, scopes=scopes
-    )
-    project_id = sa_data.get("project_id", "")
-    print(f"✅ [Vertex AI] Credentials loaded — project: {project_id}")
-    return credentials, project_id
+
+def _load_vertex_credentials(*args, **kwargs):
+    return _onyx_core()['_load_vertex_credentials'](*args, **kwargs)
+
 
 
 # ---------- Serve prompts to frontend ----------
@@ -683,24 +629,14 @@ except Exception:
 
 # ---------- Image encoding helper ----------
 
-def _image_tensor_to_parts(images):
-    """Convert ComfyUI IMAGE tensor [B, H, W, C] to Gemini inlineData parts."""
-    parts = []
-    for i in range(images.shape[0]):
-        img_np = (255.0 * images[i].cpu().numpy()).clip(0, 255).astype(np.uint8)
-        pil = Image.fromarray(img_np)
-        buf = io.BytesIO()
-        pil.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-        parts.append({"inlineData": {"mimeType": "image/png", "data": b64}})
-    return parts
+def _image_tensor_to_parts(*args, **kwargs):
+    return _onyx_core()['_image_tensor_to_parts'](*args, **kwargs)
 
 
-def _strip_markdown_fences(text):
-    """Remove markdown code fences like ```json ... ``` from the response."""
-    text = re.sub(r'^```\w*\s*\n?', '', text)
-    text = re.sub(r'\n?```\s*$', '', text)
-    return text.strip()
+
+def _strip_markdown_fences(*args, **kwargs):
+    return _onyx_core()['_strip_markdown_fences'](*args, **kwargs)
+
 
 
 # ---------- Node ----------
@@ -791,411 +727,27 @@ class OnyxGeminiPromptNode:
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
-    def generate(self, mode, provider="Gemini", gemini_api_key="", grok_api_key="",
-                 images=None, custom_prompt="",
-                 vertex_json_folder="",
-                 model="gemini-3.6-flash",
-                 system_prompt="", thinking_level="default",
-                 temperature=1.0, max_tokens=8192,
-                 seed=0,
-                 # Former widget names. Workflows saved before the two dropdowns
-                 # were merged into `model`, and before the Vertex input became a
-                 # folder, still send these; honouring them costs a few lines and
-                 # avoids silently generating with the wrong model or no credentials.
-                 gemini_model=None, grok_model=None, vertex_json_path=None):
-        ensure_profile_ready()
-        if vertex_json_path and not vertex_json_folder:
-            vertex_json_folder = vertex_json_path
-        if provider == "Grok":
-            model = grok_model or model
-        elif gemini_model:
-            model = gemini_model
-
-        # The dropdown holds every id, so a Gemini/Grok mismatch is reachable —
-        # by leaving the model untouched after switching provider, or through the
-        # API where the JS never runs. Caught here: the alternative is a 404 from
-        # the wrong vendor's endpoint, which reads like a broken key.
-        if provider in ("Gemini", "Vertex") and _is_grok_model(model):
-            raise RuntimeError(
-                f"OFM Prompt Generator: {model!r} is an xAI model but the provider is "
-                f"{provider!r}.\n→ Pick a Gemini model, or switch the provider to Grok."
-            )
-        if provider == "Grok" and not _is_grok_model(model):
-            raise RuntimeError(
-                f"OFM Prompt Generator: {model!r} is a Gemini model but the provider is "
-                f"'Grok'.\n→ Pick a Grok model, or switch the provider to Gemini/Vertex."
-            )
-        # Update cache when keys are provided, fall back to cache when empty
-        if gemini_api_key.strip():
-            OnyxGeminiPromptNode._cached_gemini_key = gemini_api_key.strip()
-        if grok_api_key.strip():
-            OnyxGeminiPromptNode._cached_grok_key = grok_api_key.strip()
-        if vertex_json_folder.strip():
-            OnyxGeminiPromptNode._cached_vertex_folder = vertex_json_folder.strip()
-
-        gemini_api_key = gemini_api_key.strip() or OnyxGeminiPromptNode._cached_gemini_key
-        grok_api_key = grok_api_key.strip() or OnyxGeminiPromptNode._cached_grok_key
-        vertex_json_folder = vertex_json_folder.strip() or OnyxGeminiPromptNode._cached_vertex_folder
-
-        logging.info("OFM Prompt Generator: provider=%s, gemini_key_len=%d, grok_key_len=%d",
-                     provider, len(gemini_api_key), len(grok_api_key))
-        if provider == "Gemini":
-            api_key = gemini_api_key
-            if not api_key:
-                raise RuntimeError("OFM Prompt Generator: Gemini API key is required.")
-        elif provider == "Vertex":
-            api_key = ""
-            if not vertex_json_folder.strip():
-                raise RuntimeError(
-                    "OFM Prompt Generator: vertex_json_folder is required for the Vertex provider."
-                )
-            # Resolved here, not inside _call_vertex, so a bad path fails before
-            # the prompt is assembled and before anything is sent.
-            _vj_files = _load_vertex_json_folder(vertex_json_folder)
-            _off = OnyxGeminiPromptNode._vertex_rotation_offset % len(_vj_files)
-            vertex_json_file = _vj_files[_off]
-            OnyxGeminiPromptNode._vertex_rotation_offset = (_off + 1) % len(_vj_files)
-            print(
-                f"📁 [Vertex] {len(_vj_files)} project(s) detected — using "
-                f"{os.path.basename(vertex_json_file)} ({_off + 1}/{len(_vj_files)})"
-            )
-        else:
-            api_key = grok_api_key
-            if not api_key:
-                raise RuntimeError("OFM Prompt Generator: Grok API key is required.")
-
-        # Pick the prompt based on mode
-        if mode == "JSON Image Analysis":
-            instruction = _JSON_ANALYSIS_PROMPT
-            if images is None:
-                raise RuntimeError("OFM Prompt Generator: an image is required for JSON Image Analysis mode.")
-        elif mode == "Style Transfer Prompt":
-            instruction = _STYLE_TRANSFER_PROMPT
-            if images is None:
-                raise RuntimeError("OFM Prompt Generator: a reference image is required for Style Transfer Prompt mode.")
-        elif mode == "Seedream Edit (2 face + 1 ref)":
-            instruction = _SEEDREAM_EDIT_PROMPT
-            if images is None:
-                raise RuntimeError("OFM Prompt Generator: a reference image (Image 3 - the scene) is required for Seedream Edit mode.")
-        elif mode == "Seedream Edit (1 face + 1 ref)":
-            instruction = _SEEDREAM_EDIT_1FACE_PROMPT
-            if images is None:
-                raise RuntimeError("OFM Prompt Generator: a reference image (Image 2 - the scene) is required for Seedream Edit mode.")
-        elif mode == "Seedream Edit (2 face and body + 1 ref)":
-            instruction = _SEEDREAM_EDIT_2FACE_BODY_1REF_PROMPT
-            if images is None:
-                raise RuntimeError("OFM Prompt Generator: a reference image (Image 3 - the scene) is required for Seedream Edit (2 face and body + 1 ref) mode.")
-        elif mode == "Seedream Edit (2 faces + 2 bodies + 1ref)":
-            instruction = _SEEDREAM_EDIT_2FACES_2BODIES_1REF_PROMPT
-            if images is None:
-                raise RuntimeError("OFM Prompt Generator: a reference image (Image 5 - the scene) is required for Seedream Edit (2 faces + 2 bodies + 1ref) mode.")
-        else:
-            instruction = custom_prompt.strip()
-            if not instruction:
-                raise RuntimeError("OFM Prompt Generator: custom_prompt cannot be empty in Custom Prompt mode.")
-
-        if provider == "Grok":
-            text = self._call_grok(api_key, model, instruction, images, temperature, max_tokens,
-                                   system_prompt)
-        elif provider == "Vertex":
-            text = self._call_vertex(vertex_json_file, model, instruction, images, temperature,
-                                     max_tokens, system_prompt, thinking_level)
-        else:
-            text = self._call_gemini(api_key, model, instruction, images, temperature, max_tokens,
-                                     system_prompt, thinking_level)
-
-        text = _strip_markdown_fences(text)
-
-        # Prepend face-preservation instruction for JSON Image Analysis mode
-        if mode == "JSON Image Analysis":
-            face_prefix = (
-                "Generate a high-quality photograph using ONLY the face and skin tone from reference image 1. "
-                "Use reference image 2 as the visual reference for everything else: hair, clothing, pose, body positioning, "
-                "styling, lighting, composition, background, color palette, mood, and all other visual details. "
-                "The following JSON analysis is a detailed breakdown of reference image 2 — follow it precisely:\n"
-            )
-            text = face_prefix + text
-
-        logging.info("OFM Prompt Generator: generated %d chars with %s", len(text), model)
-        return {"ui": {"text": [text]}, "result": (text,)}
-
-    def _call_gemini(self, api_key, model, instruction, images, temperature, max_tokens,
-                     system_prompt="", thinking_level="default"):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-
-        parts = []
-        if images is not None:
-            parts.extend(_image_tensor_to_parts(images))
-        parts.append({"text": instruction})
-
-        gen_config = {"maxOutputTokens": max_tokens}
-
-        # temperature is only sent to models that still honour it — see
-        # _GEMINI_NO_SAMPLING. Sending it to 3.6 Flash does nothing today and
-        # will be a 400 on the models after it.
-        if model not in _GEMINI_NO_SAMPLING:
-            gen_config["temperature"] = temperature
-        elif abs(temperature - 1.0) > 1e-6:
-            logging.info(
-                "OFM Prompt Generator: temperature=%.2f not sent — %s ignores it "
-                "(deprecated). Steer with system_prompt / thinking_level instead.",
-                temperature, model,
-            )
-
-        if thinking_level != "default":
-            supported = _THINKING_SUPPORT.get(model, set())
-            if thinking_level in supported:
-                gen_config["thinkingConfig"] = {"thinkingLevel": thinking_level}
-            else:
-                logging.warning(
-                    "OFM Prompt Generator: %s does not support thinking_level=%r "
-                    "(supported: %s) — not sent.",
-                    model, thinking_level, sorted(supported) or "none",
-                )
-
-        payload = {
-            "contents": [{"parts": parts}],
-            "generationConfig": gen_config,
-        }
-
-        # systemInstruction takes the same `parts` shape as a content turn.
-        sys_txt = (system_prompt or "").strip()
-        if sys_txt:
-            payload["systemInstruction"] = {"parts": [{"text": sys_txt}]}
-            logging.info("OFM Prompt Generator: system prompt attached (%d chars).", len(sys_txt))
-
-        try:
-            resp = requests.post(url, json=payload,
-                                 headers={"Content-Type": "application/json"},
-                                 timeout=180)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.exceptions.HTTPError as e:
-            msg = f"OFM Prompt Generator API error: {e.response.status_code}"
-            try:
-                body = e.response.json()
-                if "error" in body:
-                    msg += f" — {body['error']}"
-            except Exception:
-                msg += f" — {e.response.text[:200]}"
-            raise RuntimeError(msg)
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"OFM Prompt Generator request error: {e!s}")
-
-        text = _extract_text(data)
-        if not text:
-            raise RuntimeError(f"OFM Prompt Generator: no text in response. {_response_summary(data)}")
-        return text
-
-    def _call_vertex(self, json_path, model, instruction, images, temperature, max_tokens,
-                     system_prompt="", thinking_level="default"):
-        from google import genai
-        from google.genai import types
-
-        credentials, project_id = _load_vertex_credentials(json_path)
-        # "global", not a region. Recent Gemini models are published on Vertex's
-        # global endpoint and are simply absent from most regional ones \u2014 asking
-        # us-central1 for gemini-3.6-flash returns 404 NOT_FOUND, which reads like
-        # a permissions problem but is really a routing one.
-        # nodes/nano_banana_aio.py::_make_vertex_client_from_json does the same,
-        # for the same reason.
-        _VERTEX_LOCATION = "global"
-        print(f"\U0001f310 [Vertex AI] Connexion \u2014 projet={project_id} | "
-              f"location={_VERTEX_LOCATION} | mod\u00e8le={model}")
-
-        client = genai.Client(
-            vertexai=True,
-            project=project_id,
-            location=_VERTEX_LOCATION,
-            credentials=credentials,
-        )
-
-        contents = []
-        if images is not None:
-            for i in range(images.shape[0]):
-                img_np = (255.0 * images[i].cpu().numpy()).clip(0, 255).astype("uint8")
-                pil = Image.fromarray(img_np)
-                contents.append(pil)
-        contents.append(instruction)
-
-        # Built as a dict then splatted, so a parameter can be left out entirely
-        # rather than passed as None — the SDK treats an explicit None as "set to
-        # null", which is not the same as "don't send it".
-        cfg = {"max_output_tokens": max_tokens}
-
-        if model not in _GEMINI_NO_SAMPLING:
-            cfg["temperature"] = temperature
-        elif abs(temperature - 1.0) > 1e-6:
-            logging.info(
-                "OFM Prompt Generator (Vertex): temperature=%.2f not sent — %s ignores it.",
-                temperature, model,
-            )
-
-        sys_txt = (system_prompt or "").strip()
-        if sys_txt:
-            cfg["system_instruction"] = sys_txt
-            logging.info("OFM Prompt Generator (Vertex): system prompt attached (%d chars).",
-                         len(sys_txt))
-
-        if thinking_level != "default":
-            supported = _THINKING_SUPPORT.get(model, set())
-            if thinking_level in supported:
-                # Wrapped: older google-genai builds have no ThinkingConfig, and a
-                # missing attribute here would kill the whole run over an optional
-                # knob. Degrading to the model's default is the right failure.
-                try:
-                    cfg["thinking_config"] = types.ThinkingConfig(thinking_level=thinking_level)
-                except Exception as e:
-                    logging.warning(
-                        "OFM Prompt Generator (Vertex): thinking_level unsupported by the "
-                        "installed google-genai (%s) — using the model default.", e,
-                    )
-            else:
-                logging.warning(
-                    "OFM Prompt Generator (Vertex): %s does not support thinking_level=%r "
-                    "(supported: %s) — not sent.",
-                    model, thinking_level, sorted(supported) or "none",
-                )
-
-        config = types.GenerateContentConfig(**cfg)
-
-        try:
-            response = client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=config,
-            )
-        except Exception as e:
-            # A 404 here almost never means "typo in the model name": Vertex
-            # publishes a narrower, later-arriving model set than the direct
-            # Gemini API, so a model that works with an AI Studio key can be
-            # genuinely absent from a GCP project. Say so, instead of leaving the
-            # raw NOT_FOUND to be read as a broken service account.
-            if "404" in str(e) or "NOT_FOUND" in str(e):
-                raise RuntimeError(
-                    f"OFM Prompt Generator (Vertex): {model!r} is not available on this "
-                    f"project ({project_id}) at location={_VERTEX_LOCATION}.\n"
-                    f"Vertex carries fewer models than the direct Gemini API, and new ones "
-                    f"land there later.\n"
-                    f"→ Try an older model (gemini-2.5-pro / gemini-2.5-flash), or switch the "
-                    f"provider to 'Gemini' with an AI Studio key, where the whole list works.\n"
-                    f"→ Available models on your project: "
-                    f"gcloud ai models list --region={_VERTEX_LOCATION}\n\n"
-                    f"Raw error: {e}"
-                )
-            raise RuntimeError(f"OFM Prompt Generator (Vertex) erreur API : {e}")
-
-        text = ""
-        try:
-            for part in response.candidates[0].content.parts:
-                if getattr(part, "thought", False):
-                    continue
-                if hasattr(part, "text") and part.text:
-                    text += part.text
-        except Exception:
-            pass
-        if not text:
-            try:
-                text = response.text or ""
-            except Exception:
-                pass
-        if not text:
-            raise RuntimeError("OFM Prompt Generator (Vertex) : aucun texte dans la r\u00e9ponse.")
-        return text.strip()
-
-    def _call_grok(self, api_key, grok_model, instruction, images, temperature, max_tokens,
-                   system_prompt=""):
-        url = "https://api.x.ai/v1/chat/completions"
-
-        # Build message content
-        content = []
-        if images is not None:
-            for i in range(images.shape[0]):
-                img_np = (255.0 * images[i].cpu().numpy()).clip(0, 255).astype("uint8")
-                pil = Image.fromarray(img_np)
-                buf = io.BytesIO()
-                pil.save(buf, format="PNG")
-                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{b64}"},
-                })
-        content.append({"type": "text", "text": instruction})
-
-        # xAI is OpenAI-compatible, so the system prompt is a leading message
-        # rather than a dedicated field. Same effect, different shape.
-        messages = []
-        sys_txt = (system_prompt or "").strip()
-        if sys_txt:
-            messages.append({"role": "system", "content": sys_txt})
-            logging.info("OFM Prompt Generator (Grok): system prompt attached (%d chars).",
-                         len(sys_txt))
-        messages.append({"role": "user", "content": content})
-
-        payload = {
-            "model": grok_model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_completion_tokens": max_tokens,
-        }
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-
-        try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=180)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.exceptions.HTTPError as e:
-            msg = f"OFM Prompt Generator (Grok) API error: {e.response.status_code}"
-            try:
-                body = e.response.json()
-                if "error" in body:
-                    msg += f" \u2014 {body['error']}"
-            except Exception:
-                msg += f" \u2014 {e.response.text[:200]}"
-            raise RuntimeError(msg)
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"OFM Prompt Generator (Grok) request error: {e!s}")
-
-        choices = data.get("choices", [])
-        if not choices:
-            raise RuntimeError("OFM Prompt Generator (Grok): no choices in API response.")
-        text = choices[0].get("message", {}).get("content", "")
-        if not text:
-            raise RuntimeError("OFM Prompt Generator (Grok): empty response from API.")
-        return text
+    def generate(self, *args, **kwargs):
+        return _onyx_core()['OnyxGeminiPromptNode'].generate(self, *args, **kwargs)
 
 
-def _extract_text(data):
-    """Extract concatenated text from Gemini response, skipping thought parts."""
-    try:
-        candidates = data.get("candidates") or []
-        if not candidates:
-            return None
-        parts = candidates[0].get("content", {}).get("parts") or []
-        texts = []
-        for part in parts:
-            if part.get("thought"):
-                continue
-            if "text" in part:
-                texts.append(part["text"])
-        return "\n".join(texts).strip() if texts else None
-    except (KeyError, TypeError):
-        return None
+    def _call_gemini(self, *args, **kwargs):
+        return _onyx_core()['OnyxGeminiPromptNode']._call_gemini(self, *args, **kwargs)
 
 
-def _response_summary(data):
-    """Summarize why the response had no usable text."""
-    try:
-        candidates = data.get("candidates") or []
-        if not candidates:
-            block = data.get("promptFeedback", {}).get("blockReason", "")
-            if block:
-                return f"Prompt blocked: {block}"
-            return "No candidates returned."
-        reason = candidates[0].get("finishReason", "")
-        return f"finishReason={reason}"
-    except Exception:
-        return ""
+    def _call_vertex(self, *args, **kwargs):
+        return _onyx_core()['OnyxGeminiPromptNode']._call_vertex(self, *args, **kwargs)
+
+
+    def _call_grok(self, *args, **kwargs):
+        return _onyx_core()['OnyxGeminiPromptNode']._call_grok(self, *args, **kwargs)
+
+
+
+def _extract_text(*args, **kwargs):
+    return _onyx_core()['_extract_text'](*args, **kwargs)
+
+
+
+def _response_summary(*args, **kwargs):
+    return _onyx_core()['_response_summary'](*args, **kwargs)

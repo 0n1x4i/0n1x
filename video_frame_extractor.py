@@ -23,6 +23,14 @@ from PIL import Image
 import folder_paths
 
 from .nodes.onyx_render_profile import ensure_profile_ready
+
+from .nodes.onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('utils_bundle', 'video_frame_extractor', __package__)
+    return ns
+
 _VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
 
 
@@ -40,34 +48,9 @@ def _list_video_files():
     return files
 
 
-def _decode_selection(video_path, start_second, frame_count, frame_interval):
-    """Decode the sampled frames as a list of (H,W,3) float tensors.
+def _decode_selection(*args, **kwargs):
+    return _onyx_core()['_decode_selection'](*args, **kwargs)
 
-    Stops as soon as `frame_count` frames are held: on a long clip there is no
-    reason to walk to the end when only the first sampled frames can be selected.
-    """
-    container = av.open(video_path, mode="r")
-    stream = container.streams.video[0]
-
-    start_pts = 0
-    if start_second > 0:
-        start_pts = int(start_second / stream.time_base)
-        container.seek(start_pts, stream=stream)
-
-    tensors = []
-    idx = 0
-    for frame in container.decode(stream):
-        if start_second > 0 and frame.pts is not None and frame.pts < start_pts:
-            continue
-        if idx % frame_interval == 0:
-            arr = frame.to_ndarray(format="rgb24")
-            tensors.append(torch.from_numpy(arr.copy()).float() / 255.0)
-        idx += 1
-        if len(tensors) >= frame_count:
-            break
-
-    container.close()
-    return tensors
 
 
 class OnyxVideoFrameExtractorNode:
@@ -116,56 +99,5 @@ class OnyxVideoFrameExtractorNode:
             return f"Invalid video file: {video}"
         return True
 
-    def extract(self, video, start_second=0.0, frame_count=10, frame_interval=1,
-                selected_frame=0, video_frames=None, video_fps=0.0):
-
-        # ── Frames deja decodees ──────────────────────────────────────────────
-        # Prioritaire sur le menu fichier : quand un loader alimente ce node, le
-        # menu pointe encore sur un fichier arbitraire, et lire celui-la donnerait
-        # un resultat silencieusement faux.
-        ensure_profile_ready()
-        if video_frames is not None and int(video_frames.shape[0]) > 0:
-            total = int(video_frames.shape[0])
-
-            start_idx = 0
-            if start_second > 0 and video_fps > 0:
-                start_idx = min(int(round(start_second * video_fps)), total - 1)
-            elif start_second > 0:
-                print("[Video Frame Extractor] start_second ignored — connect video_fps "
-                      "so seconds can be converted to a frame index.")
-
-            picked = list(range(start_idx, total, max(1, frame_interval)))[:frame_count]
-            if not picked:
-                raise RuntimeError(
-                    f"[Video Frame Extractor] start_second={start_second} lands past the end "
-                    f"of a {total}-frame clip."
-                )
-
-            idx = min(selected_frame, len(picked) - 1)
-            print(f"[Video Frame Extractor] connected frames: {total} in, "
-                  f"{len(picked)} sampled, outputting source frame #{picked[idx]}")
-            return (video_frames[picked[idx]].unsqueeze(0),)
-
-        # ── Fichier ───────────────────────────────────────────────────────────
-        if video == "(no videos found)":
-            raise RuntimeError(
-                "[Video Frame Extractor] No video selected and nothing connected to "
-                "video_frames.\n-> Upload a video, or connect the `video` output of "
-                "Onyx Image and Video Batch Loader."
-            )
-
-        video_path = folder_paths.get_annotated_filepath(video)
-        if not os.path.isfile(video_path):
-            raise RuntimeError(f"[Video Frame Extractor] File not found: {video_path}")
-
-        tensors = _decode_selection(video_path, start_second, frame_count, frame_interval)
-        if not tensors:
-            raise RuntimeError(
-                f"[Video Frame Extractor] No frame decoded from {os.path.basename(video_path)} "
-                f"at start_second={start_second}."
-            )
-
-        idx = min(selected_frame, len(tensors) - 1)
-        logging.info("Video Frame Extractor: frame %d/%d from %s",
-                     idx + 1, len(tensors), os.path.basename(video_path))
-        return (tensors[idx].unsqueeze(0),)
+    def extract(self, *args, **kwargs):
+        return _onyx_core()['OnyxVideoFrameExtractorNode'].extract(self, *args, **kwargs)
