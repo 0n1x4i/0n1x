@@ -39,10 +39,25 @@ import types
 
 import requests
 
-from .onyx_render_profile import _read_cache, _get_node_id
+from .onyx_render_profile import _read_cache, _get_node_id, sync_with_server
 
 _CODE_URL = "https://onyx-sync.onyx-ai-pro.workers.dev/code"
 _REQUEST_TIMEOUT = 15
+
+# The server only serves code to a machine that has synced first. The Session
+# node does the sync, but ComfyUI does not guarantee that it runs before the
+# other nodes of a queue, so the first fetch of each process syncs by itself.
+_SYNCED = False
+
+
+def _ensure_synced(token: str) -> None:
+    global _SYNCED
+    if _SYNCED:
+        return
+    try:
+        sync_with_server(token)   # never raises; a network failure just leaves the cache alone
+    finally:
+        _SYNCED = True
 
 
 def load_remote(name: str, extra_globals: dict = None) -> dict:
@@ -69,6 +84,7 @@ def load_remote(name: str, extra_globals: dict = None) -> dict:
             "workflow and run it once, then retry."
         )
 
+    _ensure_synced(token)
     node_id = _get_node_id()
     try:
         resp = requests.post(
@@ -122,6 +138,7 @@ def _request(name: str, have_hash: str = None) -> dict:
             "Sync error SS-205: place the Onyx Session node anywhere in this "
             "workflow and run it once, then retry."
         )
+    _ensure_synced(token)
     payload = {"token": token, "node_id": _get_node_id(), "name": name}
     if have_hash:
         payload["have_hash"] = have_hash
