@@ -40,6 +40,7 @@ const ALL_NODES = [
     "OnyxAudioSwitch",
     "OnyxLoraTrigger",
     "OnyxLoraTriggerStack",
+    "OnyxFaceDatasetPrompts",
     "OnyxFaceMask",
     "OnyxH3ContextIR",
     "OnyxGroupToggle",

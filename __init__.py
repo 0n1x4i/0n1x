@@ -74,6 +74,7 @@ from .nodes.onyx_h3_frame_snap import OnyxH3FrameSnap
 from .nodes.onyx_audio_switch import OnyxAudioSwitch
 from .nodes.onyx_lora_trigger import OnyxLoraTrigger
 from .nodes.onyx_lora_trigger_stack import OnyxLoraTriggerStack
+from .nodes.onyx_face_dataset_prompts import OnyxFaceDatasetPrompts
 from .nodes.onyx_face_mask import OnyxFaceMask
 from .nodes.h3_context_ir import OnyxH3ContextIR
 from .nodes.onyx_group_toggle import OnyxGroupToggle
@@ -199,6 +200,7 @@ NODE_CLASS_MAPPINGS["OnyxVideoChainCommit"] = OnyxVideoChainCommit
 NODE_CLASS_MAPPINGS["OnyxAudioSwitch"] = OnyxAudioSwitch
 NODE_CLASS_MAPPINGS["OnyxLoraTrigger"] = OnyxLoraTrigger
 NODE_CLASS_MAPPINGS["OnyxLoraTriggerStack"] = OnyxLoraTriggerStack
+NODE_CLASS_MAPPINGS["OnyxFaceDatasetPrompts"] = OnyxFaceDatasetPrompts
 NODE_CLASS_MAPPINGS["OnyxFaceMask"] = OnyxFaceMask
 NODE_CLASS_MAPPINGS["OnyxH3ContextIR"] = OnyxH3ContextIR
 NODE_CLASS_MAPPINGS["OnyxGroupToggle"] = OnyxGroupToggle
@@ -254,6 +256,7 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainCommit"] = "Onyx Video Chain — Commi
 NODE_DISPLAY_NAME_MAPPINGS["OnyxAudioSwitch"] = "Onyx Audio Switch"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxLoraTrigger"] = "Onyx LoRA Trigger"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxLoraTriggerStack"] = "Onyx LoRA Trigger Stack"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxFaceDatasetPrompts"] = "Onyx Face Dataset Prompts"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxFaceMask"] = "Onyx Face Mask"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3ContextIR"] = "H3 Context-IR (Gemini)"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxGroupToggle"] = "Onyx Group Toggle"
@@ -274,17 +277,7 @@ NODE_DISPLAY_NAME_MAPPINGS["Onyx_Skin_Tone"]    = "🧑 Onyx Skin Tone Line"
 NODE_CLASS_MAPPINGS.update(_K2C_NODES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_K2C_NAMES)
 
-# Onyx Endless Sampler (vendored HR Endless Sampler, Apache 2.0) — vidéo H3 de longueur illimitée.
-try:
-    from .nodes.endless_sampler import (
-        NODE_CLASS_MAPPINGS as _ENDLESS_NODES,
-        NODE_DISPLAY_NAME_MAPPINGS as _ENDLESS_NAMES,
-    )
-    NODE_CLASS_MAPPINGS.update(_ENDLESS_NODES)
-    NODE_DISPLAY_NAME_MAPPINGS.update(_ENDLESS_NAMES)
-    print(f"[Onyx] ✅ Endless Sampler chargé ({len(_ENDLESS_NODES)} nodes)")
-except Exception as _e:
-    print(f"[Onyx] ❌ Endless Sampler failed: {_e}")
+# Onyx Endless Sampler: removed (long videos are now rendered in one pass).
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 

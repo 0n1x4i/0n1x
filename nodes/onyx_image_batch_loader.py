@@ -14,6 +14,7 @@ import os
 import json
 import uuid
 import hashlib
+import urllib.parse
 import torch
 import numpy as np
 from PIL import Image
@@ -371,6 +372,39 @@ class OnyxImageBatchLoader:
 # ne peut pas demarrer. Pattern identique a celui utilise dans nano_banana_aio.
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _register_pool_file(path, raw_name):
+    """Thumbnail + metadata for a file already sitting in the pool.
+    Shared by the file upload and the web import, so both produce the same item."""
+    safe = os.path.basename(path)
+    file_id = os.path.splitext(safe)[0]
+    if _is_video(safe):
+        # Vignette = premiere frame. Le thumbnail est toujours un PNG.
+        img = _first_frame(path)
+        is_video = True
+    else:
+        img = Image.open(path)
+        is_video = False
+    w, h = img.size
+    thumb = img.convert("RGB").copy()
+    thumb.thumbnail((300, 300), Image.Resampling.LANCZOS)
+    thumb_name = f"{_THUMB_PREFIX}{file_id}.png"
+    thumb.save(os.path.join(os.path.dirname(path), thumb_name))
+    item = {
+        "id":            file_id,
+        "filename":      safe,
+        "original_name": raw_name,
+        "thumbnail":     thumb_name,
+        "width":         w,
+        "height":        h,
+        "is_video":      is_video,
+        "size":          os.path.getsize(path),
+    }
+    if is_video:
+        dur, vfps, nfr = _probe_video(path)
+        item.update({"duration": round(dur, 3), "fps": round(vfps, 3), "frame_count": nfr})
+    return item
+
+
 if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
     PromptServer.instance._onyx_batch_routes_registered = True
 
@@ -397,43 +431,69 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
                     fh.write(data)
 
                 try:
-                    if _is_video(safe):
-                        # Vignette = premiere frame. Le thumbnail est toujours un
-                        # PNG, quelle que soit l'extension source, pour que la
-                        # galerie du widget n'ait pas a savoir lire de la video.
-                        img = _first_frame(path)
-                        is_video = True
-                    else:
-                        img = Image.open(path)
-                        is_video = False
-
-                    w, h = img.size
-
-                    thumb      = img.convert("RGB").copy()
-                    thumb.thumbnail((300, 300), Image.Resampling.LANCZOS)
-                    thumb_name = f"{_THUMB_PREFIX}{os.path.splitext(safe)[0]}.png"
-                    thumb.save(os.path.join(pool, thumb_name))
-
-                    item = {
-                        "id":            file_id,
-                        "filename":      safe,
-                        "original_name": raw_name,
-                        "thumbnail":     thumb_name,
-                        "width":         w,
-                        "height":        h,
-                        "is_video":      is_video,
-                        "size":          len(data),
-                    }
-                    if is_video:
-                        dur, vfps, nfr = _probe_video(path)
-                        item.update({"duration": round(dur, 3), "fps": round(vfps, 3),
-                                     "frame_count": nfr})
-                    results.append(item)
+                    results.append(_register_pool_file(path, raw_name))
                 except Exception as e:
                     print(f"[Onyx Batch] Error processing {raw_name}: {e}")
                     if os.path.exists(path):
                         os.remove(path)
 
+            return web.json_response({"success": True, "images": results})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+    @PromptServer.instance.routes.post("/onyx/batch_url")
+    async def _onyx_batch_url(request):
+        """Web import: links dropped on the node (Instagram, TikTok, Pinterest,
+        direct image/video links, most video sites) -> media in the pool."""
+        import asyncio
+        import shutil
+        from .onyx_url_media import fetch as _web_fetch, COOKIE_BROWSERS
+        try:
+            body = await request.json()
+            urls = [u for u in (body.get("urls") or []) if isinstance(u, str)][:12]
+            if not urls:
+                return web.json_response({"success": False, "error": "no link in the drop"}, status=400)
+            cookies = {}
+            cfile = (body.get("cookies_file") or "").strip().strip('"')
+            browser = (body.get("cookies_browser") or "").strip().lower()
+            if cfile and os.path.isfile(cfile):
+                cookies["file"] = cfile
+            elif browser in COOKIE_BROWSERS:
+                cookies["browser"] = browser
+            pool = _pool_dir()
+            files, err = await asyncio.get_running_loop().run_in_executor(
+                None, _web_fetch, urls, pool, cookies)
+            if not files:
+                return web.json_response({"success": False, "error": err})
+            src = urls[0]
+            host = (urllib.parse.urlparse(src).hostname or "web").replace("www.", "")
+            results = []
+            tmp_dirs = set()
+            for i, f in enumerate(files):
+                tmp_dirs.add(os.path.dirname(f))
+                ext = os.path.splitext(f)[1].lower() or ".bin"
+                file_id = str(uuid.uuid4())
+                dest = os.path.join(pool, f"{file_id}{ext}")
+                shutil.move(f, dest)
+                label = f"{host}{'_' + str(i + 1) if len(files) > 1 else ''}{ext}"
+                try:
+                    results.append(_register_pool_file(dest, label))
+                except Exception as e:
+                    print(f"[Onyx Batch] web item unreadable ({label}): {e}")
+                    if os.path.exists(dest):
+                        os.remove(dest)
+            # remove the per-link work folders (pool/_web_xxxx), leftovers included
+            for d in tmp_dirs:
+                while d and os.path.dirname(d) != d and not os.path.basename(d).startswith("_web_"):
+                    if os.path.normcase(d) == os.path.normcase(pool):
+                        d = None
+                        break
+                    d = os.path.dirname(d)
+                if d and os.path.basename(d).startswith("_web_"):
+                    shutil.rmtree(d, ignore_errors=True)
+            if not results:
+                return web.json_response({"success": False, "error": "downloaded file could not be read"})
             return web.json_response({"success": True, "images": results})
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)}, status=500)

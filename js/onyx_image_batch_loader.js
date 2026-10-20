@@ -79,6 +79,37 @@ const LIMIT_S = 15.0;       // doit correspondre a _MINIMAX_LIMIT_S (Python)
 const HARD_S = 16.5;        // doit correspondre a _MINIMAX_HARD_S (Python)
 const VIDEO_RE = /\.(mp4|mov|webm|mkv|avi|m4v|mpe?g|wmv|flv)$/i;
 const THUMB_SIZES = { S: 92, M: 128, L: 172 };
+// Pages (not files) that must go through the server downloaders: their dragged
+// <img> is only a thumbnail, and a video post never drags its video.
+const PAGE_RE = /(instagram\.com|tiktok\.com|pinterest\.[a-z.]+\/pin|pin\.it|youtube\.com|youtu\.be|x\.com|twitter\.com|threads\.(net|com)|facebook\.com|fb\.watch|reddit\.com|vimeo\.com|tumblr\.com|bsky\.app|dailymotion\.com|twitch\.tv)/i;
+const COOKIE_CHOICES = ["none", "firefox", "chrome", "edge", "brave", "opera", "vivaldi"];
+
+// Every URL carried by an external drag, best first: the dragged link, then
+// the image/video sources found in the dragged HTML (largest srcset entry).
+function urlsFromDrop(dt) {
+    const out = [];
+    const push = u => { if (u && /^https?:\/\//i.test(u.trim()) && !out.includes(u.trim())) out.push(u.trim()); };
+    try { (dt.getData("text/uri-list") || "").split(/\r?\n/).filter(l => l && !l.startsWith("#")).forEach(push); } catch (_) {}
+    try { (dt.getData("text/plain") || "").split(/\s+/).forEach(push); } catch (_) {}
+    try {
+        const h = dt.getData("text/html");
+        if (h) {
+            const doc = new DOMParser().parseFromString(h, "text/html");
+            doc.querySelectorAll("a[href]").forEach(a => push(a.href));
+            doc.querySelectorAll("video[src],video source[src]").forEach(v => push(v.getAttribute("src")));
+            doc.querySelectorAll("img").forEach(img => {
+                const ss = img.getAttribute("srcset");
+                if (ss) {
+                    const best = ss.split(",").map(x => x.trim().split(/\s+/))
+                        .sort((a, b) => (parseFloat(b[1]) || 0) - (parseFloat(a[1]) || 0))[0];
+                    if (best) push(best[0]);
+                }
+                push(img.getAttribute("src"));
+            });
+        }
+    } catch (_) {}
+    return out;
+}
 const SETTING_WIDGETS = [
     "video_max_side", "trim_mode", "trim_start", "trim_end", "resize_method",
     "custom_width", "custom_height", "force_fps", "consume_on_load",
@@ -273,6 +304,9 @@ function setupBatchLoader(node) {
     const stats = el("div", "obl-stats");
     const addBtn = el("button", "obl-btn", "+ Add");
     addBtn.title = "Add images or videos (you can also drop files anywhere on the node)";
+    const urlBtn = el("button", "obl-btn", "🔗 Link");
+    urlBtn.title = "Import from a link: Instagram, TikTok, Pinterest, a direct image/video URL, most video sites.\n" +
+                   "You can also drag a post, an image or a video from your browser straight onto the node.";
     const seg = el("div", "obl-seg");
     const sizeBtns = {};
     for (const k of Object.keys(THUMB_SIZES)) {
@@ -288,7 +322,7 @@ function setupBatchLoader(node) {
     const clearBtn = el("button", "obl-btn danger", "Clear");
     const head = el("div", "obl-head");
     head.append(title, stats);
-    bar.append(head, addBtn, seg, limitPill, clearBtn);
+    bar.append(head, addBtn, urlBtn, seg, limitPill, clearBtn);
 
     // drop area
     const drop = el("div", "obl-drop");
@@ -349,6 +383,26 @@ function setupBatchLoader(node) {
         fields.forEach(x => g.appendChild(x)); return g;
     }
     const hint = t => el("div", "obl-hint", t);
+    // Web import options live in node.properties (not widgets): they only
+    // concern the browser-side import, never the Python run.
+    function webGroup() {
+        const fb = el("div", "obl-f"); fb.appendChild(el("label", "", "Login cookies from"));
+        const sb = el("select");
+        for (const c of COOKIE_CHOICES) { const op = el("option", "", c); op.value = c; sb.appendChild(op); }
+        sb.value = node.properties.obl_cookies_browser || "none";
+        sb.addEventListener("change", () => { node.properties.obl_cookies_browser = sb.value; });
+        fb.appendChild(sb);
+        const ff = el("div", "obl-f"); ff.style.gridColumn = "span 2";
+        ff.appendChild(el("label", "", "or cookies.txt file (path)"));
+        const fi = el("input"); fi.type = "text"; fi.placeholder = "C:\\…\\cookies.txt (optional)";
+        fi.value = node.properties.obl_cookies_file || "";
+        fi.addEventListener("change", () => { node.properties.obl_cookies_file = fi.value.trim(); });
+        fi.addEventListener("keydown", e => e.stopPropagation());
+        ff.appendChild(fi);
+        return group("Web import (drag a link or a post from your browser)", fb, ff,
+            hint("Instagram and private posts need you logged in: pick the browser you use them in. " +
+                 "Firefox is the most reliable; Chrome/Edge may need to be closed while importing."));
+    }
     setBody.append(
         group("Decode",
             numField("video_max_side", "Max side (px, 0 = native)", { step: 64, max: 4096 }),
@@ -366,6 +420,7 @@ function setupBatchLoader(node) {
         group("Outputs",
             boolField("video_first_frame", "Video first frame → image output", "on", "off"),
             hint("On: each video outputs ONLY its first frame (at trim start, after resize) through `image` — the video itself is not loaded.")),
+        webGroup(),
         group("Queue",
             boolField("consume_on_load", "After loading an item", "remove it from the list", "keep the list"),
             numField("queue_batch_size", "Runs sent per batch", { min: 1, max: 50 }),
@@ -527,8 +582,8 @@ function setupBatchLoader(node) {
 
         drop.className = `obl-drop ${n ? "strip" : "big"}`;
         drop.innerHTML = n
-            ? `<span class="obl-drop-ico">＋</span><span>Drop more files here or click</span>`
-            : `<div class="obl-drop-ico">🖼️</div><b>Drop images or videos</b><span>or click to browse</span>`;
+            ? `<span class="obl-drop-ico">＋</span><span>Drop more files or links here, or click</span>`
+            : `<div class="obl-drop-ico">🖼️</div><b>Drop images, videos or links</b><span>files, or posts dragged from Instagram, TikTok, Pinterest… — or click to browse</span>`;
         gridWrap.style.display = n ? "" : "none";
 
         grid.innerHTML = "";
@@ -613,24 +668,92 @@ function setupBatchLoader(node) {
     addBtn.addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", e => { handleFiles([...e.target.files]); fileInput.value = ""; });
 
-    // file drop anywhere on the node (internal card drags are ignored here)
-    const isFileDrag = e => [...(e.dataTransfer?.types || [])].includes("Files");
+    // file / link drop anywhere on the node (internal card drags are ignored here)
+    const isExternalDrag = e => {
+        const t = [...(e.dataTransfer?.types || [])];
+        if (t.includes("application/x-onyx-batch")) return false;
+        return t.includes("Files") || t.includes("text/uri-list") || t.includes("text/html") || t.includes("text/plain");
+    };
     root.addEventListener("dragover", e => {
-        if (!isFileDrag(e)) return;
+        if (!isExternalDrag(e)) return;
         e.preventDefault(); e.stopPropagation(); root.classList.add("dragging");
+        try { e.dataTransfer.dropEffect = "copy"; } catch (_) {}
     });
     root.addEventListener("dragleave", e => {
         if (!root.contains(e.relatedTarget)) root.classList.remove("dragging");
     });
     root.addEventListener("drop", e => {
         root.classList.remove("dragging");
-        if (!isFileDrag(e)) return;
+        if (!isExternalDrag(e)) return;
         e.preventDefault(); e.stopPropagation();
+        const dt = e.dataTransfer;
         // f.type est parfois vide depuis l'explorateur Windows : l'extension sert de repli.
-        const files = [...e.dataTransfer.files].filter(
+        const files = [...(dt.files || [])].filter(
             f => f.type.startsWith("image/") || f.type.startsWith("video/") || VIDEO_RE.test(f.name));
-        if (files.length) handleFiles(files);
+        const urls = urlsFromDrop(dt);
+        // A social post link wins over the file the browser drags along with it
+        // (that file is the low-res thumbnail, never the video).
+        if (urls.some(u => PAGE_RE.test(u))) {
+            const pages = urls.filter(u => PAGE_RE.test(u));
+            handleUrls([...pages, ...urls.filter(u => !pages.includes(u))]);
+        } else if (files.length) {
+            handleFiles(files);
+        } else if (urls.length) {
+            handleUrls(urls);
+        }
     });
+
+    urlBtn.addEventListener("click", () => {
+        const txt = prompt("Paste one or more links (Instagram, TikTok, Pinterest, image/video URL…), separated by spaces or new lines:");
+        if (!txt) return;
+        const links = txt.split(/\s+/).filter(u => /^https?:\/\//i.test(u));
+        if (links.length) importLinks(links);
+    });
+
+    // Several pasted links = several independent imports, one after the other.
+    async function importLinks(links) {
+        for (const l of links) await handleUrls([l]);
+    }
+
+    let importing = false;
+    async function handleUrls(urls) {
+        if (importing) { status.textContent = "An import is already running…"; return; }
+        importing = true;
+        urlBtn.disabled = true;
+        const host = (() => { try { return new URL(urls[0]).hostname.replace(/^www\./, ""); } catch (_) { return "link"; } })();
+        status.classList.remove("warn");
+        status.textContent = `Importing from ${host}… (videos can take a while)`;
+        try {
+            const browser = node.properties.obl_cookies_browser || "none";
+            const resp = await fetch("/onyx/batch_url", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    urls,
+                    cookies_browser: browser === "none" ? "" : browser,
+                    cookies_file: node.properties.obl_cookies_file || "",
+                }),
+            });
+            const json = await resp.json();
+            if (json.success) {
+                for (const m of json.images) {
+                    if (!metaOf(m.id)) { data.images.push(m); data.order.push(m.id); }
+                }
+                fitPending = true; syncBatch(); render();
+                status.textContent = `Imported ${json.images.length} item${json.images.length > 1 ? "s" : ""} from ${host}`;
+            } else {
+                console.error("[Onyx Batch] Web import failed:", json.error);
+                status.textContent = `Import failed (${host}): ${json.error || "unknown error"}`;
+                status.classList.add("warn");
+            }
+        } catch (e) {
+            console.error("[Onyx Batch] Web import error:", e);
+            status.textContent = `Import error: ${e.message || e}`;
+            status.classList.add("warn");
+        } finally {
+            importing = false;
+            urlBtn.disabled = false;
+        }
+    }
 
     async function handleFiles(files) {
         if (uploading) return;

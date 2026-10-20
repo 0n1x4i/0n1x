@@ -27,7 +27,8 @@ colour-science       # Onyx_Apply_LUT.py — LUT maths
 PyWavelets           # speed_hd_spectral_utils.py — wavelet pass
 imageio              # onyx_image_batch_loader.py — video decode fallback
 fal-client           # nano_banana_aio.py — Fal provider
-gallery-dl           # instagram_faceswap.py — media fetching
+gallery-dl           # instagram_faceswap.py, batch loader web import — media fetching
+yt-dlp               # batch loader web import — TikTok / Instagram / video sites
 transformers>=4.57.0 # krea2_carousel/local_vlm.py — Qwen3-VL local pose analysis (needs >=4.57)
 accelerate>=1.1.0    # krea2_carousel/local_vlm.py — device_map loading of the local VLM
 imageio-ffmpeg       # save nodes' metadata profiles — ffmpeg binary when none is on PATH
