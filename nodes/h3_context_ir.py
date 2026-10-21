@@ -115,8 +115,15 @@ _RECREATE_ALL = tuple(
 # Second pass: proofreads the JSON of a first Recreate pass (wired / pasted in grounding_override) against the video.
 TARGET_RECREATE_VERIFY = "Seedance Recreate Second pass (verify JSON)"
 _RECREATE_ALL = _RECREATE_ALL + (TARGET_RECREATE_VERIFY,)
+# Natural Prompting: turns a plain idea (intent) into a Seedance JSON, same registers / outfit rule as Recreate.
+_NATURAL_ALL = tuple(
+    f"Natural Prompting Seedance {_v} ({_k} jiggle" + (", outfit from ref)" if _o else ", outfit from prompt)")
+    for _k in ("extreme", "strong", "normal")
+    for _v in ("2", "2.5")
+    for _o in (False, True)
+)
 _TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2, TARGET_H3_ENDLESS, TARGET_SEEDANCE_SEVERED,
-            *_RECREATE_ALL]
+            *_RECREATE_ALL, *_NATURAL_ALL]
 
 ROLE_REFERENCE = "reference"
 ROLE_FIRST = "first_frame"
@@ -223,6 +230,7 @@ class OnyxH3ContextIR:
                                "soundtrack is put back afterwards). Wire image_1 = three-view face sheet "
                                "(front / three-quarter / profile) and image_2 = body + outfit sheet with "
                                "the head masked, plus the video (color-inverted copy recommended).\n"
+                               "Natural Prompting Seedance ...: no video. Write your idea in plain words in intent (any language); image_1 = the person. 'outfit from prompt' = the outfit you describe in intent; 'outfit from ref' = the outfit of image_2. Same jiggle registers and outfit rule as Recreate. Duration = duration_seconds (0 = 10 s), adaptive aspect = 9:16.\n"
                                "Seedance Recreate Second pass (verify JSON): proofreads a first-pass Recreate JSON (in "
                                "grounding_override) against the video and returns the corrected JSON; "
                                "no reference images needed.\n"

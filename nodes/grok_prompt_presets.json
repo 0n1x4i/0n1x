@@ -7,7 +7,7 @@
     "max_tokens": 2048
   },
   "2": {
-    "prompt": "i want you to give me a prompt to recreate the picture i send you.\n\nand finally, at then end of your prompt, add this : \" raw, candid casual amateur snapshot, shot on iphone, even lighting, low dynamic range, detailed skin texture, unretouched, unedited, imperfect composition, clean skin\"\n\nyou must describe accurately in a very detailed way, the background, clothes, scene, pose. describe lightning the briefly.\nGenerate a new random girl, stunning girl, to replace the one from the picture. describe also her clothes and pose, what she's doing. never add stylistic prompt such as \" cinematic, realistic...\" only describe the scene and his composition.",
+    "prompt": "i want you to give me a prompt to recreate the picture i send you in a very detailed way, with an accurate lightning description.\n\nand finally, at then end of your prompt, add this : \" raw, candid casual amateur snapshot, shot on iphone, even lighting, low dynamic range, detailed skin texture, unretouched, unedited, imperfect composition, clean skin\"\n\nyou must describe accurately in a very detailed way, the background, clothes, scene, pose. describe lightning the briefly.\nGenerate a new random 21 yo girl, stunning girl, to replace the one from the picture. describe also her clothes and pose, what she's doing. never add stylistic prompt such as \" cinematic, realistic...\" only describe the scene and his composition.",
     "trigger_word": "emma",
     "model": "grok-4-1-fast-non-reasoning",
     "temperature": 0.75,

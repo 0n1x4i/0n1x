@@ -78,7 +78,8 @@ FRAMING = ("Close-up portrait framing: her head fills about 75% of the frame hei
            "top of her hair to just below her chin. The bottom edge of the frame cuts across her neck or at the "
            "very base of the neck; she wears a {top}, and at most its neckline or straps show at the bottom edge. "
            "No chest, no torso: the chest is never in the frame, whatever the "
-           "angle. The face stays this large and this tightly framed in every shot.")
+           "angle. The face stays this large and this tightly framed in every shot. Her head is always centered "
+           "horizontally in the frame, with equal empty space on the left and on the right, whatever the angle.")
 LOOK = ("Casual amateur smartphone photo, natural phone camera rendering, slight noise, realistic skin texture with visible pores, fine peach fuzz and natural unevenness, "
         "no retouching, makeup exactly as in image 1, not a studio or professional photo shoot. Plain seamless solid light-grey "
         "background filling the whole frame behind her: one flat uniform color, no room, no furniture, no "
