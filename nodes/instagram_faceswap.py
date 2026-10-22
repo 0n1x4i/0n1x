@@ -237,20 +237,20 @@ def _do_face_swap(
         )
 
     # ── Auto expression: build prompt + masked image manually (no expression) ────
-    from .nano_banana_aio import (
-        _FACESWAP_PROMPT_B64,
-        _SEEDREAM5PRO_FACESWAP_PROMPT_B64,
-        _MODEL_MAP,
-    )
+    from .nano_banana_aio import _MODEL_MAP
+    # The prompts only exist in the protected implementation: read them from
+    # the namespace of the loaded remote class (works for the local proxy and
+    # for the remote object alike).
+    _remote_g = aio._run_face_swap_automation.__func__.__globals__
 
     # Mask face in target image (same logic as the existing automation)
     masked_target = aio._mask_face_in_tensor(target_tensor)
 
     # Decode face-swap prompt — Seedream 5 Pro always uses its dedicated prompt
     if model_name == "Seedream 5 Pro":
-        fs_prompt = base64.b64decode(_SEEDREAM5PRO_FACESWAP_PROMPT_B64).decode("utf-8")
+        fs_prompt = base64.b64decode(_remote_g["_SEEDREAM5PRO_FACESWAP_PROMPT_B64"]).decode("utf-8")
     else:
-        fs_prompt = base64.b64decode(_FACESWAP_PROMPT_B64).decode("utf-8")
+        fs_prompt = base64.b64decode(_remote_g["_FACESWAP_PROMPT_B64"]).decode("utf-8")
     _expr = _EXPRESSION_MAP.get(face_expression, "neutral facial expression")
     if _expr:
         fs_prompt += f"\n\n{_expr}"

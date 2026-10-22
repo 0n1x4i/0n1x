@@ -372,14 +372,88 @@ class OnyxImageBatchLoader:
 # ne peut pas demarrer. Pattern identique a celui utilise dans nano_banana_aio.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Gallery helpers (import / delete / preview) ──────────────────────────────
+# Local on purpose: dropping media on the node is UI work, not a node run, so it
+# must not wait for the licence / remote core (a cold workflow could not import).
+# The licence is still checked when the node actually runs.
+
+def _ui_pool_dir():
+    d = os.path.join(folder_paths.get_input_directory(), _POOL_SUBDIR)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _ui_is_video(filename):
+    return os.path.splitext(filename)[1].lower() in _VIDEO_EXTS
+
+
+def _ui_probe_video(path):
+    """(duration_s, fps, frame_count) from the container, without decoding."""
+    try:
+        import av
+        with av.open(path) as container:
+            st = container.streams.video[0]
+            fps = float(st.average_rate) if st.average_rate else 0.0
+            n = int(st.frames or 0)
+            dur = 0.0
+            if n and fps:
+                dur = n / fps
+            elif st.duration is not None and st.time_base is not None:
+                dur = float(st.duration * st.time_base)
+            elif container.duration:
+                dur = container.duration / 1_000_000.0
+            if not n and dur and fps:
+                n = int(round(dur * fps))
+            return float(dur), float(fps), int(n)
+    except Exception:
+        pass
+    try:
+        import cv2
+        cap = cv2.VideoCapture(path)
+        fps = float(cap.get(cv2.CAP_PROP_FPS)) or 0.0
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        cap.release()
+        return (n / fps if fps else 0.0), fps, n
+    except Exception:
+        return 0.0, 0.0, 0
+
+
+def _ui_first_frame(path):
+    """First frame of a video, for the gallery thumbnail (decodes one frame only)."""
+    errors = []
+    try:
+        import av
+        with av.open(path) as container:
+            for frame in container.decode(container.streams.video[0]):
+                return frame.to_image().convert("RGB")
+        errors.append("av: no video frame")
+    except ImportError:
+        errors.append("av: not installed")
+    except Exception as e:
+        errors.append(f"av: {e}")
+    try:
+        import cv2
+        cap = cv2.VideoCapture(path)
+        ok, bgr = cap.read()
+        cap.release()
+        if ok:
+            return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        errors.append("cv2: could not read a frame")
+    except ImportError:
+        errors.append("cv2: not installed")
+    except Exception as e:
+        errors.append(f"cv2: {e}")
+    raise RuntimeError("no video backend could read a first frame - " + "; ".join(errors))
+
+
 def _register_pool_file(path, raw_name):
     """Thumbnail + metadata for a file already sitting in the pool.
     Shared by the file upload and the web import, so both produce the same item."""
     safe = os.path.basename(path)
     file_id = os.path.splitext(safe)[0]
-    if _is_video(safe):
+    if _ui_is_video(safe):
         # Vignette = premiere frame. Le thumbnail est toujours un PNG.
-        img = _first_frame(path)
+        img = _ui_first_frame(path)
         is_video = True
     else:
         img = Image.open(path)
@@ -400,7 +474,7 @@ def _register_pool_file(path, raw_name):
         "size":          os.path.getsize(path),
     }
     if is_video:
-        dur, vfps, nfr = _probe_video(path)
+        dur, vfps, nfr = _ui_probe_video(path)
         item.update({"duration": round(dur, 3), "fps": round(vfps, 3), "frame_count": nfr})
     return item
 
@@ -413,7 +487,7 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
         """Upload one or more images to the shared pool."""
         try:
             reader  = await request.multipart()
-            pool    = _pool_dir()
+            pool    = _ui_pool_dir()
             results = []
 
             async for field in reader:
@@ -461,7 +535,7 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
                 cookies["file"] = cfile
             elif browser in COOKIE_BROWSERS:
                 cookies["browser"] = browser
-            pool = _pool_dir()
+            pool = _ui_pool_dir()
             files, err = await asyncio.get_running_loop().run_in_executor(
                 None, _web_fetch, urls, pool, cookies)
             if not files:
@@ -504,7 +578,7 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
         """Delete an image (and its thumbnail) from the pool."""
         image_id = request.match_info["image_id"]
         try:
-            pool    = _pool_dir()
+            pool    = _ui_pool_dir()
             deleted = []
             for fn in os.listdir(pool):
                 if image_id in fn:
@@ -520,10 +594,10 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
         """Duration / fps of a pool video. Lets the UI fill in lengths for items
         uploaded before durations were recorded at upload time."""
         filename = os.path.basename(request.match_info["filename"])
-        path = os.path.join(_pool_dir(), filename)
-        if not os.path.exists(path) or not _is_video(filename):
+        path = os.path.join(_ui_pool_dir(), filename)
+        if not os.path.exists(path) or not _ui_is_video(filename):
             return web.json_response({"success": False}, status=404)
-        dur, vfps, nfr = _probe_video(path)
+        dur, vfps, nfr = _ui_probe_video(path)
         return web.json_response({"success": True, "duration": round(dur, 3),
                                   "fps": round(vfps, 3), "frame_count": nfr})
 
@@ -532,7 +606,7 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
     async def _onyx_view(request):
         """Serve an image from the pool via ComfyUI's standard /view endpoint."""
         filename = request.match_info["filename"]
-        pool     = _pool_dir()
+        pool     = _ui_pool_dir()
         if os.path.exists(os.path.join(pool, filename)):
             return web.HTTPFound(
                 f"/view?filename={filename}&type=input&subfolder={_POOL_SUBDIR}"
