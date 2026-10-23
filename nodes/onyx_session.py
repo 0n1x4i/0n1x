@@ -24,9 +24,11 @@ the key is read from, first match wins:
   3. a key still stored in an old workflow  -> saved to the file, then used
 """
 
+import json
 import os
+import time
 
-from .onyx_render_profile import sync_with_server
+from .onyx_render_profile import _CACHE_FILE, _GRACE_SECONDS, sync_with_server
 
 _ENV = "ONYX_LICENSE_KEY"
 _FILE_NAME = "onyx_session.key"
@@ -104,6 +106,37 @@ def _register_routes():
             return web.json_response({"ok": False, "error": "too long"}, status=400)
         save_key(key)
         return web.json_response({"ok": True, "saved": bool(key), "masked": masked(key)})
+
+    @PromptServer.instance.routes.get("/onyx_session/profile_status")
+    async def _profile_status(request):
+        # Read-only snapshot of the local render-profile cache for the Onyx
+        # glass theme to drive its "licence LED" without hitting any network.
+        # Nothing sensitive is exposed: token and ticket stay out, only the
+        # boolean verdict and freshness information already visible on the
+        # Onyx Session node's own status text.
+        try:
+            with open(_CACHE_FILE, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            data = {}
+        valid = bool(data.get("valid"))
+        checked_at = float(data.get("checked_at", 0) or 0)
+        next_check_in = float(data.get("next_check_in", 0) or 0)
+        age = max(0.0, time.time() - checked_at) if checked_at else None
+        stale = bool(checked_at) and age is not None and age > next_check_in + _GRACE_SECONDS
+        state = "err" if not valid else ("warn" if stale else "ok")
+        if not checked_at:
+            state = "off"
+        return web.json_response({
+            "state": state,
+            "valid": valid,
+            "stale": stale,
+            "reason": str(data.get("reason") or ""),
+            "checked_at": checked_at,
+            "age_seconds": age,
+            "next_check_in": next_check_in,
+            "has_key": bool(read_saved_key()),
+        })
 
 
 _register_routes()
