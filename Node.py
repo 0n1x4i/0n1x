@@ -157,10 +157,9 @@ class NanoBananaProEditAPINode:
 
         # Extract inline image data
         response_parts = candidate["content"]["parts"]
-        for part in response_parts:
-            if "inlineData" in part:
-                img_bytes = base64.b64decode(part["inlineData"]["data"])
-                return _image_bytes_to_tensor(img_bytes, "Nano Banana Pro")
+        img_bytes = _largest_image_bytes(response_parts, "Nano Banana Pro")
+        if img_bytes:
+            return _image_bytes_to_tensor(img_bytes, "Nano Banana Pro")
 
         raise RuntimeError("Nano Banana Pro: no image found in response parts.")
 
@@ -629,8 +628,37 @@ def _gemini_response_summary(data):
         return ""
 
 
+
+def _largest_image_bytes(parts, log_name):
+    """Image to keep among Gemini response parts: ignore "thought" drafts and keep
+    the LARGEST remaining image (Google can return a default 1K image next to the
+    requested 2K/4K one, in no guaranteed order). All thoughts -> largest of them."""
+    found = []  # (pixels, index, thought, bytes, "WxH")
+    for idx, part in enumerate(parts or []):
+        inline = part.get("inlineData") or part.get("inline_data")
+        b64 = inline.get("data") if inline else None
+        if not b64:
+            continue
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            continue
+        try:
+            w, h = Image.open(io.BytesIO(raw)).size
+        except Exception:
+            w = h = 0
+        found.append((w * h, idx, bool(part.get("thought")), raw, f"{w}x{h}"))
+    if not found:
+        return None
+    pool = [f for f in found if not f[2]] or found
+    best = max(pool, key=lambda f: (f[0], f[1]))
+    if len(found) > 1:
+        desc = ", ".join(f"{f[4]} {len(f[3]) // 1024} KB" + (" (thought)" if f[2] else "") for f in found)
+        print(f"🖼️  [{log_name}] {len(found)} images in the answer: {desc} -> kept {best[4]}")
+    return best[3]
+
 def _extract_image_from_gemini_response(data, log_name):
-    """Extract the first non-thought inline image from a Gemini generateContent response."""
+    """Extract the image to keep (largest non-thought) from a Gemini generateContent response."""
     try:
         candidates = data.get("candidates") or []
         if not candidates:
@@ -640,14 +668,13 @@ def _extract_image_from_gemini_response(data, log_name):
         finish_reason = candidate.get("finishReason", "")
         parts = candidate.get("content", {}).get("parts") or []
         logging.info("%s: finishReason=%s, part count=%d", log_name, finish_reason, len(parts))
+        img = _largest_image_bytes(parts, log_name)
+        if img:
+            return img
         text_parts = []
         for part in parts:
             if part.get("thought"):
                 continue
-            if "inlineData" in part:
-                b64 = part["inlineData"].get("data")
-                if b64:
-                    return base64.b64decode(b64)
             if "text" in part:
                 text_parts.append(part["text"])
         if text_parts:
