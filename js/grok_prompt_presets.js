@@ -23,6 +23,8 @@ const PRESET_KEYS = [
     "model",
     "temperature",
     "max_tokens",
+    "provider",
+    "openrouter_model",
 ];
 
 let _presetsCache = {};

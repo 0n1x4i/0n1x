@@ -8,7 +8,7 @@
 from .onyx_render_profile import ensure_profile_ready
 """
 ComfyUI node - Onyx Grok Prompt Generator.
-Calls the xAI Grok API directly (api.x.ai) - no OpenRouter middleman.
+Calls the xAI Grok API directly (api.x.ai), or any model through OpenRouter.
 Get your API key at: https://console.x.ai
 Same image+text message format as OnyxGeminiPromptNode._call_grok() in gemini_prompt.py,
 kept consistent so both nodes talk to the API the same way.
@@ -76,6 +76,8 @@ _GROK_MODELS = [
 # Presets — meme mecanique que OnyxNanoBananaAIO : un JSON a cote du node, deux
 # routes REST, et le JS qui appelle. La cle API n'est JAMAIS sauvegardee.
 # ─────────────────────────────────────────────────────────────────────────────
+_PROVIDERS = ["xAI (Grok)", "OpenRouter"]
+
 _PRESETS_FILE = os.path.join(os.path.dirname(__file__), "grok_prompt_presets.json")
 
 _PRESET_KEYS = [
@@ -84,6 +86,8 @@ _PRESET_KEYS = [
     "model",
     "temperature",
     "max_tokens",
+    "provider",
+    "openrouter_model",
 ]
 
 
@@ -231,6 +235,23 @@ class OnyxGrokPromptNode:
                                "batch). fixed = reuse the same prompt while nothing else changes. "
                                "Not sent to the API.",
                 }),
+                # OpenRouter : ajoutes EN DERNIER (valeurs serialisees par position).
+                "provider": (_PROVIDERS, {
+                    "default": _PROVIDERS[0],
+                    "tooltip": "xAI: direct call to api.x.ai with api_key and the 'model' list.\n"
+                               "OpenRouter: call openrouter.ai with openrouter_api_key and "
+                               "openrouter_model (any OpenRouter model id).",
+                }),
+                "openrouter_api_key": ("STRING", {
+                    "default": "", "multiline": False,
+                    "tooltip": "OpenRouter key (openrouter.ai/keys, starts with sk-or-). Cached after first use.",
+                }),
+                "openrouter_model": ("STRING", {
+                    "default": "x-ai/grok-4.1-fast", "multiline": False,
+                    "tooltip": "OpenRouter model id, e.g. x-ai/grok-4.1-fast, google/gemini-2.5-flash, "
+                               "anthropic/claude-sonnet-4.5. Empty = 'x-ai/' + the model chosen above. "
+                               "Pick a vision model if you connect an image.",
+                }),
             },
         }
 
@@ -254,13 +275,20 @@ class OnyxGrokPromptNode:
         max_tokens=1024,
         trigger_word="",
         seed=0,
+        provider="xAI (Grok)",
+        openrouter_api_key="",
+        openrouter_model="",
     ):
         ensure_profile_ready()
         prompt, _picks = _resolve_choices(prompt or "", seed)
         if _picks:
             print(f"🎲 [Onyx Grok] Random picks (seed {seed}): " + " · ".join(p[:60] for p in _picks))
         ns = load_remote("grok_prompt_core")
+        extra = {}
+        if provider == "OpenRouter":
+            extra = {"provider": provider, "openrouter_api_key": openrouter_api_key,
+                     "openrouter_model": openrouter_model}
         return ns["generate_impl"](
             OnyxGrokPromptNode, prompt, model, image, api_key,
-            temperature, max_tokens, trigger_word,
+            temperature, max_tokens, trigger_word, **extra,
         )
