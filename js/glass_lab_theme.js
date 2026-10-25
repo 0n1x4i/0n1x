@@ -32,7 +32,7 @@ const PALETTE = {
     err:         "#e5737f",
     errRGB:      "229, 115, 127",
     ledOff:      "#3a3b42",
-    // Background motif strength (0 = flat). Stars + one orbital arc.
+    // Background motif strength: 0 = flat, 1 = like the site, up to ~4 = bold.
     texture:     1,
 };
 
@@ -53,6 +53,7 @@ const SUPPORTS_ZOOM = typeof CSS !== "undefined" && CSS.supports?.("zoom", "1");
 function injectStyles() {
     if (document.getElementById("ogl-style")) return;
     const P = PALETTE, a = P.accentRGB, r = P.errRGB, t = P.texture;
+    const dotR = +(0.7 + 0.45 * Math.max(0, t - 1)).toFixed(2);
     const css = `
 .ogl-root{position:fixed;inset:0;pointer-events:none;z-index:2;overflow:hidden}
 .ogl{position:absolute;left:0;top:0;pointer-events:none;will-change:transform}
@@ -61,13 +62,13 @@ function injectStyles() {
 .ogl.is-selected .ogl__in{box-shadow:0 0 0 1px rgba(255,255,255,.32) inset,0 1px 0 rgba(255,255,255,.10) inset,0 0 0 1px rgba(${a},.25),0 0 22px rgba(255,255,255,.10),0 14px 34px rgba(0,0,0,.5)}
 .ogl.is-error .ogl__in{box-shadow:0 0 0 1px rgba(${r},.55) inset,0 0 0 1px rgba(${r},.18),0 0 18px rgba(${r},.14),0 14px 34px rgba(0,0,0,.5)}
 /* Motif: scattered star dots + one orbital arc, like the site background. */
-.ogl__tex{position:absolute;inset:0;pointer-events:none;opacity:${t};
+.ogl__tex{position:absolute;inset:0;pointer-events:none;
   background-image:
-    radial-gradient(rgba(255,255,255,.07) .7px,transparent 1px),
-    radial-gradient(rgba(255,255,255,.05) .7px,transparent 1px);
+    radial-gradient(rgba(255,255,255,${Math.min(.6, .07 * t)}) ${dotR}px,transparent ${dotR + .4}px),
+    radial-gradient(rgba(255,255,255,${Math.min(.45, .05 * t)}) ${dotR}px,transparent ${dotR + .4}px);
   background-size:38px 38px,61px 61px;background-position:7px 11px,23px 29px}
-.ogl__arc{position:absolute;width:220%;aspect-ratio:1;right:-150%;top:-60%;border-radius:50%;border:1px solid rgba(255,255,255,.045);pointer-events:none;opacity:${t}}
-.ogl__arc--2{width:160%;right:auto;left:-120%;top:40%;border-color:rgba(255,255,255,.035)}
+.ogl__arc{position:absolute;width:220%;aspect-ratio:1;right:-150%;top:-60%;border-radius:50%;border:1px solid rgba(255,255,255,${Math.min(.5, .045 * t)});pointer-events:none}
+.ogl__arc--2{width:160%;right:auto;left:-120%;top:40%;border-color:rgba(255,255,255,${Math.min(.4, .035 * t)})}
 /* Title band: slightly lighter top, hairline under. Title text is drawn by LiteGraph below. */
 .ogl__head{position:absolute;left:0;right:0;top:0;height:var(--ogl-title,20px);pointer-events:none;
   background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0));border-bottom:1px solid ${P.line}}
