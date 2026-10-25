@@ -32,8 +32,23 @@ const PALETTE = {
     err:         "#e5737f",
     errRGB:      "229, 115, 127",
     ledOff:      "#3a3b42",
-    // Background motif strength: 0 = flat, 1 = like the site, up to ~4 = bold.
+    // Body material: "grain" | "brushed" | "grid" | "crystal" | "halo" | "scan" | "mesh" | "orbit" | "none".
+    motif:       "grain",
+    // Motif strength: 0 = flat, 1 = default, 2 = full.
     texture:     1,
+};
+
+// Each motif is a CSS declaration list applied to the node's background layer.
+const MOTIFS = {
+    none:    "",
+    orbit:   "background-image:radial-gradient(rgba(255,255,255,.14) .8px,transparent 1.2px),radial-gradient(rgba(255,255,255,.1) .8px,transparent 1.2px);background-size:38px 38px,61px 61px;background-position:7px 11px,23px 29px",
+    grain:   "background-image:url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .22 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\");background-size:180px 180px",
+    brushed: "background-image:repeating-linear-gradient(115deg,rgba(255,255,255,.07) 0 1px,transparent 1px 7px)",
+    grid:    "background-image:linear-gradient(rgba(255,255,255,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.08) 1px,transparent 1px);background-size:22px 22px;-webkit-mask-image:radial-gradient(120% 120% at 0% 0%,#000 30%,transparent 80%);mask-image:radial-gradient(120% 120% at 0% 0%,#000 30%,transparent 80%)",
+    crystal: "background-image:url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 140'><g fill='none' stroke='white' stroke-opacity='.55' stroke-width='1'><path d='M20 70 L110 20 L220 60 L130 120 Z'/><path d='M20 70 L130 120 M110 20 L130 120 M20 70 L220 60 M110 20 L60 90 L130 120 M60 90 L220 60 M110 20 L170 95 L130 120 M170 95 L20 70 M60 90 L170 95'/></g></svg>\");background-repeat:no-repeat;background-size:62% auto;background-position:118% -18%",
+    halo:    "background-image:radial-gradient(70% 60% at 8% 0%,rgba(255,255,255,.16),transparent 60%)",
+    scan:    "background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.06) 0 1px,transparent 1px 4px)",
+    mesh:    "background-image:radial-gradient(60% 50% at 10% 10%,rgba(255,255,255,.10),transparent 60%),radial-gradient(70% 60% at 100% 100%,rgba(255,255,255,.07),transparent 60%)",
 };
 
 // Pastel family so slot colours stay readable but never shout.
@@ -52,8 +67,9 @@ const SUPPORTS_ZOOM = typeof CSS !== "undefined" && CSS.supports?.("zoom", "1");
 // ── Styles ──────────────────────────────────────────────────────────────────
 function injectStyles() {
     if (document.getElementById("ogl-style")) return;
-    const P = PALETTE, a = P.accentRGB, r = P.errRGB, t = P.texture;
-    const dotR = +(0.7 + 0.45 * Math.max(0, t - 1)).toFixed(2);
+    const P = PALETTE, a = P.accentRGB, r = P.errRGB;
+    const texO = Math.min(1, P.texture / 2);
+    const motif = MOTIFS[P.motif] ?? MOTIFS.grain;
     const css = `
 .ogl-root{position:fixed;inset:0;pointer-events:none;z-index:2;overflow:hidden}
 .ogl{position:absolute;left:0;top:0;pointer-events:none;will-change:transform}
@@ -62,13 +78,9 @@ function injectStyles() {
 .ogl.is-selected .ogl__in{box-shadow:0 0 0 1px rgba(255,255,255,.32) inset,0 1px 0 rgba(255,255,255,.10) inset,0 0 0 1px rgba(${a},.25),0 0 22px rgba(255,255,255,.10),0 14px 34px rgba(0,0,0,.5)}
 .ogl.is-error .ogl__in{box-shadow:0 0 0 1px rgba(${r},.55) inset,0 0 0 1px rgba(${r},.18),0 0 18px rgba(${r},.14),0 14px 34px rgba(0,0,0,.5)}
 /* Motif: scattered star dots + one orbital arc, like the site background. */
-.ogl__tex{position:absolute;inset:0;pointer-events:none;
-  background-image:
-    radial-gradient(rgba(255,255,255,${Math.min(.6, .07 * t)}) ${dotR}px,transparent ${dotR + .4}px),
-    radial-gradient(rgba(255,255,255,${Math.min(.45, .05 * t)}) ${dotR}px,transparent ${dotR + .4}px);
-  background-size:38px 38px,61px 61px;background-position:7px 11px,23px 29px}
-.ogl__arc{position:absolute;width:220%;aspect-ratio:1;right:-150%;top:-60%;border-radius:50%;border:1px solid rgba(255,255,255,${Math.min(.5, .045 * t)});pointer-events:none}
-.ogl__arc--2{width:160%;right:auto;left:-120%;top:40%;border-color:rgba(255,255,255,${Math.min(.4, .035 * t)})}
+.ogl__tex{position:absolute;inset:0;pointer-events:none;opacity:${texO};${motif}}
+.ogl__arc{position:absolute;width:220%;aspect-ratio:1;right:-150%;top:-60%;border-radius:50%;border:1px solid rgba(255,255,255,.09);pointer-events:none;opacity:${texO};display:${P.motif === "orbit" ? "block" : "none"}}
+.ogl__arc--2{width:160%;right:auto;left:-120%;top:40%;border-color:rgba(255,255,255,.07)}
 /* Title band: slightly lighter top, hairline under. Title text is drawn by LiteGraph below. */
 .ogl__head{position:absolute;left:0;right:0;top:0;height:var(--ogl-title,20px);pointer-events:none;
   background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0));border-bottom:1px solid ${P.line}}
