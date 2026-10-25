@@ -13,9 +13,9 @@ const TARGET = "OnyxGlassLabDemo";
 // shows on selection and primary actions.
 const PALETTE = {
     canvasInk:   "#0a0a0c",
-    body:        "#101013",   // node body (site card)
-    well:        "#141418",   // nested panels (site inner card)
-    title:       "#0d0d10",   // title band
+    body:        "#0d0d10",   // node body (site card)
+    well:        "#111114",   // nested panels (site inner card)
+    title:       "#0a0a0d",   // title band
     text:        "#f2f2f4",
     muted:       "#9a9ba3",
     faint:       "#5e5f68",
@@ -33,9 +33,11 @@ const PALETTE = {
     errRGB:      "229, 115, 127",
     ledOff:      "#3a3b42",
     // Body material: "grain" | "brushed" | "grid" | "crystal" | "halo" | "scan" | "mesh" | "orbit" | "none".
-    motif:       "grain",
+    motif:       "mesh",
     // Motif strength: 0 = flat, 1 = default, 2 = full.
-    texture:     1,
+    texture:     2,
+    // Glow multiplier on selection / error halos.
+    glow:        1.36,
 };
 
 // Each motif is a CSS declaration list applied to the node's background layer.
@@ -70,13 +72,14 @@ function injectStyles() {
     const P = PALETTE, a = P.accentRGB, r = P.errRGB;
     const texO = Math.min(1, P.texture / 2);
     const motif = MOTIFS[P.motif] ?? MOTIFS.grain;
+    const g = P.glow ?? 1;
     const css = `
 .ogl-root{position:fixed;inset:0;pointer-events:none;z-index:2;overflow:hidden}
 .ogl{position:absolute;left:0;top:0;pointer-events:none;will-change:transform}
 .ogl__in{position:relative;transform-origin:0 0;border-radius:12px;overflow:hidden;
   box-shadow:0 0 0 1px ${P.line} inset,0 1px 0 ${P.highlight} inset,0 14px 34px rgba(0,0,0,.5);transition:box-shadow 160ms ease}
-.ogl.is-selected .ogl__in{box-shadow:0 0 0 1px rgba(255,255,255,.32) inset,0 1px 0 rgba(255,255,255,.10) inset,0 0 0 1px rgba(${a},.25),0 0 22px rgba(255,255,255,.10),0 14px 34px rgba(0,0,0,.5)}
-.ogl.is-error .ogl__in{box-shadow:0 0 0 1px rgba(${r},.55) inset,0 0 0 1px rgba(${r},.18),0 0 18px rgba(${r},.14),0 14px 34px rgba(0,0,0,.5)}
+.ogl.is-selected .ogl__in{box-shadow:0 0 0 1px rgba(255,255,255,.32) inset,0 1px 0 rgba(255,255,255,.10) inset,0 0 0 1px rgba(${a},.25),0 0 ${(22 * g).toFixed(0)}px rgba(255,255,255,${(.10 * g).toFixed(3)}),0 14px 34px rgba(0,0,0,.5)}
+.ogl.is-error .ogl__in{box-shadow:0 0 0 1px rgba(${r},.55) inset,0 0 0 1px rgba(${r},.18),0 0 ${(18 * g).toFixed(0)}px rgba(${r},${(.14 * g).toFixed(3)}),0 14px 34px rgba(0,0,0,.5)}
 /* Motif: scattered star dots + one orbital arc, like the site background. */
 .ogl__tex{position:absolute;inset:0;pointer-events:none;opacity:${texO};${motif}}
 .ogl__arc{position:absolute;width:220%;aspect-ratio:1;right:-150%;top:-60%;border-radius:50%;border:1px solid rgba(255,255,255,.09);pointer-events:none;opacity:${texO};display:${P.motif === "orbit" ? "block" : "none"}}
