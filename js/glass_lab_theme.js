@@ -40,6 +40,7 @@ const SLOT_FALLBACK = "#8a949c";
 const REDUCED_MOTION = typeof matchMedia === "function"
     && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const FRAME_MS = 1000 / 30;
+const SUPPORTS_ZOOM = typeof CSS !== "undefined" && CSS.supports?.("zoom", "1");
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 function injectStyles() {
@@ -47,10 +48,12 @@ function injectStyles() {
     const a = PALETTE.accentRGB, r = PALETTE.redRGB;
     const css = `
 .ogl-root{position:fixed;inset:0;pointer-events:none;z-index:2;overflow:hidden}
-.ogl{position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none;will-change:transform;border-radius:9px;
+.ogl{position:absolute;left:0;top:0;pointer-events:none;will-change:transform}
+/* Inner box is scaled with CSS zoom (not transform) so text stays crisp at any canvas zoom. */
+.ogl__in{position:relative;transform-origin:0 0;border-radius:9px;
   box-shadow:0 0 0 1px ${PALETTE.line} inset,0 0 0 1px rgba(${a},.18);transition:box-shadow 160ms ease}
-.ogl.is-selected{box-shadow:0 0 0 1px rgba(${a},.9) inset,0 0 0 2px rgba(${a},.22),0 0 14px rgba(${a},.22)}
-.ogl.is-error{box-shadow:0 0 0 1px rgba(${r},.7) inset,0 0 0 2px rgba(${r},.16),0 0 14px rgba(${r},.22)}
+.ogl.is-selected .ogl__in{box-shadow:0 0 0 1px rgba(${a},.9) inset,0 0 0 2px rgba(${a},.22),0 0 14px rgba(${a},.22)}
+.ogl.is-error .ogl__in{box-shadow:0 0 0 1px rgba(${r},.7) inset,0 0 0 2px rgba(${r},.16),0 0 14px rgba(${r},.22)}
 .ogl__frame{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none}
 .ogl__accent{position:absolute;left:12%;right:12%;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(${a},.7),transparent)}
 .ogl.is-error .ogl__accent{background:linear-gradient(90deg,transparent,rgba(${r},.8),transparent)}
@@ -59,9 +62,8 @@ function injectStyles() {
 .ogl.is-anim .ogl__blob{animation:ogl-drift 40s ease-in-out infinite alternate}
 @keyframes ogl-drift{to{transform:translate(14%,10%)}}
 .ogl__chip{position:absolute;right:6px;top:3px;display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border-radius:999px;
-  background:${PALETTE.chipBg};border:1px solid rgba(255,255,255,.10);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  background:rgba(8,10,12,.92);border:1px solid rgba(255,255,255,.10);
   font:700 8.5px/1 Inter,"Segoe UI",system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:${PALETTE.chipText};white-space:nowrap}
-.ogl.is-noblur .ogl__chip{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(8,10,12,.92)}
 .ogl.is-error .ogl__chip{border-color:rgba(${r},.5)}
 .ogl__led{width:6px;height:6px;border-radius:50%;background:${PALETTE.ledOff};transition:background 200ms,box-shadow 200ms}
 .ogl__led.ok{background:${PALETTE.green};box-shadow:0 0 6px rgba(91,227,154,.6)}
@@ -69,8 +71,7 @@ function injectStyles() {
 .ogl__led.err{background:${PALETTE.red};box-shadow:0 0 6px rgba(${r},.6)}
 .ogl__lock{opacity:.8;font-size:9px;padding-left:5px;border-left:1px solid rgba(255,255,255,.1)}
 .ogl__err{position:absolute;left:6px;right:6px;bottom:6px;display:none;padding:5px 8px;border-radius:6px;background:rgba(40,8,14,.86);
-  border:1px solid rgba(${r},.5);color:#ffd7dc;font:600 10px/1.3 ui-monospace,Consolas,monospace;overflow:hidden;max-height:46%;
-  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+  border:1px solid rgba(${r},.5);color:#ffd7dc;font:600 10px/1.3 ui-monospace,Consolas,monospace;overflow:hidden;max-height:46%}
 .ogl.is-error .ogl__err{display:block}
 .ogl.is-collapsed .ogl__err,.ogl.is-collapsed .ogl__blob{display:none}
 
@@ -129,11 +130,12 @@ class Overlay {
     constructor() {
         const el = document.createElement("div");
         el.className = "ogl" + (BLOBS && !REDUCED_MOTION ? " is-anim" : "");
-        el.innerHTML = `
+        el.innerHTML = `<div class="ogl__in">
             <div class="ogl__frame"><div class="ogl__blob"></div><div class="ogl__accent"></div></div>
             <div class="ogl__chip"><span class="ogl__led" title="Onyx session: not synced"></span><span>ONYX</span><span class="ogl__lock">🔒</span></div>
-            <div class="ogl__err"></div>`;
+            <div class="ogl__err"></div></div>`;
         this.el = el;
+        this.inner = el.firstElementChild;
         this.led = el.querySelector(".ogl__led");
         this.err = el.querySelector(".ogl__err");
         this.last = {};
@@ -143,11 +145,17 @@ class Overlay {
         const el = this.el, L = this.last;
         if (!s.visible) { if (el.style.display !== "none") el.style.display = "none"; return; }
         if (el.style.display === "none") el.style.display = "";
-        const tf = `translate(${s.x.toFixed(1)}px,${s.y.toFixed(1)}px) scale(${s.scale.toFixed(3)})`;
+        const tf = `translate(${s.x.toFixed(1)}px,${s.y.toFixed(1)}px)`;
         if (L.tf !== tf) { el.style.transform = tf; L.tf = tf; }
+        const z = s.scale.toFixed(3);
+        if (L.z !== z) {
+            if (SUPPORTS_ZOOM) this.inner.style.zoom = z;
+            else this.inner.style.transform = `scale(${z})`;
+            L.z = z;
+        }
         const w = s.w + "px", h = (s.collapsed ? s.titleH : s.h) + "px";
-        if (L.w !== w) { el.style.width = w; L.w = w; }
-        if (L.h !== h) { el.style.height = h; L.h = h; }
+        if (L.w !== w) { this.inner.style.width = w; L.w = w; }
+        if (L.h !== h) { this.inner.style.height = h; L.h = h; }
         const flags = { "is-selected": s.selected, "is-error": !!s.error, "is-collapsed": s.collapsed, "is-noblur": !blur };
         for (const k in flags) if (L[k] !== flags[k]) { el.classList.toggle(k, flags[k]); L[k] = flags[k]; }
         if (L.lic !== s.licence) {
@@ -321,12 +329,15 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             const r = orig?.apply(this, arguments);
             const { panel, sync } = buildWidgetPanel(this);
+            // Height follows the panel's real content so nothing spills past the node.
+            const panelHeight = () => Math.max(250, (panel.scrollHeight || 0) + 14);
             const widget = this.addDOMWidget("glass_widgets", "div", panel, {
                 serialize: false,
-                getMinHeight: () => 190,
+                getMinHeight: panelHeight,
                 hideOnZoom: false,
             });
-            widget.computeSize = (w) => [w, 190];
+            widget.computeSize = (w) => [w, panelHeight()];
+            requestAnimationFrame(() => { this.setSize(this.computeSize()); this.graph?.setDirtyCanvas(true, true); });
             const origConfigure = this.onConfigure;
             this.onConfigure = function () { const r2 = origConfigure?.apply(this, arguments); sync(); return r2; };
             return r;
