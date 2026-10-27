@@ -153,13 +153,13 @@ function buildPresetUI(node) {
             }
 
             if (!cached) {
-                showStatus(node, `⚠️  Slot ${slot} is empty`, "#33cbe6");
+                showStatus(node, `⚠️  Slot ${slot} is empty`, "#b4c1e5");
                 return;
             }
 
             applyPresetToNode(node, cached);
             const preview = (cached.prompt || "").slice(0, 40);
-            showStatus(node, `📂  Preset ${slot} loaded: ${preview}…`, "#2196f3");
+            showStatus(node, `📂  Preset ${slot} loaded: ${preview}…`, "#b0bee3");
         },
         { serialize: false }
     );

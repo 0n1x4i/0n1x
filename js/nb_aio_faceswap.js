@@ -85,17 +85,17 @@ function maybeWarnSeedreamExpression(node) {
     overlay.id = "onyx-expr-modal";
     overlay.style.cssText = "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;";
     const box = document.createElement("div");
-    box.style.cssText = "width:440px;max-width:92vw;background:#0c1a1e;border:1.5px solid #1497b8;border-radius:10px;padding:16px;color:#dfeff2;font:12.5px/1.45 Segoe UI,Arial,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.6);";
+    box.style.cssText = "width:440px;max-width:92vw;background:#101014;border:1.5px solid #acbae2;border-radius:10px;padding:16px;color:#ececef;font:12.5px/1.45 Inter,Segoe UI,Arial,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,.6);";
     box.innerHTML = `
-        <div style="font-size:14px;font-weight:700;color:#2ec4e0;margin-bottom:8px">Keep original expression · Seedream</div>
+        <div style="font-size:14px;font-weight:700;color:#acbae2;margin-bottom:8px">Keep original expression · Seedream</div>
         <div style="margin-bottom:8px">The original expression is read from image 2 by <b>Gemini 3.1 Flash-Lite</b>. Seedream is mostly used for NSFW swaps, and Gemini <b>refuses NSFW photos</b>: when it does, the exact expression can't be read and only a generic “keep the same expression” instruction is sent.</div>
         <div style="margin-bottom:10px">Add a <b>Grok API key</b> and <b>Grok 4.20 non-reasoning</b> takes over automatically whenever Gemini refuses a photo. The key is stored in ComfyUI settings (Onyx › Face Swap), never in the workflow.</div>`;
     const input = document.createElement("input");
     input.type = "password"; input.placeholder = "xai-…  (Grok API key)";
-    input.style.cssText = "width:100%;box-sizing:border-box;padding:7px;border-radius:6px;border:1px solid #35636b;background:#07100f;color:#fff;margin-bottom:10px;";
+    input.style.cssText = "width:100%;box-sizing:border-box;padding:7px;border-radius:6px;border:1px solid #474851;background:#09090b;color:#fff;margin-bottom:10px;";
     const row = document.createElement("div");
     row.style.cssText = "display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;";
-    const mk = (label, primary) => { const b = document.createElement("button"); b.textContent = label; b.style.cssText = `padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:600;border:1px solid ${primary ? "#2ec4e0" : "#444"};background:${primary ? "#115c6a" : "#222"};color:#fff;`; return b; };
+    const mk = (label, primary) => { const b = document.createElement("button"); b.textContent = label; b.style.cssText = `padding:6px 10px;border-radius:6px;cursor:pointer;font-weight:600;border:1px solid ${primary ? "#acbae2" : "#444"};background:${primary ? "#37383e" : "#222"};color:#fff;`; return b; };
     const save = mk("Save key", true), settings = mk("Open settings", false), skip = mk("Continue without Grok", false);
     const close = () => overlay.remove();
     save.onclick = async () => { const v = input.value.trim(); if (!v) { input.focus(); return; } try { await setGrokKey(v); } catch (e) { console.warn("[Onyx] could not save Grok key", e); } close(); };
@@ -531,7 +531,7 @@ function setToggleVisual(btn, on, onStyle) {
 const FS_ON_STYLE = { bg: "#00c853", border: "#00e676", glow: "rgba(0,200,83,0.5)"   };
 const BR_ON_STYLE = { bg: "#c2185b", border: "#f50057", glow: "rgba(245,0,87,0.4)"   };
 const LN_ON_STYLE = { bg: "#6a1b9a", border: "#ab47bc", glow: "rgba(171,71,188,0.4)" };
-const AM_ON_STYLE = { bg: "#00838f", border: "#00bcd4", glow: "rgba(0,188,212,0.4)"  };
+const AM_ON_STYLE = { bg: "#404148", border: "#acbae2", glow: "rgba(172,186,226,0.4)"  };
 // CSS de base partagé par les 3 boutons ON/OFF (même taille, même rayon)
 const TOGGLE_BTN_BASE_CSS = `
     padding: 4px 18px;
@@ -552,12 +552,12 @@ function buildModeToggle(node) {
     const container = document.createElement("div");
     container.style.cssText = `
         box-sizing: border-box;
-        border: 2px solid #1565c0;
+        border: 2px solid #acbae2;
         border-radius: 9px;
         padding: 8px 10px 11px 10px;
         background: linear-gradient(135deg,
-            rgba(21,101,192,0.14) 0%,
-            rgba(79,195,247,0.06) 100%);
+            rgba(172,186,226,0.14) 0%,
+            rgba(202,211,236,0.06) 100%);
         font-family: 'Segoe UI', Arial, sans-serif;
         width: 100%;
         overflow: hidden;
@@ -570,10 +570,10 @@ function buildModeToggle(node) {
     titleEl.style.cssText = `
         font-weight: 700;
         font-size: 11.5px;
-        color: #4fc3f7;
+        color: #cad3ec;
         letter-spacing: 2px;
         text-align: center;
-        text-shadow: 0 0 10px rgba(79,195,247,0.45);
+        text-shadow: 0 0 10px rgba(202,211,236,0.45);
         margin-bottom: 7px;
         user-select: none;
         transition: color 0.25s, text-shadow 0.25s;
@@ -583,7 +583,7 @@ function buildModeToggle(node) {
     const sep = document.createElement("div");
     sep.style.cssText = `
         height: 1px;
-        background: linear-gradient(to right, transparent, #1565c0 40%, #1565c0 60%, transparent);
+        background: linear-gradient(to right, transparent, #acbae2 40%, #acbae2 60%, transparent);
         opacity: 0.55;
         margin-bottom: 8px;
     `;
@@ -598,14 +598,14 @@ function buildModeToggle(node) {
             flex: 1;
             padding: 6px 4px;
             border-radius: 8px;
-            border: 1.5px solid ${active ? "#4fc3f7" : "#444"};
-            background: ${active ? "rgba(79,195,247,0.18)" : "#252525"};
-            color: ${active ? "#4fc3f7" : "#555"};
+            border: 1.5px solid ${active ? "#cad3ec" : "#444"};
+            background: ${active ? "rgba(202,211,236,0.18)" : "#252525"};
+            color: ${active ? "#cad3ec" : "#555"};
             font-weight: 700;
             font-size: 11px;
             cursor: pointer;
             letter-spacing: 1px;
-            box-shadow: ${active ? "0 0 7px rgba(79,195,247,0.25)" : "none"};
+            box-shadow: ${active ? "0 0 7px rgba(202,211,236,0.25)" : "none"};
             transition: all 0.2s ease;
         `;
         return btn;
@@ -654,18 +654,18 @@ function buildModeToggle(node) {
     function activateImageMode(initial = false) {
         isVideoMode          = false;
         node._nbIsVideoMode  = false;
-        imgBtn.style.border     = "1.5px solid #4fc3f7";
-        imgBtn.style.background = "rgba(79,195,247,0.18)";
-        imgBtn.style.color      = "#4fc3f7";
-        imgBtn.style.boxShadow  = "0 0 7px rgba(79,195,247,0.25)";
+        imgBtn.style.border     = "1.5px solid #cad3ec";
+        imgBtn.style.background = "rgba(202,211,236,0.18)";
+        imgBtn.style.color      = "#cad3ec";
+        imgBtn.style.boxShadow  = "0 0 7px rgba(202,211,236,0.25)";
         vidBtn.style.border     = "1.5px solid #444";
         vidBtn.style.background = "#252525";
         vidBtn.style.color      = "#555";
         vidBtn.style.boxShadow  = "none";
-        container.style.border     = "2px solid #1565c0";
-        container.style.background = "linear-gradient(135deg, rgba(21,101,192,0.14) 0%, rgba(79,195,247,0.06) 100%)";
-        titleEl.style.color        = "#4fc3f7";
-        titleEl.style.textShadow   = "0 0 10px rgba(79,195,247,0.45)";
+        container.style.border     = "2px solid #acbae2";
+        container.style.background = "linear-gradient(135deg, rgba(172,186,226,0.14) 0%, rgba(202,211,236,0.06) 100%)";
+        titleEl.style.color        = "#cad3ec";
+        titleEl.style.textShadow   = "0 0 10px rgba(202,211,236,0.45)";
         // IMAGE_MODELS_DEFAULT = source de vérité (Python déclare image+vidéo
         // pour la validation serveur, donc options.values n'est plus fiable)
         const modelW = getWidget(node, "model");
@@ -801,12 +801,12 @@ function buildFaceSwapUI(node) {
     const container = document.createElement("div");
     container.style.cssText = `
         box-sizing: border-box;
-        border: 2px solid #1497b8;
+        border: 2px solid #acbae2;
         border-radius: 9px;
         padding: 9px 10px 16px 10px;
         background: linear-gradient(135deg,
-            rgba(20, 151, 184,0.13) 0%,
-            rgba(46, 196, 224,0.06) 100%);
+            rgba(172,186,226,0.13) 0%,
+            rgba(172,186,226,0.06) 100%);
         font-family: 'Segoe UI', Arial, sans-serif;
         width: 100%;
         transition: border-color 0.25s, background 0.25s;
@@ -818,10 +818,10 @@ function buildFaceSwapUI(node) {
     titleEl.style.cssText = `
         font-weight: 700;
         font-size: 11.5px;
-        color: #2ec4e0;
+        color: #acbae2;
         letter-spacing: 2px;
         text-align: center;
-        text-shadow: 0 0 10px rgba(46, 196, 224,0.45);
+        text-shadow: 0 0 10px rgba(172,186,226,0.45);
         margin-bottom: 7px;
         transition: color 0.25s, text-shadow 0.25s;
         user-select: none;
@@ -831,7 +831,7 @@ function buildFaceSwapUI(node) {
     const sep = document.createElement("div");
     sep.style.cssText = `
         height: 1px;
-        background: linear-gradient(to right, transparent, #1497b8 40%, #1497b8 60%, transparent);
+        background: linear-gradient(to right, transparent, #acbae2 40%, #acbae2 60%, transparent);
         opacity: 0.55;
         margin-bottom: 8px;
     `;
@@ -855,7 +855,7 @@ function buildFaceSwapUI(node) {
             display: ${hidden ? "none" : "flex"};
             align-items: center;
             gap: 8px;
-            ${hidden ? "margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(20, 151, 184,0.3);" : ""}
+            ${hidden ? "margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(172,186,226,0.3);" : ""}
         `;
         const label = document.createElement("span");
         label.textContent = labelText;
@@ -914,7 +914,7 @@ function buildFaceSwapUI(node) {
         gap: 6px;
         margin-top: 8px;
         padding-top: 7px;
-        border-top: 1px solid rgba(20, 151, 184,0.3);
+        border-top: 1px solid rgba(172,186,226,0.3);
     `;
     const exprTitleEl = document.createElement("div");
     exprTitleEl.textContent = "Facial Expression";
@@ -936,9 +936,9 @@ function buildFaceSwapUI(node) {
     function selectExpression(value) {
         for (const [v, btn] of Object.entries(exprBtns)) {
             const active = (v === value);
-            btn.style.background = active ? "rgba(46, 196, 224,0.35)" : "#2a2a2a";
-            btn.style.color      = active ? "#2ec4e0" : "#888";
-            btn.style.border     = active ? "1.5px solid #1497b8" : "1.5px solid #444";
+            btn.style.background = active ? "rgba(172,186,226,0.35)" : "#2a2a2a";
+            btn.style.color      = active ? "#acbae2" : "#888";
+            btn.style.border     = active ? "1.5px solid #acbae2" : "1.5px solid #444";
             btn.style.fontWeight = active ? "700" : "400";
         }
         syncNodeWidget(node, "face_expression", value);
@@ -992,7 +992,7 @@ function buildFaceSwapUI(node) {
         gap: 5px;
         margin-top: 8px;
         padding-top: 7px;
-        border-top: 1px solid rgba(20, 151, 184,0.3);
+        border-top: 1px solid rgba(172,186,226,0.3);
     `;
     const promptLabel = document.createElement("div");
     promptLabel.textContent = "✏️  Additional Prompt";
@@ -1021,7 +1021,7 @@ function buildFaceSwapUI(node) {
         transition: border-color 0.2s;
         min-height: 54px;
     `;
-    promptTextarea.addEventListener("focus", () => promptTextarea.style.borderColor = "#1497b8");
+    promptTextarea.addEventListener("focus", () => promptTextarea.style.borderColor = "#acbae2");
     promptTextarea.addEventListener("blur",  () => promptTextarea.style.borderColor = "#444");
     promptTextarea.addEventListener("keydown", e => e.stopPropagation());
     promptTextarea.addEventListener("input", () => {
@@ -1054,10 +1054,10 @@ function buildFaceSwapUI(node) {
             exprSection.style.display     = "flex";
             promptSection.style.display   = "flex";
         } else {
-            container.style.border     = "2px solid #1497b8";
-            container.style.background = "linear-gradient(135deg, rgba(20, 151, 184,0.13) 0%, rgba(46, 196, 224,0.06) 100%)";
-            titleEl.style.color        = "#2ec4e0";
-            titleEl.style.textShadow   = "0 0 10px rgba(46, 196, 224,0.45)";
+            container.style.border     = "2px solid #acbae2";
+            container.style.background = "linear-gradient(135deg, rgba(172,186,226,0.13) 0%, rgba(172,186,226,0.06) 100%)";
+            titleEl.style.color        = "#acbae2";
+            titleEl.style.textShadow   = "0 0 10px rgba(172,186,226,0.45)";
             brRow.style.display           = "none";
             lnRow.style.display           = "none";
             amRow.style.display           = "none";
@@ -1168,12 +1168,12 @@ function buildPresetUI(node) {
     const container = document.createElement("div");
     container.style.cssText = `
         box-sizing: border-box;
-        border: 2px solid #37474f;
+        border: 2px solid #3c3c43;
         border-radius: 9px;
         padding: 8px 10px 10px 10px;
         background: linear-gradient(135deg,
-            rgba(55,71,79,0.14) 0%,
-            rgba(96,125,139,0.06) 100%);
+            rgba(60,60,67,0.14) 0%,
+            rgba(112,113,123,0.06) 100%);
         font-family: 'Segoe UI', Arial, sans-serif;
         width: 100%;
         overflow: hidden;
@@ -1182,7 +1182,7 @@ function buildPresetUI(node) {
     const titleEl = document.createElement("div");
     titleEl.textContent = "💾  PRESETS";
     titleEl.style.cssText = `
-        font-weight: 700; font-size: 11.5px; color: #90a4ae;
+        font-weight: 700; font-size: 11.5px; color: #9a9ba4;
         letter-spacing: 2px; text-align: center;
         margin-bottom: 7px; user-select: none;
     `;
@@ -1190,7 +1190,7 @@ function buildPresetUI(node) {
     const sep = document.createElement("div");
     sep.style.cssText = `
         height: 1px;
-        background: linear-gradient(to right, transparent, #37474f 40%, #37474f 60%, transparent);
+        background: linear-gradient(to right, transparent, #3c3c43 40%, #3c3c43 60%, transparent);
         opacity: 0.55; margin-bottom: 7px;
     `;
     container.appendChild(sep);
@@ -1203,8 +1203,8 @@ function buildPresetUI(node) {
         const row   = slotRows[n];
         const input = slotInputs[n];
         if (!row) return;
-        row.style.border     = filled ? "1px solid rgba(79,195,247,0.3)" : "1px solid #2a2a2a";
-        row.style.background = filled ? "rgba(79,195,247,0.04)"          : "#1a1a1a";
+        row.style.border     = filled ? "1px solid rgba(202,211,236,0.3)" : "1px solid #2a2a2a";
+        row.style.background = filled ? "rgba(202,211,236,0.04)"          : "#1a1a1a";
         if (input && name !== undefined) input.value = name || "";
     }
     function buildSlot(n) {
@@ -1231,7 +1231,7 @@ function buildPresetUI(node) {
             color: #aaa; font-size: 9.5px; padding: 2px 5px;
             outline: none; font-family: 'Segoe UI', Arial, sans-serif;
         `;
-        nameInput.addEventListener("focus", () => nameInput.style.borderColor = "#546e7a");
+        nameInput.addEventListener("focus", () => nameInput.style.borderColor = "#5c5d68");
         nameInput.addEventListener("blur",  () => nameInput.style.borderColor = "#333");
         nameInput.addEventListener("keydown", e => e.stopPropagation());
         slotInputs[n] = nameInput;
@@ -1300,7 +1300,7 @@ function buildPresetUI(node) {
                     if (SKIP.has(key)) continue;
                     syncNodeWidget(node, key, value);
                 }
-                loadBtn.style.cssText = btnBase + "border:1px solid #2962ff; background:#0d47a1; color:#82b1ff;";
+                loadBtn.style.cssText = btnBase + "border:1px solid #bfcae9; background:#4e4f58; color:#cad3ec;";
                 setTimeout(() => {
                     loadBtn.style.cssText = btnBase + "border:1px solid #444; background:#252525; color:#666;";
                 }, 900);

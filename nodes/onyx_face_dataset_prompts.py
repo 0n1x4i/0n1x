@@ -131,6 +131,10 @@ class OnyxFaceDatasetPrompts:
                 "age": ("INT", {"default": 0, "min": 0, "max": 99,
                                 "tooltip": "Age of the person in image 1. 0 = not mentioned. "
                                            "Otherwise every prompt ends with 'She is N years old.'"}),
+                # Added after age for the same reason (widgets are saved by position).
+                "append_prompt": ("STRING", {"default": "", "multiline": True,
+                                             "tooltip": "Text added at the END of every prompt, for every generation "
+                                                        "(after the age sentence). Leave empty to add nothing."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -140,13 +144,14 @@ class OnyxFaceDatasetPrompts:
     FUNCTION = "next_prompt"
     CATEGORY = "Onyx"
     DESCRIPTION = ("Face-only dataset prompts for Nano Banana Pro (image 1 = the girl). Each queue run "
-                   "outputs the next angle; queue the workflow 'total' times to get the full set.")
+                   "outputs the next angle; queue the workflow 'total' times to get the full set. "
+                   "append_prompt adds your own text at the end of every prompt.")
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
-    def next_prompt(self, expressions, mode, index, extra_text=None, run_token="", age=0, unique_id=None):
+    def next_prompt(self, expressions, mode, index, extra_text=None, run_token="", age=0, append_prompt="", unique_id=None):
         prompts = build_prompts(expressions)
         total = len(prompts)
         if mode == "fixed index":
@@ -163,6 +168,8 @@ class OnyxFaceDatasetPrompts:
         label, text = prompts[i]
         if age and int(age) > 0:
             text = text + f" She is {int(age)} years old."
+        if append_prompt and append_prompt.strip():
+            text = text + " " + append_prompt.strip()
         if extra_text and extra_text.strip():
             text = text + " " + extra_text.strip()
         print(f"[Onyx Face Dataset] {i + 1}/{total} — {label}")
