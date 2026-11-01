@@ -173,7 +173,6 @@ class NanoBananaProEditAPINode:
         }
         url = f"{self.BASE_URL}/{self.MODEL_ID}:generateContent"
 
-        # Retries 429/5xx with backoff, never replays a read timeout (could bill twice).
         data = post_json(url, service="Nano Banana Pro", payload=payload, headers=headers,
                          timeout=(15, 180))
 
@@ -434,9 +433,8 @@ class SeedreamEditAPINode:
             for _ in range(90):
                 _time.sleep(2)
                 try:
-                    # Polling is free and idempotent: get_json retries everything.
                     data = get_json(poll_url, service="Seedream 4.5 Edit poll", headers=headers,
-                                    timeout=(10, 30), max_retries=2).get("data", {})
+                                    timeout=(10, 30)).get("data", {})
                 except OnyxAPIError as e:
                     logging.warning("Seedream 4.5 Edit poll error: %s", e)
                     continue

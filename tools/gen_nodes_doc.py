@@ -134,7 +134,9 @@ class _StubFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
 
 def _install_comfy_stubs():
-    tmp = tempfile.gettempdir()
+    # An EMPTY folder: dropdowns built from ComfyUI's input/output folders must
+    # not list whatever happens to sit in this machine's temp directory.
+    tmp = tempfile.mkdtemp(prefix="onyx_doc_")
     class _FolderPaths(types.ModuleType):
         def __getattr__(self, item):        # any other folder_paths helper: empty list
             if item.startswith("__"):

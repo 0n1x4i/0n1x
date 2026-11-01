@@ -50,57 +50,43 @@ class FakeSession:
         return item
 
 
-def _no_sleep(_s):
-    pass
-
-
 class HttpTests(unittest.TestCase):
-    def setUp(self):
-        self.p = mock.patch.object(onyx_http, "_sleep", _no_sleep)
-        self.p.start()
+    """Each request is sent once: no retry on any error."""
 
-    def tearDown(self):
-        self.p.stop()
-
-    def test_retries_429_then_succeeds(self):
+    def test_429_is_not_retried(self):
         s = FakeSession([FakeResp(429, {"error": {"message": "slow down"}}), FakeResp(200, {"ok": 1})])
-        self.assertEqual(onyx_http.post_json("https://x", service="T", payload={}, session=s), {"ok": 1})
-        self.assertEqual(s.calls, 2)
+        with self.assertRaises(onyx_http.OnyxAPIError) as cm:
+            onyx_http.post_json("https://x", service="T", payload={}, session=s)
+        self.assertEqual(s.calls, 1)
+        self.assertEqual(cm.exception.status, 429)
 
-    def test_does_not_retry_400(self):
+    def test_5xx_is_not_retried(self):
+        s = FakeSession([FakeResp(503, {"message": "busy"}), FakeResp(200, {})])
+        with self.assertRaises(onyx_http.OnyxAPIError) as cm:
+            onyx_http.post_json("https://x", service="T", payload={}, session=s)
+        self.assertEqual(s.calls, 1)
+        self.assertIn("busy", str(cm.exception))
+
+    def test_network_errors_not_retried(self):
+        for exc in (requests.exceptions.ConnectionError("dns"), requests.exceptions.ReadTimeout("slow")):
+            s = FakeSession([exc, FakeResp(200, {})])
+            with self.assertRaises(onyx_http.OnyxAPIError):
+                onyx_http.post_json("https://x", service="T", payload={}, session=s)
+            self.assertEqual(s.calls, 1)
+            s = FakeSession([exc, FakeResp(200, {})])
+            with self.assertRaises(onyx_http.OnyxAPIError):
+                onyx_http.get_json("https://x", service="T", session=s)
+            self.assertEqual(s.calls, 1)
+
+    def test_success(self):
+        s = FakeSession([FakeResp(200, {"ok": 1})])
+        self.assertEqual(onyx_http.post_json("https://x", service="T", payload={}, session=s), {"ok": 1})
+
+    def test_400_message(self):
         s = FakeSession([FakeResp(400, {"error": {"message": "bad size", "status": "INVALID_ARGUMENT"}})])
         with self.assertRaises(onyx_http.OnyxAPIError) as cm:
             onyx_http.post_json("https://x", service="T", payload={}, session=s)
-        self.assertEqual(s.calls, 1)
-        self.assertEqual(cm.exception.status, 400)
         self.assertIn("bad size", str(cm.exception))
-
-    def test_gives_up_after_max_retries(self):
-        s = FakeSession([FakeResp(503, {"message": "busy"})] * 4)
-        with self.assertRaises(onyx_http.OnyxAPIError) as cm:
-            onyx_http.post_json("https://x", service="T", payload={}, session=s, max_retries=3)
-        self.assertEqual(s.calls, 4)
-        self.assertIn("4 attempts", str(cm.exception))
-
-    def test_read_timeout_not_replayed_on_post(self):
-        s = FakeSession([requests.exceptions.ReadTimeout("slow"), FakeResp(200, {})])
-        with self.assertRaises(onyx_http.OnyxAPIError):
-            onyx_http.post_json("https://x", service="T", payload={}, session=s)
-        self.assertEqual(s.calls, 1)
-
-    def test_read_timeout_retried_on_get(self):
-        s = FakeSession([requests.exceptions.ReadTimeout("slow"), FakeResp(200, {"a": 1})])
-        self.assertEqual(onyx_http.get_json("https://x", service="T", session=s), {"a": 1})
-
-    def test_connection_error_retried(self):
-        s = FakeSession([requests.exceptions.ConnectionError("dns"), FakeResp(200, {"a": 2})])
-        self.assertEqual(onyx_http.post_json("https://x", service="T", payload={}, session=s), {"a": 2})
-
-    def test_long_retry_after_is_not_waited(self):
-        s = FakeSession([FakeResp(429, {"error": "quota"}, headers={"Retry-After": "3600"})])
-        with self.assertRaises(onyx_http.OnyxAPIError):
-            onyx_http.post_json("https://x", service="T", payload={}, session=s)
-        self.assertEqual(s.calls, 1)
 
     def test_key_is_redacted(self):
         key = "AIzaSySECRETSECRET123"

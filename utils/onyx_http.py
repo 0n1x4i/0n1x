@@ -2,32 +2,18 @@
 """
 Onyx HTTP — one client for every provider call in the pack.
 
-Every API node used to call `requests.post` on its own, each with its own
-timeout and its own error handling, and none of them retried. One 429 from
-Google in the middle of a 40-image batch killed the whole queue.
+Each request is sent ONCE: no automatic retry, no replay. A failed call fails
+the node right away, exactly as before; re-queueing is the user's decision.
 
-What this module does, and why each rule is the way it is:
-
-  * Retries 408 / 429 / 500 / 502 / 503 / 504 / 529 with exponential backoff
-    and jitter, and honours `Retry-After` when the provider sends it. Those
-    statuses mean "the provider did not do the work": nothing was generated,
-    nothing was billed.
-  * Retries connection errors (DNS, refused, reset before the answer, connect
-    timeout): the request never reached the provider.
-  * Does NOT retry a READ timeout by default. The provider received the
-    request and may still be generating — and billing — the image. Replaying
-    it would pay twice for one picture. Pass `retry_read_timeout=True` only
-    for idempotent, free calls (polling, listing models).
-  * Never retries 400 / 401 / 403 / 404 / 413 / 422: the same request will
-    fail the same way, and the user needs the message, not a 30 s wait.
-  * Builds one readable error (`OnyxAPIError`) out of the very different
-    error bodies of Google, xAI, fal, WaveSpeed, Kie and Atlas Cloud, with a
-    hint per status code.
-  * Redacts API keys from every message it produces. `requests` puts the full
+What it adds over a bare `requests.post`:
+  * One readable error (`OnyxAPIError`) out of the very different error
+    bodies of Google, xAI, fal, WaveSpeed, Kie and Atlas Cloud, with a hint
+    per status code (bad key, quota, model retired, image too large...).
+  * API keys redacted from every message it produces. `requests` puts the full
     URL in its exceptions, and Google's `?key=` style used to land the key in
-    the ComfyUI console and in screenshots people post on Discord.
-  * Waits in short slices and checks ComfyUI's cancel button between them, so
-    "Cancel" works during a backoff instead of after it.
+    the ComfyUI console and in screenshots.
+  * A clear message on a read timeout: the provider may still finish (and
+    bill) the job, so check its dashboard before re-queueing.
 
 Usage:
 
@@ -35,39 +21,23 @@ Usage:
 
     data = post_json(url, service="Nano Banana Pro", payload=payload,
                      headers={"x-goog-api-key": key}, timeout=(15, 180))
-
-The protected modules served by the Worker run inside the pack's package (see
-nodes/onyx_remote_exec.load_bundle_module), so they can use it the same way:
-`from ..utils.onyx_http import post_json`.
 """
 
 from __future__ import annotations
 
-import email.utils
 import logging
-import random
 import re
-import time
 from typing import Iterable, Optional
 
 import requests
 
 __all__ = [
-    "OnyxAPIError", "request", "post_json", "get_json", "download",
-    "RETRY_STATUSES", "redact",
+    "OnyxAPIError", "request", "post_json", "get_json", "download", "redact",
 ]
 
 log = logging.getLogger("onyx.http")
 
-# Statuses where the provider did not run the job, so a replay costs nothing.
-# 529 = Anthropic/xAI-style "overloaded".
-RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504, 529})
-
 DEFAULT_TIMEOUT = (15, 180)        # (connect, read) seconds
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_BACKOFF_BASE = 2.0         # 2s, 4s, 8s (+ jitter)
-DEFAULT_BACKOFF_MAX = 30.0
-MAX_RETRY_AFTER = 120.0            # a provider asking for 10 minutes is a quota, not a blip
 
 _SECRET_HEADERS = ("authorization", "x-goog-api-key", "x-api-key", "api-key", "x-key")
 
@@ -84,7 +54,7 @@ _HINTS = {
     413: "Request too large — send fewer or smaller input images.",
     422: "The provider could not validate the request (a parameter is out of range "
          "or not allowed together with another one).",
-    429: "Rate limit or quota reached. Wait a minute, lower the batch size, or check "
+    429: "Rate limit or quota reached. Wait a minute before re-queueing, lower the batch size, or check "
          "the quota/billing page of this provider.",
     500: "Internal error on the provider side.",
     502: "Provider gateway error — usually transient.",
@@ -98,13 +68,11 @@ class OnyxAPIError(RuntimeError):
     """Readable provider error. `str(err)` is safe to show: keys are redacted."""
 
     def __init__(self, service: str, message: str, status: Optional[int] = None,
-                 provider_message: str = "", retryable: bool = False, attempts: int = 1):
+                 provider_message: str = ""):
         super().__init__(message)
         self.service = service
         self.status = status
         self.provider_message = provider_message
-        self.retryable = retryable
-        self.attempts = attempts
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -190,61 +158,14 @@ def _message_from_body(body) -> str:
     return str(body)[:300]
 
 
-def _build_error(service: str, resp: requests.Response, secrets, attempts: int) -> OnyxAPIError:
+def _build_error(service: str, resp: requests.Response, secrets) -> OnyxAPIError:
     status = resp.status_code
     pmsg = redact(_provider_message(resp), secrets)
     hint = _HINTS.get(status) or ("Provider-side error." if status >= 500 else "Request refused.")
     msg = f"{service}: HTTP {status} — {hint}"
     if pmsg:
         msg += f"\n  Provider says: {pmsg}"
-    if attempts > 1:
-        msg += f"\n  (gave up after {attempts} attempts)"
-    return OnyxAPIError(service, msg, status=status, provider_message=pmsg,
-                        retryable=status in RETRY_STATUSES, attempts=attempts)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Waiting (interruptible)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _check_interrupted():
-    try:
-        import comfy.model_management as mm  # only inside ComfyUI
-    except Exception:
-        return
-    mm.throw_exception_if_processing_interrupted()
-
-
-def _sleep(seconds: float):
-    end = time.monotonic() + max(0.0, seconds)
-    while True:
-        _check_interrupted()
-        left = end - time.monotonic()
-        if left <= 0:
-            return
-        time.sleep(min(0.25, left))
-
-
-def _retry_after(resp: requests.Response) -> Optional[float]:
-    value = resp.headers.get("Retry-After")
-    if not value:
-        return None
-    try:
-        return max(0.0, float(value))
-    except ValueError:
-        pass
-    try:
-        dt = email.utils.parsedate_to_datetime(value)
-        return max(0.0, dt.timestamp() - time.time())
-    except Exception:
-        return None
-
-
-def _backoff(attempt: int, base: float, cap: float) -> float:
-    # attempt is 1-based: 2s, 4s, 8s ... with ±25 % jitter so parallel
-    # workers that failed together do not retry together.
-    delay = min(cap, base * (2 ** (attempt - 1)))
-    return delay * random.uniform(0.75, 1.25)
+    return OnyxAPIError(service, msg, status=status, provider_message=pmsg)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -254,72 +175,38 @@ def _backoff(attempt: int, base: float, cap: float) -> float:
 def request(method: str, url: str, *, service: str = "API",
             headers: Optional[dict] = None, params: Optional[dict] = None,
             json=None, data=None, timeout=DEFAULT_TIMEOUT,
-            max_retries: int = DEFAULT_MAX_RETRIES,
-            backoff_base: float = DEFAULT_BACKOFF_BASE,
-            backoff_max: float = DEFAULT_BACKOFF_MAX,
-            retry_read_timeout: bool = False,
             raise_for_status: bool = True,
             session: Optional[requests.Session] = None,
             **kwargs) -> requests.Response:
-    """Send one HTTP request with the retry rules described in the module docstring.
+    """Send one HTTP request, once (no retry).
 
     Returns the `requests.Response` (status < 400 unless raise_for_status=False).
     Raises OnyxAPIError on failure, never a raw requests exception.
     """
     secrets = _secrets_from(headers, params)
     sender = session or requests
-    attempts = 0
-    while True:
-        attempts += 1
-        _check_interrupted()
-        try:
-            resp = sender.request(method, url, headers=headers, params=params,
-                                  json=json, data=data, timeout=timeout, **kwargs)
-        except requests.exceptions.ReadTimeout as e:
-            if retry_read_timeout and attempts <= max_retries:
-                delay = _backoff(attempts, backoff_base, backoff_max)
-                print(f"[Onyx HTTP] {service}: read timeout, retry {attempts}/{max_retries} in {delay:.1f}s")
-                _sleep(delay)
-                continue
-            raise OnyxAPIError(
-                service,
-                f"{service}: no answer within {timeout if not isinstance(timeout, tuple) else timeout[1]}s. "
-                f"The provider may still finish (and bill) this job, so it was not replayed "
-                f"automatically. Check the provider dashboard before re-queueing.",
-                retryable=False, attempts=attempts,
-            ) from None
-        except (requests.exceptions.ConnectionError, requests.exceptions.ConnectTimeout) as e:
-            if attempts <= max_retries:
-                delay = _backoff(attempts, backoff_base, backoff_max)
-                print(f"[Onyx HTTP] {service}: connection error, retry {attempts}/{max_retries} in {delay:.1f}s")
-                _sleep(delay)
-                continue
-            raise OnyxAPIError(
-                service,
-                f"{service}: could not reach the provider after {attempts} attempts "
-                f"(network down, DNS, proxy or firewall). Details: {redact(str(e), secrets)[:300]}",
-                retryable=True, attempts=attempts,
-            ) from None
-        except requests.exceptions.RequestException as e:
-            raise OnyxAPIError(service, f"{service}: request error — {redact(str(e), secrets)[:300]}",
-                               attempts=attempts) from None
+    try:
+        resp = sender.request(method, url, headers=headers, params=params,
+                              json=json, data=data, timeout=timeout, **kwargs)
+    except requests.exceptions.ReadTimeout:
+        read_s = timeout[1] if isinstance(timeout, tuple) else timeout
+        raise OnyxAPIError(
+            service,
+            f"{service}: no answer within {read_s}s. The provider may still finish (and bill) "
+            f"this job — check the provider dashboard before re-queueing.",
+        ) from None
+    except (requests.exceptions.ConnectionError, requests.exceptions.ConnectTimeout) as e:
+        raise OnyxAPIError(
+            service,
+            f"{service}: could not reach the provider (network down, DNS, proxy or firewall). "
+            f"Details: {redact(str(e), secrets)[:300]}",
+        ) from None
+    except requests.exceptions.RequestException as e:
+        raise OnyxAPIError(service, f"{service}: request error — {redact(str(e), secrets)[:300]}") from None
 
-        if resp.status_code < 400 or not raise_for_status:
-            return resp
-
-        if resp.status_code in RETRY_STATUSES and attempts <= max_retries:
-            wait = _retry_after(resp)
-            if wait is not None and wait > MAX_RETRY_AFTER:
-                # A long Retry-After is a quota window: waiting it out silently
-                # would freeze the queue for minutes. Tell the user instead.
-                raise _build_error(service, resp, secrets, attempts)
-            delay = wait if wait is not None else _backoff(attempts, backoff_base, backoff_max)
-            print(f"[Onyx HTTP] {service}: HTTP {resp.status_code}, retry {attempts}/{max_retries} "
-                  f"in {delay:.1f}s")
-            _sleep(delay)
-            continue
-
-        raise _build_error(service, resp, secrets, attempts)
+    if resp.status_code < 400 or not raise_for_status:
+        return resp
+    raise _build_error(service, resp, secrets)
 
 
 def post_json(url: str, *, service: str = "API", payload=None, **kwargs) -> dict:
@@ -329,16 +216,13 @@ def post_json(url: str, *, service: str = "API", payload=None, **kwargs) -> dict
 
 
 def get_json(url: str, *, service: str = "API", **kwargs) -> dict:
-    """GET and return the decoded JSON body. Read timeouts are retried: a GET is free."""
-    kwargs.setdefault("retry_read_timeout", True)
+    """GET and return the decoded JSON body."""
     resp = request("GET", url, service=service, **kwargs)
     return _decode(resp, service, kwargs)
 
 
 def download(url: str, *, service: str = "API", timeout=(15, 120), **kwargs) -> bytes:
-    """Fetch a result file (image/video) and return its bytes. Downloads are
-    free and idempotent, so read timeouts are retried."""
-    kwargs.setdefault("retry_read_timeout", True)
+    """Fetch a result file (image/video) and return its bytes."""
     resp = request("GET", url, service=f"{service} download", timeout=timeout, **kwargs)
     return resp.content
 

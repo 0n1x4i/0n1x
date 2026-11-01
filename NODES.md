@@ -138,7 +138,7 @@ Load images from a directory one at a time.
 |------|------|----------|---------|-------|-------------|
 | `use_absolute_path` | `BOOLEAN` | yes | `False` |  |  |
 | `run_count` | `INT` | yes | `1` | 1 – 9999 (step 1) |  |
-| `input_folder` | Dropdown: `cc-socks`, `claude-0`, `hsperfdata_root`, `initgoogle_syslog_dir.0`, `node-compile-cache`, `v8-compile-cache-0` | no | `cc-socks` |  |  |
+| `input_folder` | Dropdown: `(no folders found)` | no | `(no folders found)` |  |  |
 | `absolute_path` | `STRING` | no | `""` |  |  |
 
 ### Outputs
@@ -208,7 +208,7 @@ Generate LoRA training captions for all images in a folder.
 
 | Name | Type | Required | Default | Range | Description |
 |------|------|----------|---------|-------|-------------|
-| `input_folder` | Dropdown: `cc-socks`, `claude-0`, `hsperfdata_root`, `initgoogle_syslog_dir.0`, `node-compile-cache`, `v8-compile-cache-0` | yes | `cc-socks` |  |  |
+| `input_folder` | Dropdown: `(no folders found)` | yes | `(no folders found)` |  |  |
 | `api_key` | `STRING` | yes | `""` |  |  |
 | `provider` | Dropdown: `gemini`, `vertex`, `grok` | yes | `gemini` |  |  |
 | `trigger_word` | `STRING` | yes | `""` |  |  |

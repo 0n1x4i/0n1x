@@ -19,7 +19,7 @@ Guarantees:
   * ComfyUI's Cancel button is honoured between calls.
   * A ComfyUI progress bar advances as calls finish, when running inside ComfyUI.
   * `max_workers` is capped (default 4): providers rate-limit per key, and 10
-    parallel calls on one Google key mostly buy 429s. onyx_http retries those.
+    parallel calls on one Google key mostly buy 429s.
 
 Used locally by Node.py (result downloads). The Worker modules (carousel,
 Re-pose, Dataset Creator) run inside the pack's package and can import it with
