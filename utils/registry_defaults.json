@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "updated": "2026-11-01",
+  "_comment": "Defaults shipped with the pack. The Worker can serve a newer copy at /registry (same shape); it is merged on top of this file at startup, so a new model or a new price reaches every install without a pack release. Ids are NEVER removed from a dropdown, even when retired: ComfyUI saves the chosen string in the workflow and would refuse to load it if the option disappeared. Retired ids are flagged deprecated instead: sorted last, and a warning names the replacement when one is run.",
+
+  "models": {
+    "gemini_text": {
+      "default": "gemini-3.6-flash",
+      "entries": [
+        {"id": "gemini-3.8-flash",       "thinking": ["minimal", "low", "medium", "high"], "no_sampling": true},
+        {"id": "gemini-3.7-flash",       "thinking": ["minimal", "low", "medium", "high"], "no_sampling": true},
+        {"id": "gemini-3.6-flash",       "thinking": ["minimal", "low", "medium", "high"], "no_sampling": true},
+        {"id": "gemini-3.5-flash",       "thinking": ["minimal", "low", "medium", "high"], "no_sampling": false},
+        {"id": "gemini-3.5-flash-lite",  "thinking": ["minimal", "low", "medium", "high"], "no_sampling": true},
+        {"id": "gemini-3.1-pro-preview", "thinking": ["low", "medium", "high"],            "no_sampling": false},
+        {"id": "gemini-2.5-pro",         "thinking": ["low", "medium", "high"],            "no_sampling": false},
+        {"id": "gemini-2.5-flash",       "thinking": ["low", "medium", "high"],            "no_sampling": false}
+      ]
+    },
+    "grok": {
+      "default": "grok-4.20-0309-reasoning",
+      "entries": [
+        {"id": "grok-4.20-0309-reasoning",     "vision": true},
+        {"id": "grok-4.20-0309-non-reasoning", "vision": true},
+        {"id": "grok-4-1-fast-reasoning",      "vision": true},
+        {"id": "grok-4-1-fast-non-reasoning",  "vision": true},
+        {"id": "grok-2-vision-1212",           "vision": true, "deprecated": true, "replacement": "grok-4-1-fast-non-reasoning"},
+        {"id": "grok-3",                       "vision": false},
+        {"id": "grok-3-fast",                  "vision": false},
+        {"id": "grok-3-mini",                  "vision": false},
+        {"id": "grok-3-mini-fast",             "vision": false}
+      ]
+    },
+    "kie_grok": {
+      "default": "grok-4-7",
+      "entries": [
+        {"id": "grok-4-7"}, {"id": "grok-4-6"}, {"id": "grok-4-5"}, {"id": "grok-4-3"}
+      ]
+    }
+  },
+
+  "pricing": {
+    "currency": "USD",
+    "updated": "2026-11-01",
+    "_comment": "Price per generated image (image section, keyed by image_size) or per second of video (video section, keyed by resolution). '*' = any size. '_reference' is the model owner's list price, used as an indicative figure for a provider whose own price is not listed here (shown with a ≈ and the word 'indicative'). Fill in or correct your own rates: a local override file _cache/pricing_override.json (same shape as this 'pricing' block) wins over everything.",
+    "image": {
+      "Nano Banana Pro": {
+        "GOOGLE":     {"1K": 0.134, "2K": 0.134, "4K": 0.24},
+        "WAVESPEED":  {"*": 0.14},
+        "_reference": {"1K": 0.134, "2K": 0.134, "4K": 0.24, "8K": 0.24}
+      },
+      "Nano Banana 2": {
+        "GOOGLE":     {"1K": 0.067, "2K": 0.101, "4K": 0.151},
+        "_reference": {"1K": 0.067, "2K": 0.101, "4K": 0.151}
+      },
+      "Seedream 4.5": {
+        "FAL":        {"*": 0.04},
+        "_reference": {"*": 0.04}
+      }
+    },
+    "video": {
+      "Veo 3.1": {
+        "GOOGLE":     {"720p": 0.40, "1080p": 0.40},
+        "_reference": {"720p": 0.40, "1080p": 0.40}
+      },
+      "Veo 3.1 Fast": {
+        "GOOGLE":     {"720p": 0.10, "1080p": 0.12},
+        "_reference": {"720p": 0.10, "1080p": 0.12}
+      },
+      "Veo 3.1 Lite": {
+        "GOOGLE":     {"720p": 0.05, "1080p": 0.08},
+        "_reference": {"720p": 0.05, "1080p": 0.08}
+      },
+      "Kling 3.0": {
+        "WAVESPEED":  {"*": 0.084}
+      }
+    }
+  }
+}

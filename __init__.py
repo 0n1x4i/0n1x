@@ -1,53 +1,19 @@
 """ComfyUI custom nodes for Nano Banana Pro and Nano Banana 2 APIs (Monthly)."""
 
-# ── OpenCV: nettoyer les distributions en double AVANT que quiconque importe cv2 ──
-# Sur Windows, un .pyd deja charge par le process est verrouille par l'OS : un
-# pip uninstall tente une fois cv2 en memoire laisse un dossier temporaire
-# orphelin (verifie le 14/09 — "jai du le faire comfyui ferme pour que ce
-# soit effectif"). Ce bloc tourne donc ICI, avant le tout premier import de ce
-# fichier, pour avoir la meilleure chance de s'executer pendant qu'aucun
-# process n'a encore charge cv2. Ca ne peut pas garantir de gagner la course
-# si un autre pack, charge avant le notre, importe cv2 plus tot — mais c'est
-# le point le plus tot ou nous pouvons agir.
-def _onyx_early_fix_opencv_conflict():
-    import os, sys, time, subprocess, importlib.metadata as _md
-    try:
-        installed = sorted(
-            d.metadata["Name"] for d in _md.distributions()
-            if (d.metadata["Name"] or "").lower().startswith("opencv")
-        )
-    except Exception:
-        return
-    if len(installed) <= 1:
-        return
-    marker = os.path.join(os.path.dirname(__file__), "nodes", ".opencv_last_fix")
-    last = 0.0
-    try:
-        with open(marker) as fh:
-            last = float(fh.read().strip())
-    except Exception:
-        pass
-    if time.time() - last < 24 * 3600:
-        return
-    try:
-        with open(marker, "w") as fh:
-            fh.write(str(time.time()))
-    except OSError:
-        pass
-    try:
-        print(f"[Onyx] {len(installed)} distributions OpenCV detectees au demarrage "
-              f"({', '.join(installed)}) — nettoyage avant que cv2 ne soit charge...")
-        subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", *installed],
-                        timeout=120, capture_output=True, text=True)
-        subprocess.run([sys.executable, "-m", "pip", "install", "opencv-python-headless",
-                         "--quiet", "--break-system-packages"],
-                        timeout=120, capture_output=True, text=True)
-        print("[Onyx] OpenCV nettoye avant chargement — aucun redemarrage necessaire.")
-    except Exception as e:
-        print(f"[Onyx] Nettoyage OpenCV au demarrage echoue : {e}")
-
-
-_onyx_early_fix_opencv_conflict()
+# ── OpenCV : verification des installations en double ──────────────────────
+# Plusieurs builds OpenCV (opencv-python, -headless, -contrib...) partagent le
+# meme dossier cv2 et se cassent mutuellement. Avant, le pack lancait pip tout
+# seul a chaque demarrage. Desormais : simple detection + message, et la
+# reparation ne tourne que si l'utilisateur l'a demandee via le bouton du
+# dialogue (js/onyx_opencv_check.js). Elle s'execute alors ICI, au prochain
+# demarrage, avant le tout premier import de cv2 (sur Windows un .pyd charge
+# est verrouille). Voir utils/onyx_opencv.py.
+try:
+    from .utils import onyx_opencv as _onyx_opencv
+    _onyx_opencv.startup_check()
+except Exception as _e:
+    _onyx_opencv = None
+    print(f"[Onyx] OpenCV check skipped: {_e}")
 
 from .Node import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 from .gemini_prompt import OnyxGeminiPromptNode
@@ -163,6 +129,22 @@ except Exception as _e:
     print(f"[Onyx] ❌ Krea2 Carousel failed: {_e}")
 
 WEB_DIRECTORY = "./js"
+
+# Routes partagees : /onyx/registry (listes de modeles + prix), /onyx/opencv/*,
+# /onyx/costs/* — et rafraichissement du registre depuis le Worker en arriere-plan.
+try:
+    from .utils import onyx_registry as _onyx_registry
+    _onyx_registry.register_routes()
+    _onyx_registry.start_background_refresh()
+    from .utils import onyx_cost as _onyx_cost
+    _onyx_cost.register_routes()
+except Exception as _e:
+    print(f"[Onyx] Registry / cost routes failed: {_e}")
+if _onyx_opencv is not None:
+    try:
+        _onyx_opencv.register_routes()
+    except Exception as _e:
+        print(f"[Onyx] OpenCV routes failed: {_e}")
 
 NODE_CLASS_MAPPINGS["OnyxNanoBananaAIO"] = OnyxNanoBananaAIO
 NODE_CLASS_MAPPINGS["OnyxGeminiPromptNode"] = OnyxGeminiPromptNode

@@ -41,6 +41,7 @@ import os
 
 from .onyx_h3_guides import GUIDE_BASE_TEXT, GUIDE_REF_TEXT
 from .onyx_remote_exec import load_remote
+from ..utils import onyx_registry as _reg
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,30 +134,22 @@ _ROLES = [ROLE_REFERENCE, ROLE_FIRST, ROLE_LAST]
 # Verifie sur ai.google.dev/gemini-api/docs/models (page datee du 2026-09-02) :
 # 3.8 et 3.7 flash sont tous deux en Stable. Les combos ComfyUI serialisent la
 # CHAINE et non l'index, donc reordonner cette liste ne casse aucun workflow.
-_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-]
+_MODELS = _reg.model_ids("gemini_text", always=(
+    "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash",
+    "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash",
+))
 
 _PROVIDERS = ["Gemini", "Vertex", "Grok", "Kie"]   # Kie: same Gemini models / Kie Grok models, Kie.ai key
 
 # Meme liste que _GROK_MODELS dans grok_prompt.py, modeles vision en tete.
-_GROK_MODELS = [
-    "grok-4.20-0309-reasoning",
-    "grok-4.20-0309-non-reasoning",
-    "grok-4-1-fast-reasoning",
-    "grok-4-1-fast-non-reasoning",
-    "grok-2-vision-1212",
-]
+_GROK_MODELS = _reg.model_ids("grok", vision=True, always=(
+    "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning",
+    "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-2-vision-1212",
+))
 
 # Grok models sold by Kie.ai (provider=Kie only); with Kie, the Gemini models
 # above are used as they are.
-_KIE_GROK_MODELS = ["grok-4-7", "grok-4-6", "grok-4-5", "grok-4-3"]
+_KIE_GROK_MODELS = _reg.model_ids("kie_grok", always=("grok-4-7", "grok-4-6", "grok-4-5", "grok-4-3"))
 
 # Gemini 3 image token counts, from the media-resolution guide: 1120 at the
 # default, 280 at low - a factor of four on every keyframe. The same guide
@@ -505,6 +498,7 @@ class OnyxH3ContextIR:
 
         guides_text = _load_guides(guide_folder)
 
+        _reg.warn_if_deprecated(model, node="H3 Context-IR")
         ns = load_remote("h3_context_ir_core", extra_globals={"__file__": __file__})
         # only sent when used: a server-side core older than Kie still runs the rest
         kie = {"kie_api_key": kie_api_key} if (kie_api_key or "").strip() else {}

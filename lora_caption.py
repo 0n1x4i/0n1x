@@ -18,6 +18,7 @@ import folder_paths
 
 from .nodes.onyx_render_profile import ensure_profile_ready
 from .nodes.onyx_remote_exec import load_remote
+from .utils import onyx_registry as _reg
 
 
 def _list_input_subdirs():
@@ -38,21 +39,16 @@ _PROVIDERS = ["gemini", "vertex", "grok"]
 
 # Meme liste que gemini_prompt.py, pour que les deux nodes du pack proposent les
 # memes modeles. L'ancienne s'arretait a la 2.0, qui ne repond plus.
-_GEMINI_MODELS = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-]
+_GEMINI_MODELS = _reg.model_ids("gemini_text", include_deprecated=False, always=(
+    "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite",
+    "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash",
+))
 
-_GROK_MODELS = [
-    "grok-4-1-fast-non-reasoning",
-    "grok-4.20-0309-non-reasoning",
-    "grok-4-1-fast-reasoning",
-    "grok-4.20-0309-reasoning",
-]
+# Vision models only: a caption needs the image. Retired ones are not offered here.
+_GROK_MODELS = _reg.model_ids("grok", vision=True, include_deprecated=False, always=(
+    "grok-4-1-fast-non-reasoning", "grok-4.20-0309-non-reasoning",
+    "grok-4-1-fast-reasoning", "grok-4.20-0309-reasoning",
+))
 
 _CAPTION_MODES = ["sdxl"]
 
@@ -196,6 +192,8 @@ class OnyxLoraCaptionGeneratorNode:
             if not api_key:
                 raise RuntimeError("Lora Caption Generator: API key is required.")
 
+        _reg.warn_if_deprecated(gemini_model if provider != "grok" else grok_model,
+                                node="Lora Caption")
         ns = load_remote("lora_caption_core")
         return ns["process_folder_impl"](
             directory, api_key, provider, trigger_word, mode, gemini_model,
