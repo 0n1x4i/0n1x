@@ -91,6 +91,8 @@ from .nodes.save_image_no_metadata import OnyxSaveImageNoMetadataNode
 from .nodes.onyx_speed_hd_sampler import OnyxSpeedHDSampler
 from .nodes.onyx_eye_detailer import OnyxEyeBBoxDetectorProvider, OnyxDetailer
 from .nodes.onyx_temporal_mask_smooth import OnyxTemporalMaskSmooth
+from .nodes.onyx_depth_colormap import OnyxDepthColormap
+from .nodes.onyx_mask_to_box import OnyxMaskToBox
 from .nodes.onyx_session import OnyxSessionNode
 
 # Post-processing nodes (dossier avec espace + noms unicode -> importlib)
@@ -209,6 +211,8 @@ NODE_CLASS_MAPPINGS["OnyxSpeedHDSampler"] = OnyxSpeedHDSampler
 NODE_CLASS_MAPPINGS["OnyxEyeBBoxDetectorProvider"] = OnyxEyeBBoxDetectorProvider
 NODE_CLASS_MAPPINGS["OnyxDetailer"] = OnyxDetailer
 NODE_CLASS_MAPPINGS["OnyxTemporalMaskSmooth"] = OnyxTemporalMaskSmooth
+NODE_CLASS_MAPPINGS["OnyxDepthColormap"] = OnyxDepthColormap
+NODE_CLASS_MAPPINGS["OnyxMaskToBox"] = OnyxMaskToBox
 NODE_CLASS_MAPPINGS["OnyxSessionNode"] = OnyxSessionNode
 if Onyx_Renoise:     NODE_CLASS_MAPPINGS["Onyx_Renoise"]     = Onyx_Renoise
 if Onyx_Camera_Look: NODE_CLASS_MAPPINGS["Onyx_Camera_Look"] = Onyx_Camera_Look
@@ -265,6 +269,8 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxSpeedHDSampler"] = "Onyx Speed HD Sampler"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxEyeBBoxDetectorProvider"] = "Onyx HD Ultralytic BBox Loader"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxDetailer"] = "Onyx Detailer"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxTemporalMaskSmooth"] = "Onyx Temporal Mask Smooth"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxDepthColormap"] = "Onyx Depth Colormap"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxMaskToBox"] = "Onyx Mask To Box"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxSessionNode"] = "Onyx Session"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Renoise"]     = "Onyx Renoise"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Camera_Look"] = "📷 Onyx Camera Look"
