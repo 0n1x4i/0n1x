@@ -79,6 +79,9 @@ const LIMIT_S = 15.0;       // doit correspondre a _MINIMAX_LIMIT_S (Python)
 const HARD_S = 16.5;        // doit correspondre a _MINIMAX_HARD_S (Python)
 const VIDEO_RE = /\.(mp4|mov|webm|mkv|avi|m4v|mpe?g|wmv|flv)$/i;
 const THUMB_SIZES = { S: 92, M: 128, L: 172 };
+// Taille fixe du node a la creation, et hauteur minimale (constante) du panneau.
+const DEFAULT_NODE_SIZE = [540, 600];
+const MIN_PANEL_H = 320;
 // Pages (not files) that must go through the server downloaders: their dragged
 // <img> is only a thumbnail, and a video post never drags its video.
 const PAGE_RE = /(instagram\.com|tiktok\.com|pinterest\.[a-z.]+\/pin|pin\.it|youtube\.com|youtu\.be|x\.com|twitter\.com|threads\.(net|com)|facebook\.com|fb\.watch|reddit\.com|vimeo\.com|tumblr\.com|bsky\.app|dailymotion\.com|twitch\.tv)/i;
@@ -153,7 +156,7 @@ function injectStyle() {
 .obl-pill.on i:after{left:14px;background:#fff}
 .obl-drop{margin:10px;border:2px dashed var(--line2);border-radius:10px;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:6px;cursor:pointer;color:var(--dim);transition:border-color .15s,background .15s;flex-shrink:0}
-.obl-drop.big{flex:1;min-height:170px}
+.obl-drop.big{flex:1;min-height:0}
 .obl-drop.big .obl-drop-ico{font-size:34px;line-height:1}
 .obl-drop.big b{color:var(--acc2);font-size:14px}
 .obl-drop.strip{flex-direction:row;padding:7px;margin:8px 10px 0;border-width:1px;font-size:11.5px}
@@ -193,7 +196,7 @@ function injectStyle() {
 .obl-chev{color:var(--dim);transition:transform .15s}
 .obl-settings.open .obl-chev{transform:rotate(90deg)}
 .obl-set-body{display:none;padding:2px 10px 10px;gap:10px;flex-direction:column}
-.obl-settings.open .obl-set-body{display:flex}
+.obl-settings.open .obl-set-body{display:flex;max-height:260px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
 .obl-group{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 8px;align-items:end}
 .obl-group-t{grid-column:1/-1;color:var(--acc2);font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;margin-top:2px}
 .obl-f{display:flex;flex-direction:column;gap:3px;min-width:0}
@@ -242,7 +245,6 @@ function setupBatchLoader(node) {
     let data = { images: [], order: [] };
     let currentId = null;
     let uploading = false;
-    let fitPending = true;
 
     const W = name => node.widgets?.find(w => w.name === name);
     const getVal = (name, fb) => { const w = W(name); return w === undefined ? fb : w.value; };
@@ -311,7 +313,7 @@ function setupBatchLoader(node) {
     const sizeBtns = {};
     for (const k of Object.keys(THUMB_SIZES)) {
         const b = el("button", "", k); b.title = `Thumbnail size ${k}`;
-        b.addEventListener("click", () => { node.properties.obl_thumb = k; fitPending = true; render(); });
+        b.addEventListener("click", () => { node.properties.obl_thumb = k; render(); });
         sizeBtns[k] = b; seg.appendChild(b);
     }
     const limitPill = el("div", "obl-pill");
@@ -345,7 +347,7 @@ function setupBatchLoader(node) {
     setHead.addEventListener("click", () => {
         node.properties.obl_settings_open = !settings.classList.contains("open");
         settings.classList.toggle("open", node.properties.obl_settings_open);
-        fitPending = true; fitNode();
+        fitNode();
     });
 
     const controls = {};
@@ -601,32 +603,18 @@ function setupBatchLoader(node) {
     }
 
     // ── Sizing ─────────────────────────────────────────────────────────────
-    // La hauteur voulue est calculee a partir du contenu puis exposee au
-    // frontend via getMinHeight : les widgets natifs etant caches, le node ne
-    // contient plus que ce panneau, et il ne peut pas etre ecrase.
-    function desiredHeight() {
-        const n = data.order.length;
-        const fixed = (bar.offsetHeight || 44) + (foot.offsetHeight || 46)
-                    + (settings.offsetHeight || 36) + (n ? (drop.offsetHeight || 32) + 8 : 0);
-        if (!n) return fixed + 200;
-        const size = THUMB_SIZES[node.properties.obl_thumb || "M"];
-        const cols = Math.max(1, Math.floor((node.size[0] - 22) / (size + 8)));
-        const rows = Math.ceil(n / cols);
-        const gridH = Math.min(Math.max(rows * (size + 30) + 20, size + 50), 3 * (size + 30) + 20);
-        return fixed + gridH;
-    }
-    let minH = 420;
+    // TAILLE FIXE. Avant, la hauteur etait recalculee a chaque rendu (nombre de
+    // medias, taille des vignettes, reglages ouverts) et le node changeait de
+    // taille sans arret. Maintenant : taille par defaut a la creation, puis
+    // plus jamais touchee par le code. La grille defile a l'interieur
+    // (.obl-grid-wrap, overflow-y:auto) et ouvrir les reglages la reduit au
+    // lieu d'agrandir le node. L'utilisateur peut toujours redimensionner a la
+    // main ; sa taille est sauvegardee avec le workflow et respectee.
+    // getMinHeight est une CONSTANTE : une valeur qui varie fait grossir le
+    // node par le frontend.
+    const minH = MIN_PANEL_H;
     function fitNode() {
-        requestAnimationFrame(() => {
-            minH = Math.max(260, desiredHeight());
-            if (fitPending || node.size[1] < minH + 30) {
-                const h = minH + 30;
-                const w = Math.max(node.size[0], 420);
-                if (node.setSize) node.setSize([w, h]); else node.size = [w, h];
-                fitPending = false;
-            }
-            app.graph?.setDirtyCanvas(true, true);
-        });
+        app.graph?.setDirtyCanvas(true, true);
     }
 
     // ── Actions ────────────────────────────────────────────────────────────
@@ -646,7 +634,7 @@ function setupBatchLoader(node) {
         data.images = data.images.filter(m => m.id !== id);
         data.order = data.order.filter(x => x !== id);
         if (currentId === id) currentId = null;
-        fitPending = true; syncBatch(); render();
+        syncBatch(); render();
     }
 
     let clearTimer = null;
@@ -662,7 +650,7 @@ function setupBatchLoader(node) {
         clearBtn.classList.remove("armed"); clearBtn.textContent = "Clear";
         for (const id of [...data.order]) fetch(`/onyx/batch_delete/${id}`, { method: "DELETE" }).catch(() => {});
         data = { images: [], order: [] }; currentId = null;
-        fitPending = true; syncBatch(); render();
+        syncBatch(); render();
     });
 
     addBtn.addEventListener("click", () => fileInput.click());
@@ -738,7 +726,7 @@ function setupBatchLoader(node) {
                 for (const m of json.images) {
                     if (!metaOf(m.id)) { data.images.push(m); data.order.push(m.id); }
                 }
-                fitPending = true; syncBatch(); render();
+                syncBatch(); render();
                 status.textContent = `Imported ${json.images.length} item${json.images.length > 1 ? "s" : ""} from ${host}`;
             } else {
                 console.error("[Onyx Batch] Web import failed:", json.error);
@@ -770,7 +758,7 @@ function setupBatchLoader(node) {
                 for (const m of json.images) {
                     if (!metaOf(m.id)) { data.images.push(m); data.order.push(m.id); }
                 }
-                fitPending = true; syncBatch(); render();
+                syncBatch(); render();
             } else {
                 console.error("[Onyx Batch] Upload failed:", json.error);
                 status.textContent = `Upload failed: ${json.error || "unknown error"}`;
@@ -872,7 +860,6 @@ function setupBatchLoader(node) {
             data.images ||= []; data.order ||= [];
         }
         hideAll();
-        fitPending = false;
         syncBatch(); render();
         probeMissing();
     };
@@ -893,7 +880,7 @@ function setupBatchLoader(node) {
         origRemoved?.();
     };
 
-    node.size = [520, 460];
+    node.size = [...DEFAULT_NODE_SIZE];   // une seule fois, a la creation
     render();
 }
 
