@@ -10,6 +10,7 @@ import { api } from "../../scripts/api.js";
 const NODE_SIZE = [760, 1000];
 const PANEL_MIN_H = 640;
 const PREVIEW_SIZE = 1024;
+const GROUPS = { scene: "The scene", phone: "The phone", upload: "The upload" };
 
 function h(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -71,12 +72,16 @@ function injectStyle() {
 .ops-seg{display:flex;background:var(--p2);border:1px solid var(--ln2);border-radius:9px;padding:2px}
 .ops-seg button{flex:1;background:transparent;border:0;color:var(--dim);padding:4px 6px;border-radius:7px;cursor:pointer;font:600 11.5px Inter,system-ui,sans-serif}
 .ops-seg button.on{background:linear-gradient(135deg,#2a3156,#30264a);color:var(--tx)}
-.ops-tabs{display:flex;gap:2px;padding:6px 8px 0;background:var(--p1);border-bottom:1px solid var(--ln);overflow-x:auto;scrollbar-width:none;flex:none}
-.ops-tab{padding:6px 9px;border-radius:8px 8px 0 0;cursor:pointer;color:var(--dim);font-weight:600;font-size:11.5px;border:1px solid transparent;border-bottom:0;white-space:nowrap;display:flex;align-items:center;gap:5px}
-.ops-tab.on{background:var(--bg);color:var(--tx);border-color:var(--ln)}
-.ops-tab .dot{width:6px;height:6px;border-radius:50%;background:#444}.ops-tab .dot.on{background:var(--ok)}
-.ops-tab .num{font-size:10px;color:var(--ac2)}
-.ops-body{flex:1;min-height:0;position:relative}
+.ops-main{flex:1;min-height:0;display:grid;grid-template-columns:150px minmax(0,1fr)}
+.ops-tabs{overflow:auto;background:var(--p1);border-right:1px solid var(--ln);padding:6px;scrollbar-width:thin;scrollbar-color:var(--ln2) transparent}
+.ops-tabs .grp{color:var(--dim);font-size:9.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;padding:8px 6px 3px}
+.ops-tab{padding:5px 7px;border-radius:7px;cursor:pointer;color:var(--dim);font-weight:600;font-size:11.5px;white-space:nowrap;display:flex;align-items:center;gap:6px;border:1px solid transparent}
+.ops-tab:hover{color:var(--tx)}
+.ops-tab.on{background:var(--p3);color:var(--tx);border-color:var(--ln2)}
+.ops-tab .dot{width:6px;height:6px;border-radius:50%;background:#444;flex:none}.ops-tab .dot.on{background:var(--ok)}
+.ops-tab .num{font-size:10px;color:var(--ac2);min-width:13px;text-align:right}
+.ops-body{min-height:0;position:relative}
+.ops-ghd{color:var(--dim);font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;margin:6px 2px 4px}
 .ops-page{position:absolute;inset:0;overflow:auto;padding:12px;display:none;scrollbar-width:thin;scrollbar-color:var(--ln2) transparent}
 .ops-page.on{display:block}
 .ops-card{background:var(--p1);border:1px solid var(--ln);border-radius:10px;padding:10px;margin-bottom:10px}
@@ -101,12 +106,12 @@ function injectStyle() {
 .ops-tog i:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#9a9aa8;transition:left .15s,background .15s}
 .ops-tog.on i{background:#5468c9}.ops-tog.on i:after{left:16px;background:#fff}
 .ops-chain{display:flex;flex-direction:column;gap:0}
-.ops-st{display:grid;grid-template-columns:30px 26px 1fr auto auto;gap:9px;align-items:center;padding:9px 10px;border:1px solid var(--ln);border-radius:10px;background:var(--p2)}
+.ops-st{display:grid;grid-template-columns:26px 22px 1fr auto auto;gap:8px;align-items:center;padding:6px 9px;border:1px solid var(--ln);border-radius:10px;background:var(--p2)}
 .ops-st.off{opacity:.5}
 .ops-st .n{width:24px;height:24px;border-radius:50%;background:var(--p3);color:var(--ac2);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11.5px}
 .ops-st .ic{font-size:17px;text-align:center}
 .ops-st .tt{font-weight:700}.ops-st .sub{color:var(--dim);font-size:11px}
-.ops-arrow{text-align:center;color:var(--ln2);font-size:12px;line-height:14px}
+.ops-arrow{text-align:center;color:var(--ln2);font-size:10px;line-height:10px}
 .ops-looks{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:7px}
 .ops-look{border:1px solid var(--ln);border-radius:9px;background:var(--p2);padding:8px;cursor:pointer}
 .ops-look:hover{border-color:var(--ac)}.ops-look b{display:block;margin-bottom:2px}.ops-look span{color:var(--dim);font-size:11px}
@@ -182,7 +187,7 @@ function setupPostStudio(node) {
   const tabsBar = h("div", { class: "ops-tabs" });
   const body = h("div", { class: "ops-body" });
   const pages = {};
-  root.append(head, presetBar, prevBox, tabsBar, body);
+  root.append(head, presetBar, prevBox, h("div", { class: "ops-main" }, tabsBar, body));
 
   // ── compare slider ─────────────────────────────────────────────────────────
   const setSplit = (x) => {
@@ -308,9 +313,14 @@ function setupPostStudio(node) {
     fill(chainPill, h("b", {}, `${on}/${spec.stages.length}`), " stages on");
     const linked = node.inputs?.find((i) => i.name === "onyx_post")?.link != null;
     linkPill.style.display = linked ? "" : "none";
-    fill(tabsBar, h("div", { class: "ops-tab" + (state.tab === "chain" ? " on" : ""), onclick: () => setTab("chain") }, "⛓ Chain"),
-      spec.stages.map((s, i) => h("div", { class: "ops-tab" + (state.tab === s.key ? " on" : ""), title: s.info, onclick: () => setTab(s.key) },
-        h("span", { class: "dot" + (isOn(s.key) ? " on" : "") }), h("span", { class: "num" }, i + 1), `${s.icon} ${s.short || s.title}`)));
+    const items = [h("div", { class: "ops-tab" + (state.tab === "chain" ? " on" : ""), onclick: () => setTab("chain") }, "⛓ Chain")];
+    let grp = null;
+    spec.stages.forEach((s, i) => {
+      if (s.group !== grp) { grp = s.group; items.push(h("div", { class: "grp" }, GROUPS[grp] || grp)); }
+      items.push(h("div", { class: "ops-tab" + (state.tab === s.key ? " on" : ""), title: s.info, onclick: () => setTab(s.key) },
+        h("span", { class: "dot" + (isOn(s.key) ? " on" : "") }), h("span", { class: "num" }, i + 1), `${s.icon} ${s.short || s.title}`));
+    });
+    fill(tabsBar, items);
     for (const [k, p] of Object.entries(pages)) p.classList.toggle("on", k === state.tab);
   }
   function setTab(t) { state.tab = t; saveState(); render(); }
@@ -318,8 +328,10 @@ function setupPostStudio(node) {
   function renderChain() {
     const p = pages.chain;
     const rows = [];
+    let grp = null;
     spec.stages.forEach((s, i) => {
-      if (i) rows.push(h("div", { class: "ops-arrow" }, "↓"));
+      if (s.group !== grp) { grp = s.group; rows.push(h("div", { class: "ops-ghd" }, GROUPS[grp] || grp)); }
+      else if (i) rows.push(h("div", { class: "ops-arrow" }, "↓"));
       rows.push(h("div", { class: "ops-st" + (isOn(s.key) ? "" : " off") },
         h("div", { class: "n" }, i + 1), h("div", { class: "ic" }, s.icon),
         h("div", {}, h("div", { class: "tt" }, s.title, s.available ? "" : " — not available"), h("div", { class: "sub" }, s.info)),
@@ -328,7 +340,7 @@ function setupPostStudio(node) {
     });
     fill(p,
       h("div", { class: "ops-card" }, h("h4", {}, "The chain, in order"), h("div", { class: "ops-chain" }, rows),
-        h("div", { class: "ops-hint", style: "margin-top:8px" }, "Same order as the 4K Crispy workflow: colour and skin on the clean render, then grade, sensor, grain, JPEG — and the motion blur last, since it smears everything before it.")),
+        h("div", { class: "ops-hint", style: "margin-top:8px" }, "The 4K Crispy workflow's order: first the scene (colour, skin, grade, LUT), then what the phone does to it (lens, sensor clipping, sensor, HDR processing, grain, JPEG, shake), and last what the upload does to the file. New stages start switched off.")),
       h("div", { class: "ops-card" }, h("h4", {}, "Start from a look", h("span", { class: "sp" }),
         h("button", { class: "ops-btn ghost", onclick: () => { if (confirm("Reset every stage to the Crispy workflow settings?")) { state.stages = {}; state.current_preset = null; saveState(); render(); schedulePreview(); } } }, "↺ Reset all (Crispy)")),
         h("div", { class: "ops-looks" }, Object.keys(spec.looks).map((name) => h("div", { class: "ops-look", onclick: () => loadLook(name) },
@@ -342,7 +354,9 @@ function setupPostStudio(node) {
       const vals = look[s.key] || {};
       const v = {};
       for (const p of s.params) if (p.name in vals && !same(vals[p.name], p.default)) v[p.name] = vals[p.name];
-      stages[s.key] = { on: vals._bypass ? false : true, v };
+      // a stage the look does not mention keeps its own on/off (a look never switches on the LUT...)
+      const on = s.key in look ? !vals._bypass : isOn(s.key);
+      stages[s.key] = { on, v };
     }
     stages.motion = state.stages.motion || stages.motion;     // a look never changes the motion
     state.stages = stages; state.current_preset = null; saveState(); render(); schedulePreview();

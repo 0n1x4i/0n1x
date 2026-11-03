@@ -40,24 +40,50 @@ from ..utils import onyx_post as _onyx_post
 from .onyx_render_profile import ensure_profile_ready
 
 STAGES = [
-    {"key": "color", "short": "Color", "cls": "OnyxFameGridColorFinish", "title": "Color finish", "icon": "🎨",
+    # ── the scene: colour, skin, grade (the "photo" before the camera) ──────────
+    {"key": "color", "group": "scene", "short": "Color", "cls": "OnyxFameGridColorFinish", "title": "Color finish", "icon": "🎨",
      "info": "Colour pop + light sharpen. First, on the clean render."},
-    {"key": "skin", "short": "Skin", "cls": "OnyxRealismInjector", "title": "Skin & eyes", "icon": "💧",
+    {"key": "skin", "group": "scene", "short": "Skin", "cls": "OnyxRealismInjector", "title": "Skin & eyes", "icon": "💧",
      "info": "Skin oil and T-zone shine, micro shadows, eye moisture (face-aware)."},
-    {"key": "grade", "short": "Grade", "cls": "OnyxPostProcessSuite", "title": "Grade & optics", "icon": "🎚️",
+    {"key": "skintone", "group": "scene", "short": "Skin tone", "cls": "Onyx_Skin_Tone", "title": "Skin tone", "icon": "🧴",
+     "info": "Pulls skin hues towards a natural tone and evens them out."},
+    {"key": "dehaze", "group": "scene", "short": "Dehaze", "cls": "Onyx_Dehaze", "title": "Dehaze", "icon": "🌁",
+     "info": "Removes haze / flat contrast (dark channel)."},
+    {"key": "clarity", "group": "scene", "short": "Clarity", "cls": "Onyx_Clarity", "title": "Clarity", "icon": "🔍",
+     "info": "Midtone local contrast, edge-aware."},
+    {"key": "levels", "group": "scene", "short": "Match", "cls": "Onyx_Match_Levels", "title": "Match levels", "icon": "📊",
+     "info": "Black / white points and midtones matched to the `reference` image input (skipped without it)."},
+    {"key": "grade", "group": "scene", "short": "Grade", "cls": "OnyxPostProcessSuite", "title": "Grade & optics", "icon": "🎚️",
      "info": "Levels, colour wheels, temperature, glow, glare, chromatic aberration, vignette, lens."},
-    {"key": "camera", "short": "Camera", "cls": "Onyx_Camera_Look", "title": "Camera sensor", "icon": "📷",
+    {"key": "lut", "group": "scene", "short": "LUT", "cls": "Onyx_Apply_LUT", "title": "LUT", "icon": "🎞️",
+     "info": "A .cube LUT from the pack's luts/ folder — the final colour grade."},
+    # ── the phone: lens, sensor, processing, file ─────────────────────────────
+    {"key": "smudge", "group": "phone", "short": "Smudge", "cls": "OnyxLensSmudge", "title": "Lens smudge", "icon": "👆",
+     "info": "Fingerprint on the lens: milky veil, patchy glow and smear streaks around lights."},
+    {"key": "clip", "group": "phone", "short": "Clip", "cls": "OnyxHighlightClip", "title": "Highlight clip", "icon": "💡",
+     "info": "Lamps and windows burn out like on a sensor: per-channel clip, colour drift, fringe, bloom."},
+    {"key": "camera", "group": "phone", "short": "Camera", "cls": "Onyx_Camera_Look", "title": "Camera sensor", "icon": "📷",
      "info": "Phone sensor: demosaic softness, sensor noise, lens blur, JPEG."},
-    {"key": "grain", "short": "Grain", "cls": "Onyx_Renoise", "title": "Grain & noise", "icon": "🌫️",
+    {"key": "hdr", "group": "phone", "short": "HDR", "cls": "OnyxPhoneHDR", "title": "Phone HDR", "icon": "📱",
+     "info": "The phone's smart HDR: lifted shadows, held highlights, local contrast, sharpening halos."},
+    {"key": "grain", "group": "phone", "short": "Grain", "cls": "Onyx_Renoise", "title": "Grain & noise", "icon": "🌫️",
      "info": "ISO grain, chroma blotches, purple/green noise, noise-reduction smear."},
-    {"key": "jpeg", "short": "JPEG", "cls": "OnyxMoreJPEG", "title": "JPEG & contrast", "icon": "🗜️",
+    {"key": "jpeg", "group": "phone", "short": "JPEG", "cls": "OnyxMoreJPEG", "title": "JPEG & contrast", "icon": "🗜️",
      "info": "Final contrast and JPEG pass."},
-    {"key": "motion", "short": "Motion", "cls": "OnyxCameraShake", "title": "Motion", "icon": "🌀",
-     "info": "Camera shake (shake.py), LAST: it smears everything before it. "
+    {"key": "motion", "group": "phone", "short": "Motion", "cls": "OnyxCameraShake", "title": "Motion", "icon": "🌀",
+     "info": "Camera shake (shake.py): it smears everything before it. "
              "Studio's motion (post input) picks the preset per image."},
+    # ── after the photo exists: the upload ────────────────────────────────────
+    {"key": "chroma", "group": "upload", "short": "Chroma", "cls": "OnyxChromaSubsample", "title": "Chroma subsample", "icon": "📤",
+     "info": "Colour resolution of a JPEG / Instagram upload (4:2:0). After everything: it happens to the finished file."},
 ]
 STAGE_KEYS = [s["key"] for s in STAGES]
-_DEFAULT_OFF: set = set()
+# New stages start switched off: the Crispy chain is unchanged until you turn them on.
+_DEFAULT_OFF = {"skintone", "dehaze", "clarity", "levels", "lut", "smudge", "clip", "hdr", "chroma"}
+# Extra node inputs a stage receives from the Post Studio's own optional inputs.
+_STAGE_INPUTS = {"skin": {"depth_map": "depth_map"}, "levels": {"reference": "reference"},
+                 "motion": {"motion_override": "preset_override"}}
+_NEEDS = {"levels": "reference"}        # stage skipped (with a note) when this input is missing
 _HIDDEN_PARAMS = {"enabled"}            # Camera Look's own on/off = the stage switch
 _MAIN_PARAMS = {"global_mix"}           # never part of an enable_* group
 _DEFAULT_OVERRIDES = {"motion": {"preset": "none"}}
@@ -200,7 +226,7 @@ def _unwrap(res):
 
 
 def run_chain(images, state: dict, onyx_post=None, depth_map=None, motion_override=None,
-              preview: bool = False, progress=None) -> tuple:
+              preview: bool = False, progress=None, reference=None) -> tuple:
     """-> (images, [(stage key, seconds or error text)]). Stages switched off are
     skipped. In a preview a failing stage is skipped and reported; in a real run
     it raises, like the separate node would."""
@@ -229,10 +255,16 @@ def run_chain(images, state: dict, onyx_post=None, depth_map=None, motion_overri
             kwargs["enabled"] = True
         if onyx_post is not None:
             kwargs["onyx_post"] = onyx_post
-        if s["key"] == "skin" and depth_map is not None:
-            kwargs["depth_map"] = depth_map
-        if s["key"] == "motion" and motion_override is not None:
-            kwargs["preset_override"] = motion_override
+        extras = {"depth_map": depth_map, "reference": reference, "motion_override": motion_override}
+        need = _NEEDS.get(s["key"])
+        if need and extras.get(need) is None:
+            msg = f"needs the `{need}` input"
+            print(f"⚠️  [Onyx Post Studio] {s['title']}: {msg} — stage skipped.")
+            timings.append((s["key"], msg))
+            continue
+        for src, dst in _STAGE_INPUTS.get(s["key"], {}).items():
+            if extras.get(src) is not None:
+                kwargs[dst] = extras[src]
         t0 = time.time()
         try:
             images = _unwrap(getattr(cls(), cls.FUNCTION)(**kwargs))
@@ -302,12 +334,13 @@ _SOURCES: "OrderedDict[str, dict]" = OrderedDict()
 _MAX_SOURCES = 3
 
 
-def remember_source(node_id, images, onyx_post=None) -> None:
+def remember_source(node_id, images, onyx_post=None, reference=None, motion_override=None) -> None:
     if node_id is None or images is None:
         return
     import numpy as np
     arr = (images[0, ..., :3].detach().cpu().float().clamp(0, 1).numpy() * 255).round().astype(np.uint8)
-    _SOURCES[str(node_id)] = {"img": arr, "post": onyx_post}
+    _SOURCES[str(node_id)] = {"img": arr, "post": onyx_post, "motion": motion_override,
+                              "ref": reference[:1].detach().cpu() if reference is not None else None}
     _SOURCES.move_to_end(str(node_id))
     while len(_SOURCES) > _MAX_SOURCES:
         _SOURCES.popitem(last=False)
@@ -319,7 +352,7 @@ def set_source_from_bytes(node_id, data: bytes) -> tuple:
     im = Image.open(io.BytesIO(data)).convert("RGB")
     arr = np.asarray(im, dtype=np.uint8).copy()
     prev = _SOURCES.get(str(node_id), {})
-    _SOURCES[str(node_id)] = {"img": arr, "post": prev.get("post")}
+    _SOURCES[str(node_id)] = {**prev, "img": arr}
     _SOURCES.move_to_end(str(node_id))
     while len(_SOURCES) > _MAX_SOURCES:
         _SOURCES.popitem(last=False)
@@ -359,7 +392,8 @@ def render_preview(node_id, state: dict, mode: str = "fit", cx: float = 0.5, cy:
     import torch
     view = _view(src["img"], mode, float(cx), float(cy), int(size))
     t = torch.from_numpy(view.astype(np.float32) / 255.0)[None]
-    out, timings = run_chain(t, state, onyx_post=src.get("post"), preview=True)
+    out, timings = run_chain(t, state, onyx_post=src.get("post"), preview=True,
+                             reference=src.get("ref"), motion_override=src.get("motion"))
     after = (out[0, ..., :3].detach().cpu().float().clamp(0, 1).numpy() * 255).round().astype(np.uint8)
     h, w = src["img"].shape[:2]
     return {"before": _jpeg_b64(np.ascontiguousarray(view)), "after": _jpeg_b64(after),
@@ -391,6 +425,7 @@ class OnyxPostStudio:
             "optional": {
                 **_onyx_post.POST_INPUT,
                 "depth_map": ("IMAGE", {"tooltip": "Optional depth map for Skin & eyes (bright = near)."}),
+                "reference": ("IMAGE", {"tooltip": "Reference photo for the Match levels stage."}),
                 "motion_override": ("STRING", {"forceInput": True,
                     "tooltip": "A Camera Shake preset name (e.g. Onyx Studio's post_preset). 'none' = no "
                                "shake, empty = the Motion tab's preset."}),
@@ -403,14 +438,15 @@ class OnyxPostStudio:
     FUNCTION = "run"
     CATEGORY = "Onyx/Post"
 
-    def run(self, image, post_state="{}", onyx_post=None, depth_map=None, motion_override=None, unique_id=None):
+    def run(self, image, post_state="{}", onyx_post=None, depth_map=None, motion_override=None, unique_id=None,
+            reference=None):
         ensure_profile_ready()
         try:
             state = json.loads(post_state or "{}")
         except ValueError:
             state = {}
         try:
-            remember_source(unique_id, image, onyx_post)
+            remember_source(unique_id, image, onyx_post, reference, motion_override)
         except Exception as e:
             print(f"⚠️  [Onyx Post Studio] preview source not kept: {e}")
         bar = None
@@ -420,7 +456,7 @@ class OnyxPostStudio:
         except Exception:
             pass
         out, timings = run_chain(image, state, onyx_post=onyx_post, depth_map=depth_map,
-                                 motion_override=motion_override,
+                                 motion_override=motion_override, reference=reference,
                                  progress=(lambda _k: bar.update(1)) if bar else None)
         if timings:
             print("🎛️  [Onyx Post Studio] " + " → ".join(f"{k} {t:.2f}s" for k, t in timings

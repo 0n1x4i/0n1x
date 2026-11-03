@@ -526,7 +526,14 @@ class PostStudioTests(unittest.TestCase):
         self.ps = _load_pack_module("nodes.onyx_post_studio")
 
     def test_chain_order_is_the_crispy_workflow_with_motion_last(self):
-        self.assertEqual(self.ps.STAGE_KEYS, ["color", "skin", "grade", "camera", "grain", "jpeg", "motion"])
+        keys = self.ps.STAGE_KEYS
+        crispy = [k for k in keys if k not in self.ps._DEFAULT_OFF]
+        self.assertEqual(crispy, ["color", "skin", "grade", "camera", "grain", "jpeg", "motion"])
+        self.assertEqual(keys[-1], "chroma")                        # the upload, after the photo exists
+        self.assertLess(keys.index("lut"), keys.index("camera"))
+        self.assertLess(keys.index("clip"), keys.index("camera"))
+        self.assertLess(keys.index("camera"), keys.index("hdr"))
+        self.assertLess(keys.index("hdr"), keys.index("grain"))
 
     def _fake(self, calls, name, extra=None):
         class Fake:
@@ -547,11 +554,12 @@ class PostStudioTests(unittest.TestCase):
         classes = {k: self._fake(calls, k) for k in ps.STAGE_KEYS}
         with mock.patch.object(ps, "stage_class", lambda k: classes.get(k)), \
              mock.patch.object(ps, "defaults", lambda k, cls=None: {"amount": 1.0}):
-            out, timings = ps.run_chain([], {"stages": {"grain": {"on": False},
+            out, timings = ps.run_chain([], {"stages": {"grain": {"on": False}, "hdr": {"on": True},
+                                                       "levels": {"on": True},
                                                        "skin": {"v": {"amount": "0.5", "bogus": 3}}}})
-        self.assertEqual(out, ["color", "skin", "grade", "camera", "jpeg", "motion"])
+        self.assertEqual(out, ["color", "skin", "grade", "camera", "hdr", "jpeg", "motion"])
         self.assertEqual(calls[1], ("skin", 0.5, {}))               # coerced, unknown key dropped
-        self.assertEqual([k for k, _ in timings], out)
+        self.assertIn(("levels", "needs the `reference` input"), timings)   # on, but no reference
 
     def test_preview_skips_a_failing_stage_but_a_run_raises(self):
         ps = self.ps
@@ -567,6 +575,7 @@ class PostStudioTests(unittest.TestCase):
                 raise RuntimeError("no licence")
         calls = []
         classes = {k: (Boom if k == "grain" else self._fake(calls, k)) for k in ps.STAGE_KEYS}
+        classes = {k: v for k, v in classes.items() if k not in ps._DEFAULT_OFF}
         with mock.patch.object(ps, "stage_class", lambda k: classes.get(k)), \
              mock.patch.object(ps, "defaults", lambda k, cls=None: {"amount": 1.0} if k != "grain" else {}):
             out, timings = ps.run_chain([], {}, preview=True)
@@ -593,3 +602,40 @@ class PostStudioTests(unittest.TestCase):
         self.assertEqual(params["glow_radius"]["group"], "glow")
         self.assertEqual(params["global_mix"]["group"], "main")
         self.assertEqual(params["mode"]["default"], "a")
+
+
+class PhoneFxTests(unittest.TestCase):
+    def setUp(self):
+        self.fx = _load_pack_module("nodes.onyx_phone_fx")
+        import numpy as np
+        yy, xx = np.mgrid[0:96, 0:128]
+        self.img = np.stack([xx / 128, yy / 96, 0.3 + 0 * xx], -1).astype(np.float32)
+        self.img[30:40, 50:60] = 0.98                                   # a lamp
+
+    def test_hdr_lifts_shadows_and_holds_highlights(self):
+        out = self.fx.phone_hdr(self.img, strength=1.0, sharpen_halo=0.0, local_contrast=0.0)
+        dark = self.img[..., 0] + self.img[..., 1] < 0.3
+        self.assertGreater(out[dark].mean(), self.img[dark].mean())
+        self.assertLess(out[30:40, 50:60].mean(), self.img[30:40, 50:60].mean() + 1e-3)
+        self.assertTrue((out >= 0).all() and (out <= 1).all())
+
+    def test_clip_burns_only_bright_areas(self):
+        out = self.fx.highlight_clip(self.img, threshold=0.8, push=2.0, bloom=0.0, fringe=0.0)
+        self.assertGreater(out[35, 55].min(), 0.99)                      # the lamp is white
+        self.assertLess(abs(float(out[10, 5].mean() - self.img[10, 5].mean())), 0.005)
+
+    def test_smudge_follows_the_light(self):
+        import numpy as np
+        dark = np.full((96, 128, 3), 0.1, np.float32)
+        self.assertLess(float(np.abs(self.fx.lens_smudge(dark, haze=0.0) - dark).max()), 1e-6)
+        out = self.fx.lens_smudge(self.img, amount=1.0)
+        self.assertGreater(out[35, 70].mean(), self.img[35, 70].mean())  # glow next to the lamp
+
+    def test_chroma_subsample_keeps_luma(self):
+        import torch
+        t = torch.rand(1, 33, 47, 3)
+        out = self.fx.chroma_subsample(t, "4:2:0")
+        y = lambda x: 0.299 * x[..., 0] + 0.587 * x[..., 1] + 0.114 * x[..., 2]
+        self.assertEqual(out.shape, t.shape)
+        self.assertLess(float((y(out) - y(t)).abs().mean()), 0.02)
+        self.assertGreater(float((out - t).abs().mean()), 0.01)          # colour did change

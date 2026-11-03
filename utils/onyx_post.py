@@ -92,6 +92,7 @@ LOOKS = {
         "OnyxMoreJPEG": {"contrast": 1.0},
     }),
     "amateur": _derive(_CRISPY, {
+        "OnyxPhoneHDR": {"strength": 0.5, "shadow_lift": 0.35, "highlight_compress": 0.4, "sharpen_halo": 0.3},
         "OnyxFameGridColorFinish": {"color_strength": 0.1},
         "OnyxPostProcessSuite": {"contrast": 0.97, "saturation": 1.03, "small_glow_intensity": 0.0,
                                  "large_glow_intensity": 0.05, "enable_vignette": True,
@@ -102,6 +103,8 @@ LOOKS = {
         "OnyxMoreJPEG": {"jpeg_quality": 88, "contrast": 1.02},
     }),
     "night": _derive(_CRISPY, {
+        "OnyxLensSmudge": {"amount": 0.6, "haze": 0.35, "streaks": 0.4},
+        "OnyxHighlightClip": {"threshold": 0.85, "push": 1.3, "fringe": 0.5, "fringe_color": "purple", "bloom": 0.35},
         "OnyxRealismInjector": {"oil_strength": 0.6},
         "OnyxPostProcessSuite": {"exposure": -0.12, "gamma": 1.08, "saturation": 0.95, "vibrance": -0.08,
                                  "enable_temp_tint": True, "temperature": -8.0, "tint": 0.0,
@@ -112,6 +115,7 @@ LOOKS = {
         "OnyxMoreJPEG": {"jpeg_quality": 85, "contrast": 1.0},
     }),
     "flash": _derive(_CRISPY, {
+        "OnyxHighlightClip": {"threshold": 0.84, "push": 0.9, "fringe": 0.25, "fringe_color": "warm", "bloom": 0.2},
         "OnyxRealismInjector": {"oil_strength": 1.0, "t_zone_gloss": 0.9, "side_matte": 0.35},
         "OnyxPostProcessSuite": {"exposure": 0.03, "contrast": 1.06, "saturation": 1.04,
                                  "enable_vignette": True, "vignette_strength": 0.22, "vignette_radius": 1.9,
@@ -122,6 +126,8 @@ LOOKS = {
         "OnyxMoreJPEG": {"jpeg_quality": 88, "contrast": 1.03},
     }),
     "golden": _derive(_CRISPY, {
+        "OnyxPhoneHDR": {"strength": 0.45, "shadow_lift": 0.3, "highlight_compress": 0.5, "sharpen_halo": 0.2},
+        "OnyxHighlightClip": {"threshold": 0.88, "push": 0.6, "fringe": 0.2, "fringe_color": "warm", "bloom": 0.3},
         "OnyxPostProcessSuite": {"saturation": 1.08, "vibrance": 0.04, "enable_temp_tint": True,
                                  "temperature": 10.0, "tint": 2.0, "large_glow_intensity": 0.12,
                                  "large_glow_threshold": 0.35},
