@@ -691,7 +691,7 @@ class OnyxStudio:
         return (model, clip, positive, negative, prompt,
                 out_image if out_image is not None else (image if image is not None else _placeholder()),
                 out_video if out_video is not None else _placeholder(),
-                audio, fps, res["notes"], res["post"] or "none", res["ratio"] or state.get("ratio", ""), post)
+                audio, fps, res["notes"], post["motion"], res["ratio"] or state.get("ratio", ""), post)
 
 
 def _zero_out(cond):

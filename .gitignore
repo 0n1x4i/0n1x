@@ -58,3 +58,6 @@ onyx_session.key.tmp
 # Onyx Studio data when ComfyUI has no user folder: skills, characters, API keys,
 # history. Personal, and the keys are secrets: never commit.
 _studio/
+
+# Workflows are shared outside the pack (never shipped in this repository).
+workflows/

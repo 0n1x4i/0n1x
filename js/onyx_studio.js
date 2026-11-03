@@ -379,7 +379,7 @@ function setupStudio(node) {
             toggle("Improve my prompt with a skill", state.enhance, (v) => set({ enhance: v }), "The skill rewrites YOUR prompt to follow its rules (its fix / check path): same scene, outfit, pose and light."),
             state.enhance ? h("div", { class: "ost-col", style: "flex:2" }, skillSelect((v) => set({ skill: v }))) : null),
           state.enhance ? h("div", { class: "ost-row" }, extra) : h("div", { class: "ost-hint" }, "Off: the prompt is used exactly as typed.")),
-        state.enhance ? llmCard() : null);
+        state.enhance ? llmCard() : null, postQuickCard());
       return;
     }
     if (m === "idea") {
@@ -387,7 +387,7 @@ function setupStudio(node) {
         oninput: (e) => { state.idea = e.target.value; saveState(); } });
       fill(p, info, h("div", { class: "ost-card" }, h("h4", {}, "Idea"), idea, h("div", { class: "ost-row", style: "margin-top:8px" }, extra),
           h("div", { class: "ost-row" }, triggerHint())),
-        skillCard(), llmCard());
+        skillCard(), llmCard(), postQuickCard());
       return;
     }
     // recreate
@@ -413,7 +413,23 @@ function setupStudio(node) {
         h("div", { class: "ost-row" }, triggerHint()),
         h("div", { class: "ost-row" }, extra),
         h("div", { class: "ost-row" }, toggle("Double-check pass", state.double_check, (v) => set({ double_check: v }, false), "Only for presets linked to a skill."))),
-      llmCard());
+      llmCard(), postQuickCard());
+  }
+
+  // Look + motion chosen right where the prompt is written (same values as the Post tab).
+  function postQuickCard() {
+    const looks = boot.post_looks.length ? boot.post_looks.map((l) => l.id) : ["none"];
+    const motions = boot.post_motions.length ? boot.post_motions : ["none"];
+    const motionLabel = (m) => m === "auto" ? "auto (the skill decides)" : m;
+    return h("div", { class: "ost-card" }, h("h4", {}, "Post look & motion"),
+      h("div", { class: "ost-row" },
+        h("div", { class: "ost-col" }, h("label", {}, "Look"),
+          h("select", { onchange: (e) => set({ post_look: e.target.value }) },
+            looks.map((l) => h("option", { value: l, selected: state.post_look === l ? "selected" : null }, l)))),
+        h("div", { class: "ost-col" }, h("label", {}, "Motion (Camera Shake)"),
+          h("select", { onchange: (e) => set({ post_motion: e.target.value }) },
+            motions.map((m) => h("option", { value: m, selected: state.post_motion === m ? "selected" : null }, motionLabel(m)))))),
+      h("div", { class: "ost-hint" }, "Pick a motion yourself, or auto to use the one the skill writes in its NOTES. Sent through the post and post_preset outputs."));
   }
 
   // ── Gallery tab ────────────────────────────────────────────────────────────
