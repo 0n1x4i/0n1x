@@ -23,6 +23,7 @@ const DEFAULT_STATE = {
   skill: "", character_id: "", provider: "ollama", model: "", ollama_url: "http://127.0.0.1:11434",
   temperature: 0.7, max_tokens: 2048, double_check: false, force_trigger: true, ratio: "9:16",
   extra_loras: [], tab: "prompt", enhance: false, preset: "", post_look: "none", post_motion: "none",
+  res: { mp: 1.0, mult: 32, follow_skill: false },
 };
 
 // ── tiny DOM helpers ─────────────────────────────────────────────────────────
@@ -134,6 +135,14 @@ function injectStyle() {
 .ost-drop{border:2px dashed var(--ln2);border-radius:10px;padding:14px;text-align:center;color:var(--dim);cursor:pointer}
 .ost-drop.hot{border-color:var(--ac);color:var(--tx);background:rgba(159,180,255,.06)}
 .ost-empty{color:var(--dim);text-align:center;padding:24px 10px}
+.ost-presets{display:flex;align-items:center;gap:5px;padding:6px 10px;background:var(--p1);border-bottom:1px solid var(--ln);flex-wrap:wrap}
+.ost-presets .lbl{color:var(--dim);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-right:4px}
+.ost-ps{min-width:28px;max-width:118px;padding:4px 8px;border-radius:7px;border:1px solid var(--ln2);background:var(--p2);color:var(--dim);
+  font:600 11px Inter,system-ui,sans-serif;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ost-ps.full{color:var(--tx);border-color:#46507e;background:#1c2038}
+.ost-ps.cur{box-shadow:0 0 0 2px rgba(159,180,255,.45)}
+.ost-ps.saving{border-style:dashed;border-color:#ffc58a;color:#ffc58a}
+.ost-ps:hover{border-color:var(--ac)}
 `;
   document.head.append(h("style", { id: "onyx-studio-style", html: css }));
 }
@@ -220,7 +229,62 @@ function setupStudio(node) {
     h("div", { class: "ost-row", style: "margin:0;justify-content:space-between" }, chips,
       h("div", { class: "ost-row", style: "margin:0" }, copyBtn, saveGalBtn, useBtn, genBtn, queueBtn)));
 
-  root.append(head, tabsBar, body, foot);
+  // ── presets bar (10 slots, every setting of the node) ──────────────────────
+  const presetBar = h("div", { class: "ost-presets" });
+  let presetSaveMode = false;
+  const SKIP_WIDGETS = new Set(["batch_data", "studio_state", "studio_panel", "seed", "control_after_generate"]);
+  function widgetSnapshot() {
+    const out = {};
+    for (const w of node.widgets || []) {
+      if (!w.name || SKIP_WIDGETS.has(w.name) || w.type === "button") continue;
+      if (w.value === null || ["string", "number", "boolean"].includes(typeof w.value)) out[w.name] = w.value;
+    }
+    return out;
+  }
+  function applyPreset(slot, pr) {
+    const keepTab = state.tab;
+    state = { ...DEFAULT_STATE, ...(pr.state || {}), tab: keepTab, current_preset: slot };
+    saveState();
+    for (const [k, v] of Object.entries(pr.widgets || {})) {
+      const w = W(k);
+      if (w) { w.value = v; w.callback?.(v); }
+    }
+    node.onWidgetChanged?.();          // lets the media panel redraw its settings
+    render();
+    toast(`Preset ${slot} “${pr.name}” loaded.`, "success");
+  }
+  async function savePresetTo(slot) {
+    const prev = (boot.presets_saved || {})[slot];
+    const name = window.prompt(`Name for preset ${slot}`, prev?.name || `Preset ${slot}`);
+    if (name === null) return;
+    const r = await postJSON("/onyx/studio/preset/save", { slot, name, state: { ...state, current_preset: slot }, widgets: widgetSnapshot() });
+    if (!r.ok) return toast(r.error, "error");
+    boot.presets_saved = r.presets; presetSaveMode = false; state.current_preset = slot; saveState();
+    renderPresets(); toast(`Saved to preset ${slot}.`, "success");
+  }
+  function renderPresets() {
+    const saved = boot.presets_saved || {};
+    const chips = [];
+    for (let i = 1; i <= 10; i++) {
+      const pr = saved[String(i)];
+      const cls = "ost-ps" + (pr ? " full" : "") + (String(state.current_preset) === String(i) ? " cur" : "") + (presetSaveMode ? " saving" : "");
+      chips.push(h("button", {
+        class: cls, title: pr ? `${pr.name}\nclick: load · right-click: delete` : "empty slot",
+        onclick: () => presetSaveMode ? savePresetTo(i) : pr ? applyPreset(i, pr) : toast("Empty slot: click 💾 Save, then this slot.", "info"),
+        oncontextmenu: async (e) => {
+          e.preventDefault(); e.stopPropagation();
+          if (!pr || !confirm(`Delete preset ${i} “${pr.name}”?`)) return;
+          const r = await postJSON("/onyx/studio/preset/delete", { slot: i });
+          boot.presets_saved = r.presets; renderPresets();
+        } }, pr ? `${i} · ${pr.name}` : String(i)));
+    }
+    fill(presetBar, h("span", { class: "lbl" }, "Presets"), ...chips,
+      h("button", { class: "ost-btn" + (presetSaveMode ? " pri" : " ghost"), style: "margin-left:auto;padding:4px 10px",
+        title: "Saves every setting of the node: mode, skill, preset, character, extra LoRAs, LLM, format, post look / motion, media settings (not the media list).",
+        onclick: () => { presetSaveMode = !presetSaveMode; renderPresets(); } }, presetSaveMode ? "Click a slot…" : "💾 Save"));
+  }
+
+  root.append(head, tabsBar, presetBar, body, foot);
 
   // ── data ───────────────────────────────────────────────────────────────────
   async function loadBoot() {
@@ -288,6 +352,7 @@ function setupStudio(node) {
     if (state.tab === "history") renderHistory();
   }
   function renderHeader() {
+    renderPresets();
     const c = curChar();
     fill(charPill, "🧑 ", c ? h("b", {}, c.name) : h("span", { style: "color:var(--dim)" }, "no character"),
       state.post_look && state.post_look !== "none" ? h("span", { style: "color:#ffc58a;margin-left:6px" }, "· 🎛️ " + state.post_look) : null);
@@ -338,12 +403,10 @@ function setupStudio(node) {
       }));
   }
   function skillCard(title = "Skill") {
-    const ratio = h("select", { onchange: (e) => set({ ratio: e.target.value }, false) }, RATIOS.map((r) => h("option", { value: r, selected: state.ratio === r ? "selected" : null }, r)));
     const sk = curSkill();
     return h("div", { class: "ost-card" }, h("h4", {}, title),
       h("div", { class: "ost-row" },
-        h("div", { class: "ost-col", style: "flex:3" }, h("label", {}, "Prompting style"), skillSelect((v) => set({ skill: v }))),
-        h("div", { class: "ost-col", style: "max-width:90px" }, h("label", {}, "Ratio"), ratio)),
+        h("div", { class: "ost-col", style: "flex:3" }, h("label", {}, "Prompting style"), skillSelect((v) => set({ skill: v })))),
       h("div", { class: "ost-row" },
         toggle("Double-check pass", state.double_check, (v) => set({ double_check: v }, false), "A second call checks the prompt against the skill's rules and returns the fixed version (the two-chat method)."),
         sk?.locked_sentence ? h("span", { class: "ost-hint" }, "rulebook with locked sentences") : null),
@@ -379,7 +442,7 @@ function setupStudio(node) {
             toggle("Improve my prompt with a skill", state.enhance, (v) => set({ enhance: v }), "The skill rewrites YOUR prompt to follow its rules (its fix / check path): same scene, outfit, pose and light."),
             state.enhance ? h("div", { class: "ost-col", style: "flex:2" }, skillSelect((v) => set({ skill: v }))) : null),
           state.enhance ? h("div", { class: "ost-row" }, extra) : h("div", { class: "ost-hint" }, "Off: the prompt is used exactly as typed.")),
-        state.enhance ? llmCard() : null, postQuickCard());
+        state.enhance ? llmCard() : null, formatCard(), postQuickCard());
       return;
     }
     if (m === "idea") {
@@ -387,7 +450,7 @@ function setupStudio(node) {
         oninput: (e) => { state.idea = e.target.value; saveState(); } });
       fill(p, info, h("div", { class: "ost-card" }, h("h4", {}, "Idea"), idea, h("div", { class: "ost-row", style: "margin-top:8px" }, extra),
           h("div", { class: "ost-row" }, triggerHint())),
-        skillCard(), llmCard(), postQuickCard());
+        skillCard(), llmCard(), formatCard(), postQuickCard());
       return;
     }
     // recreate
@@ -413,7 +476,35 @@ function setupStudio(node) {
         h("div", { class: "ost-row" }, triggerHint()),
         h("div", { class: "ost-row" }, extra),
         h("div", { class: "ost-row" }, toggle("Double-check pass", state.double_check, (v) => set({ double_check: v }, false), "Only for presets linked to a skill."))),
-      llmCard(), postQuickCard());
+      llmCard(), formatCard(), postQuickCard());
+  }
+
+  // Format: ratio (also sent to the skill) + megapixels -> width / height outputs,
+  // computed by Onyx Resolution (MP)'s own engine (same live preview route).
+  function formatCard() {
+    const res = (state.res ||= { mp: 1.0, mult: 32, follow_skill: false });
+    const aspects = boot.res_aspects?.length ? boot.res_aspects : RATIOS;
+    const preview = h("span", { class: "ost-hint" }, "…");
+    const refresh = async () => {
+      const ar = state.ratio;
+      if (ar === "from image (input)") { preview.textContent = "from the batch image — computed at run time"; return; }
+      try {
+        const r = await getJSON(`/onyx/resolution_mp/preview?mp=${encodeURIComponent(res.mp)}&ar=${encodeURIComponent(ar)}&mult=${encodeURIComponent(res.mult)}`);
+        preview.textContent = r.success ? "📐 " + r.text : (r.error || "?");
+      } catch { preview.textContent = "preview unavailable"; }
+    };
+    refresh();
+    return h("div", { class: "ost-card" }, h("h4", {}, "Format (width / height outputs)"),
+      h("div", { class: "ost-row" },
+        h("div", { class: "ost-col" }, h("label", {}, "Aspect ratio"),
+          h("select", { onchange: (e) => { set({ ratio: e.target.value }, false); refresh(); } },
+            aspects.map((a) => h("option", { value: a, selected: state.ratio === a ? "selected" : null }, a)))),
+        h("div", { class: "ost-col", style: "max-width:120px" }, h("label", {}, "Megapixels"),
+          h("input", { type: "number", min: 0.05, max: 20, step: 0.01, value: res.mp, onchange: (e) => { res.mp = Number(e.target.value) || 1; saveState(); refresh(); } })),
+        h("div", { class: "ost-col", style: "max-width:100px" }, h("label", {}, "Multiple of"),
+          h("input", { type: "number", min: 1, max: 128, step: 1, value: res.mult, onchange: (e) => { res.mult = parseInt(e.target.value, 10) || 32; saveState(); refresh(); } }))),
+      h("div", { class: "ost-row" }, preview,
+        toggle("Follow the skill's ratio", res.follow_skill, (v) => { res.follow_skill = v; saveState(); }, "When the skill writes a ratio in its NOTES line, the width / height follow it.")));
   }
 
   // Look + motion chosen right where the prompt is written (same values as the Post tab).

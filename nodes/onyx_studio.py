@@ -193,6 +193,39 @@ def delete_character(char_id: str) -> None:
         _write("characters.json", [c for c in characters() if c.get("id") != char_id])
 
 
+# ── presets (10 slots, every setting of the node) ─────────────────────────────
+
+PRESET_SLOTS = 10
+_VOLATILE = {"tab", "gallery_q", "gallery_sel", "preview_media", "_galleryLoaded"}
+
+
+def presets() -> dict:
+    data = _read("master_presets.json", {})
+    return data if isinstance(data, dict) else {}
+
+
+def save_preset(slot: int, name: str, state: dict, widgets: dict) -> dict:
+    if not 1 <= int(slot) <= PRESET_SLOTS:
+        raise ValueError(f"slot must be 1-{PRESET_SLOTS}")
+    with _lock:
+        data = presets()
+        data[str(int(slot))] = {
+            "name": (name or f"Preset {slot}").strip()[:40],
+            "state": {k: v for k, v in (state or {}).items() if k not in _VOLATILE},
+            "widgets": {k: v for k, v in (widgets or {}).items() if k != "batch_data"},
+            "saved": time.time(),
+        }
+        _write("master_presets.json", data)
+        return data[str(int(slot))]
+
+
+def delete_preset(slot: int) -> None:
+    with _lock:
+        data = presets()
+        data.pop(str(int(slot)), None)
+        _write("master_presets.json", data)
+
+
 # ── history ──────────────────────────────────────────────────────────────────
 
 def add_history(entry: dict) -> None:
@@ -468,7 +501,8 @@ def generate(state: dict, image=None, keys: dict | None = None, seed: int = 0) -
 
     def skill_system(skill_id):
         text, _kind, meta = skill_text(skill_id)
-        return render_skill(text, meta, char, state.get("ratio", ""))
+        r = state.get("ratio", "")
+        return render_skill(text, meta, char, r if ":" in r else "")
 
     if mode in ("manual", "gallery"):
         base = state.get("manual", "") if mode == "manual" else \
@@ -613,9 +647,11 @@ class OnyxStudio:
 
     # `post` is LAST: outputs are linked by index, appending keeps saved links valid.
     RETURN_TYPES = ("MODEL", "CLIP", "CONDITIONING", "CONDITIONING", "STRING",
-                    "IMAGE", "IMAGE", "AUDIO", "FLOAT", "STRING", "STRING", "STRING", _onyx_post.POST_TYPE)
+                    "IMAGE", "IMAGE", "AUDIO", "FLOAT", "STRING", "STRING", "STRING", _onyx_post.POST_TYPE,
+                    "INT", "INT")
     RETURN_NAMES = ("model", "clip", "positive", "negative", "prompt",
-                    "image", "video", "audio", "video_fps", "notes", "post_preset", "ratio", "post")
+                    "image", "video", "audio", "video_fps", "notes", "post_preset", "ratio", "post",
+                    "width", "height")
     FUNCTION = "run"
     CATEGORY = "Onyx"
 
@@ -687,11 +723,38 @@ class OnyxStudio:
         post = _onyx_post.make(state.get("post_look", "none"), state.get("post_motion", "none"),
                                auto_motion=res.get("post") or "")
         res["post_look"], res["post_motion"] = post["look"], post["motion"]
+        try:
+            width, height, ratio_label = resolution(state, res.get("ratio", ""), ref if ref is not None else out_image)
+        except Exception as e:
+            print(f"⚠️  [Onyx Studio] resolution: {e} — 1024x1024 used.")
+            width, height, ratio_label = 1024, 1024, state.get("ratio", "1:1")
+        res["width"], res["height"] = width, height
+        print(f"📐 [Onyx Studio] {width} x {height} ({ratio_label})")
         _notify(unique_id, res)
         return (model, clip, positive, negative, prompt,
                 out_image if out_image is not None else (image if image is not None else _placeholder()),
                 out_video if out_video is not None else _placeholder(),
-                audio, fps, res["notes"], post["motion"], res["ratio"] or state.get("ratio", ""), post)
+                audio, fps, res["notes"], post["motion"], ratio_label, post, width, height)
+
+
+RES_ASPECTS = ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "21:9", "5:4", "4:5", "from image (input)"]
+
+
+def resolution(state: dict, skill_ratio: str, image=None):
+    """(width, height, ratio label) with Onyx Resolution (MP)'s own engine.
+    The ratio is the node's, or the skill's NOTES ratio when 'follow the skill'."""
+    res = state.get("res") or {}
+    ratio = state.get("ratio") or "9:16"
+    if res.get("follow_skill") and skill_ratio in RES_ASPECTS:
+        ratio = skill_ratio
+    if ratio == "from image (input)" and image is None:
+        ratio = "1:1"
+    from .onyx_resolution_mp import OnyxResolutionMP
+    out = OnyxResolutionMP().compute(megapixels=float(res.get("mp", 1.0)), aspect_ratio=ratio,
+                                     multiple_of=int(res.get("mult", 32)), image=image)
+    if isinstance(out, dict):
+        out = out.get("result", ())
+    return int(out[0]), int(out[1]), str(out[2] if len(out) > 2 else ratio)
 
 
 def _zero_out(cond):
@@ -766,7 +829,7 @@ def register_routes() -> None:
                   providers=[{"id": p, "label": _llm.PROVIDER_LABELS[p]} for p in _llm.PROVIDERS],
                   models={"xai": _reg.model_ids("grok", vision=True, include_deprecated=False),
                           "gemini": _reg.model_ids("gemini_text", include_deprecated=False)},
-                  modes=MODES, studio_dir=studio_dir())
+                  modes=MODES, studio_dir=studio_dir(), presets_saved=presets(), res_aspects=RES_ASPECTS)
 
     @inst.routes.post("/onyx/studio/skill/import")
     async def _skill_import(request):
@@ -812,6 +875,24 @@ def register_routes() -> None:
     async def _char_delete(request):
         delete_character((await request.json()).get("id", ""))
         return ok()
+
+    @inst.routes.get("/onyx/studio/presets")
+    async def _presets(_r):
+        return ok(presets=presets(), slots=PRESET_SLOTS)
+
+    @inst.routes.post("/onyx/studio/preset/save")
+    async def _preset_save(request):
+        try:
+            b = await request.json()
+            return ok(preset=save_preset(int(b.get("slot", 0)), b.get("name", ""), b.get("state") or {},
+                                         b.get("widgets") or {}), presets=presets())
+        except Exception as e:
+            return err(e)
+
+    @inst.routes.post("/onyx/studio/preset/delete")
+    async def _preset_delete(request):
+        delete_preset(int((await request.json()).get("slot", 0)))
+        return ok(presets=presets())
 
     @inst.routes.get("/onyx/studio/lora_trigger")
     async def _lora_trigger(request):

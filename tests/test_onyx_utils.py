@@ -388,3 +388,43 @@ class CameraShakeTableTests(unittest.TestCase):
         self.assertEqual(mod.PRESETS["shake_med_rot"], (0.012, 60, 0.008, 0.20, 0.0008, 8))
         self.assertEqual(mod.PRESETS["soft"], (0.000, 0, 0.000, 0.00, 0.0012, 0))
         self.assertEqual(mod.PRESET_NAMES[0], "none")
+
+
+class StudioPresetResolutionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.st = _load_pack_module("nodes.onyx_studio")
+
+    def test_presets_round_trip(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch.object(self.st, "studio_dir", lambda: tmp):
+                self.st.save_preset(3, "Night", {"mode": "idea", "tab": "post", "gallery_q": "x"},
+                                    {"video_max_side": 768, "batch_data": "{...}"})
+                p = self.st.presets()["3"]
+                self.assertEqual(p["name"], "Night")
+                self.assertNotIn("tab", p["state"])               # UI-only keys are not saved
+                self.assertNotIn("batch_data", p["widgets"])      # the media list is not a setting
+                with self.assertRaises(ValueError):
+                    self.st.save_preset(11, "x", {}, {})
+                self.st.delete_preset(3)
+                self.assertEqual(self.st.presets(), {})
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_resolution_follows_skill_ratio(self):
+        calls = {}
+
+        class FakeRes:
+            def compute(self, megapixels, aspect_ratio, multiple_of, image=None):
+                calls.update(mp=megapixels, ar=aspect_ratio, mult=multiple_of)
+                return (768, 1344, aspect_ratio)
+
+        mod = sys.modules[self.st.__name__.rsplit(".", 1)[0] + ".onyx_resolution_mp"]
+        with mock.patch.object(mod, "OnyxResolutionMP", FakeRes):
+            w, h, r = self.st.resolution({"ratio": "9:16", "res": {"mp": 1.03, "mult": 32}}, "4:5")
+            self.assertEqual((w, h, calls["ar"], calls["mp"]), (768, 1344, "9:16", 1.03))
+            self.st.resolution({"ratio": "9:16", "res": {"follow_skill": True}}, "4:5")
+            self.assertEqual(calls["ar"], "4:5")
+            self.st.resolution({"ratio": "from image (input)", "res": {}}, "", image=None)
+            self.assertEqual(calls["ar"], "1:1")                 # no image: square fallback
