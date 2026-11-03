@@ -63,7 +63,9 @@ async function queueInChunks(total, chunkSize, onProgress, shouldStop = () => fa
 // cours est la sienne. Les autres workflows en file ne sont pas touches.
 function promptUsesNode(entry, nodeId) {
     const prompt = Array.isArray(entry) ? entry[2] : null;
-    return !!prompt && prompt[String(nodeId)]?.class_type === "OnyxImageBatchLoader";
+    const cls = prompt?.[String(nodeId)]?.class_type;
+    // The panel also lives inside Onyx Studio: its queued prompts carry that class.
+    return cls === "OnyxImageBatchLoader" || cls === "OnyxStudio";
 }
 async function stopBatch(nodeId) {
     let q;

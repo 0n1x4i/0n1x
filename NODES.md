@@ -1426,7 +1426,7 @@ shake.py as a node: soft, shake_med (diagonal), shake_med_h (side-to-side + doub
 | `images` | `IMAGE` | yes | — |  |  |
 | `preset` | Dropdown: `none`, `soft`, `shake_med`, `shake_med_h`, `shake_med_v`, `shake_med_rot`, `shake_heavy` | yes | `shake_med` |  |  |
 | `strength` | `FLOAT` | yes | `1.0` | 0.0 – 2.0 (step 0.05) | 1 = shake.py exactly. |
-| `preset_override` | `STRING` | no | — |  | A preset name as text (e.g. Onyx Studio's post_preset). Not empty = replaces the preset above; 'none' = no shake for this image. |
+| `preset_override` | `STRING` | no | — |  | A preset name as text (e.g. Onyx Studio's post_preset). Not empty = replaces the preset above; empty = the preset above is used; 'none' = no shake for this image. |
 | `onyx_post` | `ONYX_POST` | no | — |  | From Onyx Studio (post output) or Onyx Post Style. A look other than 'none' overrides this node's settings. |
 
 ### Outputs

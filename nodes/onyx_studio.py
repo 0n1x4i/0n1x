@@ -26,7 +26,7 @@ A skill can carry a CONFIG block (lines like `TRIGGER_LINE = ...`, `BODY = ...`,
 those lines from the selected character before each call, forces OUTPUT = chat,
 and replaces the skill's locked sentence (e.g. the hair lock) with the
 character's own. The answer's code block becomes the prompt, its NOTES line
-becomes `notes` (+ `ratio`, `post_preset` for the Camera Shake node).
+becomes `notes` (+ `ratio`). `post_preset` = the motion chosen (or the skill's in auto), empty when none.
 
 LLM back-ends: Ollama (local), Qwen3-VL local (transformers), Grok, OpenRouter,
 Gemini — see utils/onyx_llm.py. API keys are stored on this computer
@@ -664,7 +664,16 @@ class OnyxStudio:
             return float("nan")
         if state.get("mode") in ("idea", "recreate") or (batch.get("order") or []):
             return float("nan")                     # new LLM answer / next batch item every run
-        return hashlib.sha256(f"{studio_state}|{seed}".encode()).hexdigest()
+        # Characters and skills live in their own files: editing them must re-run the node.
+        char = json.dumps(character(state.get("character_id", "")), sort_keys=True)
+        skill_mtime = ""
+        sid = state.get("skill") or ""
+        if sid.startswith("file:"):
+            try:
+                skill_mtime = str(os.path.getmtime(os.path.join(studio_dir(), "skills", os.path.basename(sid[5:]))))
+            except OSError:
+                pass
+        return hashlib.sha256(f"{studio_state}|{seed}|{char}|{skill_mtime}".encode()).hexdigest()
 
     def run(self, studio_state="{}", unique_id=None, model=None, clip=None, image=None,
             grok_api_key=None, gemini_api_key=None, openrouter_api_key=None, seed=0, **batch_kwargs):
@@ -736,7 +745,8 @@ class OnyxStudio:
         return (model, clip, positive, negative, prompt,
                 out_image if out_image is not None else (image if image is not None else _placeholder()),
                 out_video if out_video is not None else _placeholder(),
-                audio, fps, res["notes"], post["motion"], ratio_label, post, width, height, latent)
+                audio, fps, res["notes"], "" if post["motion"] == "none" else post["motion"],
+                ratio_label, post, width, height, latent)
 
 
 RES_ASPECTS = ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "21:9", "5:4", "4:5", "from image (input)"]

@@ -188,8 +188,9 @@ function setupStudio(node) {
   let busy = false;
 
   const readState = () => {
-    try { state = { ...DEFAULT_STATE, ...(JSON.parse(W("studio_state")?.value || "{}") || {}) }; }
-    catch { state = { ...DEFAULT_STATE }; }
+    // structuredClone: the nested defaults (res, extra_loras) must not be shared between nodes.
+    try { state = { ...structuredClone(DEFAULT_STATE), ...(JSON.parse(W("studio_state")?.value || "{}") || {}) }; }
+    catch { state = structuredClone(DEFAULT_STATE); }
   };
   const saveState = () => {
     const w = W("studio_state");
@@ -250,7 +251,7 @@ function setupStudio(node) {
   }
   function applyPreset(slot, pr) {
     const keepTab = state.tab;
-    state = { ...DEFAULT_STATE, ...(pr.state || {}), tab: keepTab, current_preset: slot };
+    state = { ...structuredClone(DEFAULT_STATE), ...structuredClone(pr.state || {}), tab: keepTab, current_preset: slot };
     saveState();
     for (const [k, v] of Object.entries(pr.widgets || {})) {
       const w = W(k);

@@ -428,3 +428,19 @@ class StudioPresetResolutionTests(unittest.TestCase):
             self.assertEqual(calls["ar"], "4:5")
             self.st.resolution({"ratio": "from image (input)", "res": {}}, "", image=None)
             self.assertEqual(calls["ar"], "1:1")                 # no image: square fallback
+
+
+class StudioCacheKeyTests(unittest.TestCase):
+    def test_editing_the_character_changes_the_key(self):
+        st = _load_pack_module("nodes.onyx_studio")
+        tmp = tempfile.mkdtemp()
+        try:
+            with mock.patch.object(st, "studio_dir", lambda: tmp):
+                c = st.save_character({"name": "Mia", "trigger_line": "mia"})
+                state = json.dumps({"mode": "manual", "manual": "x", "character_id": c["id"]})
+                k1 = st.OnyxStudio.IS_CHANGED(state, "{}", 1)
+                self.assertEqual(k1, st.OnyxStudio.IS_CHANGED(state, "{}", 1))
+                st.save_character({**c, "trigger_line": "mia_v2"})
+                self.assertNotEqual(k1, st.OnyxStudio.IS_CHANGED(state, "{}", 1))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
