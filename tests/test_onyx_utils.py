@@ -334,3 +334,57 @@ class StudioTests(unittest.TestCase):
         self.assertEqual(self.st._apply_trigger("on a bench", char, True), "mia woman\non a bench")
         self.assertEqual(self.st._apply_trigger("anna woman\nA shot.", char, True, from_llm=True), "mia woman\nA shot.")
         self.assertEqual(self.st._apply_trigger("on a bench", char, False), "on a bench")
+
+
+class PostLookTests(unittest.TestCase):
+    def setUp(self):
+        from utils import onyx_post
+        self.p = onyx_post
+
+    def test_none_changes_nothing(self):
+        post = self.p.make("none", "none")
+        kw = {"exposure": 0.5}
+        self.assertEqual(self.p.apply("OnyxPostProcessSuite", kw, post), (kw, False))
+
+    def test_look_overrides_only_existing_widgets(self):
+        post = self.p.make("night", "none")
+        out, bypass = self.p.apply("Onyx_Renoise", {"iso_preset": "ISO 100 (Clean)", "seed": 3}, post)
+        self.assertFalse(bypass)
+        self.assertEqual(out["iso_preset"], "ISO 800")
+        self.assertEqual(out["seed"], 3)
+        self.assertNotIn("fine_grain", out)          # not a widget passed in -> never injected
+
+    def test_bypass_and_motion(self):
+        post = self.p.make("clean", "auto", auto_motion="shake_med_h")
+        self.assertTrue(self.p.apply("Onyx_Camera_Look", {"enabled": True}, post)[1])
+        self.assertEqual(post["nodes"]["OnyxCameraShake"]["preset"], "shake_med_h")
+        self.assertEqual(self.p.make("none", "shake_heavy")["nodes"], {"OnyxCameraShake": {"preset": "shake_heavy"}})
+        self.assertEqual(self.p.make("amateur", "none")["nodes"]["OnyxCameraShake"]["preset"], "none")
+
+    def test_wire_adds_input_and_applies(self):
+        calls = {}
+
+        class Node:
+            FUNCTION = "run"
+
+            @classmethod
+            def INPUT_TYPES(cls):
+                return {"required": {"image": ("IMAGE",), "jpeg_compression": ("INT", {})}}
+
+            def run(self, image, jpeg_compression):
+                calls["q"] = jpeg_compression
+                return (image,)
+
+        self.p.wire(Node, "Onyx_Camera_Look")
+        self.assertIn("onyx_post", Node.INPUT_TYPES()["optional"])
+        Node().run(image="IMG", jpeg_compression=100, onyx_post=self.p.make("amateur", "none"))
+        self.assertEqual(calls["q"], 92)
+        self.assertEqual(Node().run(image="IMG", jpeg_compression=100, onyx_post=self.p.make("clean", "none")), ("IMG",))
+
+
+class CameraShakeTableTests(unittest.TestCase):
+    def test_presets_match_shake_py(self):
+        mod = _load_pack_module("nodes.onyx_camera_shake")
+        self.assertEqual(mod.PRESETS["shake_med_rot"], (0.012, 60, 0.008, 0.20, 0.0008, 8))
+        self.assertEqual(mod.PRESETS["soft"], (0.000, 0, 0.000, 0.00, 0.0012, 0))
+        self.assertEqual(mod.PRESET_NAMES[0], "none")

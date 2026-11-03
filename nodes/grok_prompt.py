@@ -83,6 +83,8 @@ _PRESET_KEYS = [
     "max_tokens",
     "provider",
     "openrouter_model",
+    "name",     # Onyx Studio: label shown in the recreate preset list
+    "skill",    # Onyx Studio: skill used as the preset's rulebook (e.g. "candid")
 ]
 
 

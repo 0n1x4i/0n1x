@@ -64,6 +64,15 @@ from .nodes.onyx_h3_vfx import OnyxH3VfxLora
 from .nodes.onyx_conditioning_cache import OnyxConditioningCache
 from .nodes.onyx_studio import OnyxStudio
 from .nodes.onyx_camera_shake import OnyxCameraShake
+from .nodes.onyx_post_style import OnyxPostStyle
+from .nodes.onyx_famegrid import OnyxFameGridColorFinish
+from .nodes.onyx_more_jpeg import OnyxMoreJPEG
+from .nodes.onyx_realism_injector import OnyxRealismInjector
+try:   # needs spandrel (shipped with ComfyUI) for its optional upscale stage
+    from .nodes.onyx_post_suite import OnyxPostProcessSuite
+except Exception as _e:
+    OnyxPostProcessSuite = None
+    print(f"[Onyx] ❌ Post-Process Suite failed: {_e}")
 from .nodes import onyx_studio as _onyx_studio_mod
 
 # Post-processing nodes (dossier avec espace + noms unicode -> importlib)
@@ -208,6 +217,20 @@ NODE_CLASS_MAPPINGS["OnyxH3VfxLora"] = OnyxH3VfxLora
 NODE_CLASS_MAPPINGS["OnyxConditioningCache"] = OnyxConditioningCache
 NODE_CLASS_MAPPINGS["OnyxStudio"] = OnyxStudio
 NODE_CLASS_MAPPINGS["OnyxCameraShake"] = OnyxCameraShake
+NODE_CLASS_MAPPINGS["OnyxPostStyle"] = OnyxPostStyle
+NODE_CLASS_MAPPINGS["OnyxFameGridColorFinish"] = OnyxFameGridColorFinish
+NODE_CLASS_MAPPINGS["OnyxMoreJPEG"] = OnyxMoreJPEG
+NODE_CLASS_MAPPINGS["OnyxRealismInjector"] = OnyxRealismInjector
+if OnyxPostProcessSuite:
+    NODE_CLASS_MAPPINGS["OnyxPostProcessSuite"] = OnyxPostProcessSuite
+# Onyx Post looks: every post-processing node gets the optional `onyx_post` input
+# (Onyx Studio / Onyx Post Style), applied around its own code.
+from .utils import onyx_post as _onyx_post_mod
+for _pp_cls in (Onyx_Renoise, Onyx_Camera_Look, Onyx_Apply_LUT, Onyx_Clarity, Onyx_Dehaze,
+                Onyx_Match_Levels, Onyx_Skin_Tone):
+    if _pp_cls is not None:
+        _onyx_post_mod.wire(_pp_cls)
+
 if Onyx_Renoise:     NODE_CLASS_MAPPINGS["Onyx_Renoise"]     = Onyx_Renoise
 if Onyx_Camera_Look: NODE_CLASS_MAPPINGS["Onyx_Camera_Look"] = Onyx_Camera_Look
 if Onyx_Apply_LUT:   NODE_CLASS_MAPPINGS["Onyx_Apply_LUT"]   = Onyx_Apply_LUT
@@ -270,6 +293,11 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxH3VfxLora"] = "Onyx H3 VFX LoRA"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxConditioningCache"] = "Onyx Conditioning Cache (text encode)"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxStudio"] = "Onyx Studio ✦"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxCameraShake"] = "Onyx Camera Shake"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxPostStyle"] = "Onyx Post Style"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxFameGridColorFinish"] = "Onyx FameGrid Color Finish"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxMoreJPEG"] = "Onyx More JPEG"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxRealismInjector"] = "Onyx Realism Injector"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxPostProcessSuite"] = "Onyx Post-Process Suite"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Renoise"]     = "Onyx Renoise"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Camera_Look"] = "📷 Onyx Camera Look"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Apply_LUT"]   = "🎨 Onyx Apply LUT"

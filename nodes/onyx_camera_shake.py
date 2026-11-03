@@ -1,131 +1,93 @@
 # -*- coding: utf-8 -*-
 """
-Onyx Camera Shake — the "shake" post-process of the Candid Snap method, as a node.
+Onyx Camera Shake — the Candid Snap "shake.py" pass as a node.
 
-Why after the render and not in the prompt: the workflow's detail stages
-re-sharpen the face, so blur written into the prompt is either cleaned away or
-turns the face to mush. Real hand-shake blur is added to the finished image.
+Real-photo distortion after the render: camera-shake motion blur + double-image
+ghost + soft defocus (+ optional dutch tilt), sized relative to the image WIDTH
+so it matches blurry phone references at any resolution. Blur written into the
+prompt gets sharpened away by the detail stages or turns the face to mush, so it
+is added here, to the finished image.
 
-Presets (the names the Candid Snap skill writes in its NOTES line, so the
-Studio's `post_preset` output can drive this node directly):
-  soft           slightly soft / hazy overall, no smear
-  shake_med      diagonal hand-shake smear, eyes and lips still readable
-  shake_med_h    side-to-side smear with a faint double image
-  shake_med_v    up-and-down smear
-  shake_med_rot  smear plus a slightly tilted frame
-  shake_heavy    strong smear, flash-in-the-dark style, face barely readable
-  none           pass-through
+Same presets, values and operation order as shake.py
+(rotate -> ghost -> motion blur -> gaussian softness):
 
-Lengths are relative to the image size, so a preset looks the same at 1K and 4K.
-Batches (video frames) get a slightly different random shake per frame from `seed`.
+               length  angle  ghost_off  ghost_a  sigma   rotate
+  soft         0.000     0     0.000      0.00    0.0012    0
+  shake_med    0.010    15     0.008      0.20    0.0008    0
+  shake_med_h  0.012     0     0.012      0.25    0.0008    0
+  shake_med_v  0.010    75     0.007      0.18    0.0008    0
+  shake_med_rot 0.012   60     0.008      0.20    0.0008    8
+  shake_heavy  0.022    35     0.015      0.30    0.0015    0
+
+`strength` scales lengths, offsets, sigma and tilt (1 = shake.py exactly).
+Onyx Studio's `post` output (or Onyx Post Style) can choose the preset per image.
 """
 
 from __future__ import annotations
 
 import math
-import random
 
+from ..utils import onyx_post as _onyx_post
 from .onyx_render_profile import ensure_profile_ready
 
-PRESETS = ["none", "soft", "shake_med", "shake_med_h", "shake_med_v", "shake_med_rot", "shake_heavy"]
-
-# length = blur length as a fraction of the long side; angle in degrees (0 = horizontal);
-# ghost = (strength, offset fraction) of the faint double image; tilt = frame rotation (deg)
-_SPECS = {
-    "soft":          {"length": 0.0,   "angle": 0,   "ghost": (0.0, 0.0),   "tilt": 0.0, "soft": 1.0, "haze": 0.06},
-    "shake_med":     {"length": 0.010, "angle": 35,  "ghost": (0.0, 0.0),   "tilt": 0.0, "soft": 0.0, "haze": 0.0},
-    "shake_med_h":   {"length": 0.012, "angle": 0,   "ghost": (0.22, 0.010), "tilt": 0.0, "soft": 0.0, "haze": 0.0},
-    "shake_med_v":   {"length": 0.011, "angle": 90,  "ghost": (0.0, 0.0),   "tilt": 0.0, "soft": 0.0, "haze": 0.0},
-    "shake_med_rot": {"length": 0.010, "angle": 20,  "ghost": (0.0, 0.0),   "tilt": 2.2, "soft": 0.0, "haze": 0.0},
-    "shake_heavy":   {"length": 0.032, "angle": 25,  "ghost": (0.30, 0.016), "tilt": 1.0, "soft": 0.0, "haze": 0.03},
+PRESETS = {
+    #                length  angle  ghost_off ghost_a  sigma   rotate
+    "soft":          (0.000,   0,   0.000,   0.00,  0.0012,  0),
+    "shake_med":     (0.010,  15,   0.008,   0.20,  0.0008,  0),
+    "shake_med_h":   (0.012,   0,   0.012,   0.25,  0.0008,  0),
+    "shake_med_v":   (0.010,  75,   0.007,   0.18,  0.0008,  0),
+    "shake_med_rot": (0.012,  60,   0.008,   0.20,  0.0008,  8),
+    "shake_heavy":   (0.022,  35,   0.015,   0.30,  0.0015,  0),
 }
+PRESET_NAMES = ["none", *PRESETS]
 
 
-def _line_kernel(length_px: float, angle_deg: float, device):
-    import torch
-    n = max(1, int(round(length_px)))
-    size = n if n % 2 else n + 1
-    k = torch.zeros((size, size), device=device)
-    c = (size - 1) / 2
-    a = math.radians(angle_deg)
-    steps = max(2, size * 3)
-    for i in range(steps):
-        t = i / (steps - 1) - 0.5
-        x = c + t * (size - 1) * math.cos(a)
-        y = c - t * (size - 1) * math.sin(a)
-        k[int(round(y)), int(round(x))] += 1.0
+def _motion_kernel(length, angle_deg):
+    import cv2
+    import numpy as np
+    n = max(3, int(round(length)) | 1)
+    k = np.zeros((n, n), np.float32)
+    k[n // 2, :] = 1.0
+    m = cv2.getRotationMatrix2D((n / 2 - 0.5, n / 2 - 0.5), angle_deg, 1.0)
+    k = cv2.warpAffine(k, m, (n, n))
     return k / k.sum()
 
 
-def _gauss_kernel(sigma: float, device):
-    import torch
-    r = max(1, int(math.ceil(sigma * 3)))
-    x = torch.arange(-r, r + 1, device=device, dtype=torch.float32)
-    g = torch.exp(-(x ** 2) / (2 * sigma ** 2))
-    g = g / g.sum()
-    return g[:, None] * g[None, :]
-
-
-def _conv(img, kernel):
-    """img [1,C,H,W], kernel [k,k] -> same size, reflect padding, per channel."""
-    import torch.nn.functional as F
-    k = kernel.shape[0]
-    p = k // 2
-    x = F.pad(img, (p, p, p, p), mode="reflect" if p < min(img.shape[-2:]) else "replicate")
-    w = kernel[None, None].repeat(img.shape[1], 1, 1, 1)
-    return F.conv2d(x, w, groups=img.shape[1])
-
-
-def _rotate(img, deg):
-    """Rotate and zoom just enough that no empty corner shows (a real tilted phone)."""
-    import torch
-    import torch.nn.functional as F
-    a = math.radians(deg)
-    h, w = img.shape[-2:]
-    zoom = abs(math.cos(a)) + abs(math.sin(a)) * max(h / w, w / h)
-    cos, sin = math.cos(a) / zoom, math.sin(a) / zoom
-    theta = torch.tensor([[cos, -sin * h / w, 0.0], [sin * w / h, cos, 0.0]],
-                         device=img.device, dtype=img.dtype)[None]
-    grid = F.affine_grid(theta, img.shape, align_corners=False)
-    return F.grid_sample(img, grid, mode="bilinear", padding_mode="reflection", align_corners=False)
-
-
-def shake_frame(img, preset: str, strength: float, rng: random.Random):
-    """img [H,W,C] float 0-1 -> same."""
-    import torch
-    spec = _SPECS.get(preset)
-    if spec is None or strength <= 0:
+def shake(img, preset: str, strength: float = 1.0):
+    """img: float32 HxWx3 in 0-255 (numpy). Same maths as shake.py.run()."""
+    import cv2
+    import numpy as np
+    if preset not in PRESETS or strength <= 0:
         return img
-    x = img.permute(2, 0, 1)[None]
-    long_side = max(x.shape[-2:])
-    if spec["tilt"]:
-        x = _rotate(x, spec["tilt"] * strength * rng.choice((-1, 1)) * rng.uniform(0.8, 1.2))
-    if spec["length"]:
-        length = spec["length"] * long_side * strength * rng.uniform(0.85, 1.15)
-        angle = spec["angle"] + rng.uniform(-8, 8)
-        x = _conv(x, _line_kernel(length, angle, x.device))
-    if spec["ghost"][0]:
-        amount, off = spec["ghost"]
-        dx = int(round(off * long_side * strength * math.cos(math.radians(spec["angle"]))))
-        dy = int(round(-off * long_side * strength * math.sin(math.radians(spec["angle"]))))
-        ghost = torch.roll(x, shifts=(dy, dx), dims=(-2, -1))
-        x = x * (1 - amount * min(strength, 1.5)) + ghost * amount * min(strength, 1.5)
-    if spec["soft"]:
-        x = _conv(x, _gauss_kernel(max(0.4, spec["soft"] * long_side / 1400 * strength), x.device))
-    if spec["haze"]:
-        h = spec["haze"] * strength
-        x = x * (1 - h) + h * x.mean(dim=(-2, -1), keepdim=True).clamp(0.35, 0.65)
-    return x[0].permute(1, 2, 0).clamp(0, 1)
+    h, w = img.shape[:2]
+    length, ang, goff, ga, sigma, rot = PRESETS[preset]
+    length, goff, sigma, rot = length * strength, goff * strength, sigma * strength, rot * strength
+    ga = min(0.6, ga * strength) if strength > 1 else ga * strength
+    if rot:
+        t = math.radians(abs(rot))
+        s = max((w * math.cos(t) + h * math.sin(t)) / w, (w * math.sin(t) + h * math.cos(t)) / h)
+        m = cv2.getRotationMatrix2D((w / 2, h / 2), rot, s)
+        img = cv2.warpAffine(img, m, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+    if ga:
+        dx = int(round(goff * w * math.cos(math.radians(ang))))
+        dy = int(round(-goff * w * math.sin(math.radians(ang))))
+        m = np.float32([[1, 0, dx], [0, 1, dy]])
+        ghost = cv2.warpAffine(img, m, (w, h), borderMode=cv2.BORDER_REFLECT)
+        img = (1 - ga) * img + ga * ghost
+    if length:
+        img = cv2.filter2D(img, -1, _motion_kernel(length * w, ang), borderType=cv2.BORDER_REFLECT)
+    if sigma:
+        img = cv2.GaussianBlur(img, (0, 0), sigma * w)
+    return np.clip(img, 0, 255)
 
 
 class OnyxCameraShake:
-    """Add phone hand-shake / softness after the render (Candid Snap 'post' presets)."""
+    """Phone camera shake / softness after rendering (the Candid Snap shake.py presets)."""
 
     DESCRIPTION = (
-        "Phone camera shake after rendering: soft, shake_med (diagonal), shake_med_h (side-to-side "
-        "+ faint double image), shake_med_v, shake_med_rot (+ tilted frame), shake_heavy. Connect "
-        "Onyx Studio's post_preset to `preset_override` to use the preset the skill chose for "
-        "this image."
+        "shake.py as a node: soft, shake_med (diagonal), shake_med_h (side-to-side + double image), "
+        "shake_med_v, shake_med_rot (+ tilted frame), shake_heavy. Width-relative, so it looks the same at "
+        "any resolution. Wire Onyx Studio's `post` (or Onyx Post Style) to choose the preset per image."
     )
 
     @classmethod
@@ -133,14 +95,15 @@ class OnyxCameraShake:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "preset": (PRESETS, {"default": "shake_med"}),
-                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffff}),
+                "preset": (PRESET_NAMES, {"default": "shake_med"}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05,
+                                       "tooltip": "1 = shake.py exactly."}),
             },
             "optional": {
                 "preset_override": ("STRING", {"forceInput": True,
-                    "tooltip": "From Onyx Studio `post_preset`. When connected and not empty, it "
-                               "replaces the preset above ('none' = no shake for this image)."}),
+                    "tooltip": "A preset name as text (e.g. Onyx Studio's post_preset). Not empty = "
+                               "replaces the preset above; 'none' = no shake for this image."}),
+                **_onyx_post.POST_INPUT,
             },
         }
 
@@ -148,18 +111,24 @@ class OnyxCameraShake:
     FUNCTION = "apply"
     CATEGORY = "Onyx/Post"
 
-    def apply(self, images, preset, strength, seed, preset_override=None):
+    def apply(self, images, preset, strength, preset_override=None, onyx_post=None):
         ensure_profile_ready()
-        chosen = (preset_override or "").strip().lower() or preset
-        if chosen not in PRESETS:
-            print(f"⚠️  [Onyx Camera Shake] unknown preset '{chosen}' — using '{preset}'.")
-            chosen = preset
+        values, bypass = _onyx_post.apply("OnyxCameraShake", {"preset": preset, "strength": strength}, onyx_post)
+        if bypass:
+            return (images,)
+        chosen = (preset_override or "").strip().lower() or values["preset"]
+        if chosen not in PRESET_NAMES:
+            print(f"⚠️  [Onyx Camera Shake] unknown preset '{chosen}' — using '{values['preset']}'.")
+            chosen = values["preset"]
         if chosen == "none":
             return (images,)
+        import numpy as np
         import torch
-        rng = random.Random(seed)
-        out = [shake_frame(images[i], chosen, float(strength), rng) for i in range(images.shape[0])]
-        return (torch.stack(out, 0),)
+        out = []
+        for i in range(images.shape[0]):
+            arr = images[i, ..., :3].detach().cpu().numpy().astype(np.float32) * 255.0
+            out.append(torch.from_numpy(shake(arr, chosen, float(values["strength"])) / 255.0))
+        return (torch.stack(out, 0).to(images.dtype),)
 
 
 NODE_CLASS_MAPPINGS = {"OnyxCameraShake": OnyxCameraShake}

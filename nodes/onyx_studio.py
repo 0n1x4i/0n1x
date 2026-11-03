@@ -47,8 +47,9 @@ from .onyx_render_profile import ensure_profile_ready
 from ..utils import onyx_llm as _llm
 from ..utils import onyx_registry as _reg
 from ..utils.onyx_http import OnyxAPIError
+from ..utils import onyx_post as _onyx_post
 
-MODES = ["manual", "gallery", "idea", "recreate"]
+MODES = ["manual", "idea", "recreate"]   # "gallery" kept readable for old workflows
 _lock = threading.RLock()
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -122,24 +123,69 @@ def character(char_id: str) -> dict:
 
 
 def save_character(c: dict) -> dict:
+    """A character = its LoRA(s) and its trigger line. Nothing else is needed:
+    the skill and the LoRA own the rest."""
     with _lock:
         items = characters()
         c = {
             "id": c.get("id") or uuid.uuid4().hex[:10],
             "name": str(c.get("name") or "Character")[:60],
             "trigger_line": str(c.get("trigger_line") or "")[:300],
-            "body": str(c.get("body") or "")[:600],
-            "hair_lock": str(c.get("hair_lock") or "")[:600],
-            "extra_rules": str(c.get("extra_rules") or "")[:3000],
             "loras": [
-                {"lora": str(r.get("lora") or ""), "sm": float(r.get("sm", 1.0)), "sc": float(r.get("sc", r.get("sm", 1.0))),
-                 "on": bool(r.get("on", True))}
+                {"lora": str(r.get("lora") or ""), "sm": float(r.get("sm", 1.0)),
+                 "sc": float(r.get("sc", r.get("sm", 1.0))), "on": bool(r.get("on", True))}
                 for r in (c.get("loras") or []) if isinstance(r, dict) and r.get("lora")
             ],
         }
         items = [x for x in items if x.get("id") != c["id"]] + [c]
         _write("characters.json", items)
         return c
+
+
+def lora_trigger(name: str) -> str:
+    """The LoRA's own trigger: `modelspec.trigger_phrase` in its metadata, else the
+    most frequent training tag (kohya `ss_tag_frequency`), else ''."""
+    try:
+        import folder_paths
+        path = folder_paths.get_full_path("loras", name)
+    except Exception:
+        path = None
+    if not path:
+        return ""
+    try:
+        from .onyx_lora_trigger import read_trigger_phrase
+        phrase = read_trigger_phrase(path)
+        if phrase:
+            return phrase.strip()
+    except Exception:
+        pass
+    try:
+        import struct
+        with open(path, "rb") as fh:
+            (size,) = struct.unpack("<Q", fh.read(8))
+            meta = (json.loads(fh.read(size)).get("__metadata__") or {}) if 0 < size < 100 * 2 ** 20 else {}
+        freq = json.loads(meta.get("ss_tag_frequency") or "{}")
+        counts = {}
+        for tags in freq.values():
+            for tag, n in (tags or {}).items():
+                counts[tag.strip()] = counts.get(tag.strip(), 0) + int(n)
+        if counts:
+            return max(counts.items(), key=lambda kv: kv[1])[0]
+    except Exception:
+        pass
+    return ""
+
+
+def character_trigger(char: dict) -> str:
+    """The trigger to use: the one typed in the character, else its first active LoRA's own."""
+    if (char.get("trigger_line") or "").strip():
+        return char["trigger_line"].strip()
+    for r in char.get("loras") or []:
+        if r.get("on", True):
+            t = lora_trigger(r.get("lora", ""))
+            if t:
+                return t
+    return ""
 
 
 def delete_character(char_id: str) -> None:
@@ -224,11 +270,36 @@ def delete_skill(skill_id: str) -> None:
 
 
 def _grok_presets() -> dict:
+    """{"1": preset, ...} — string slots (the Grok node's loader returns int keys)."""
     try:
         from .grok_prompt import _load_presets
-        return _load_presets() or {}
+        return {str(k): v for k, v in (_load_presets() or {}).items()}
     except Exception:
         return {}
+
+
+_PRESET_TRIGGER_RE = re.compile(r'start(?:s)?\s+with\s*:?\s*"\s*([^"\n]{2,60}?)\s*"', re.I)
+
+
+def list_presets() -> list:
+    """Grok Prompt Generator presets, for recreate mode (image -> prompt)."""
+    out = []
+    for slot, p in sorted(_grok_presets().items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 99):
+        text = (p or {}).get("prompt", "")
+        if not text.strip():
+            continue
+        out.append({"slot": str(slot), "name": (p.get("name") or text.strip().splitlines()[0])[:70],
+                    "skill": p.get("skill", ""), "model": p.get("model", ""),
+                    "embedded_trigger": preset_trigger(p)})
+    return out
+
+
+def preset_trigger(p: dict) -> str:
+    """The trigger a preset hard-codes: its trigger_word field, or 'start with : "xxx"' in its text."""
+    if (p.get("trigger_word") or "").strip():
+        return p["trigger_word"].strip()
+    m = _PRESET_TRIGGER_RE.search(p.get("prompt", ""))
+    return m.group(1).strip() if m else ""
 
 
 def _worker_skills() -> dict:
@@ -258,18 +329,25 @@ def list_skills(include_worker: bool = True) -> list:
             out.append({"id": "file:" + fname, "name": m.get("name") or os.path.splitext(fname)[0],
                         "kind": "system", "source": "imported",
                         "locked_sentence": m.get("locked_sentence", "")})
-    for slot, p in sorted(_grok_presets().items(), key=lambda kv: str(kv[0])):
-        text = (p or {}).get("prompt", "")
-        if text.strip():
-            first = text.strip().splitlines()[0][:48]
-            out.append({"id": f"grok:{slot}", "name": f"Grok preset {slot} · {first}", "kind": "instruction",
-                        "source": "grok", "locked_sentence": ""})
     if include_worker:
         for sid, s in _worker_skills().items():
             out.append({"id": "worker:" + sid, "name": s.get("name") or sid,
                         "kind": s.get("kind", "system"), "source": "worker",
                         "locked_sentence": s.get("locked_sentence", "")})
     return out
+
+
+def resolve_skill(ref: str) -> str:
+    """A skill id from a loose reference: an exact id, or a word found in an imported
+    skill's name or file name ("candid" -> file:CANDID-SNAP-MASTER.txt)."""
+    ref = (ref or "").strip()
+    if not ref or ref.startswith(("file:", "worker:")):
+        return ref
+    low = ref.lower()
+    for s in list_skills(include_worker=False):
+        if low in s["id"].lower() or low in s["name"].lower():
+            return s["id"]
+    return ""
 
 
 def skill_text(skill_id: str) -> tuple:
@@ -298,7 +376,7 @@ def render_skill(text: str, meta: dict, char: dict, ratio: str = "") -> str:
     examples, which otherwise pull the model back to the skill author's
     character) and the locked sentence (e.g. the hair lock)."""
     values = {
-        "TRIGGER_LINE": char.get("trigger_line", ""),
+        "TRIGGER_LINE": character_trigger(char) if char else "",
         "BODY": char.get("body", ""),
         "RATIO": ratio,
         "OUTPUT": "chat",
@@ -337,7 +415,7 @@ def _gallery_text(entry_id: str, fallback: str) -> str:
 
 
 def _apply_trigger(prompt: str, char: dict, force: bool, from_llm: bool = False) -> str:
-    trig = (char.get("trigger_line") or "").strip()
+    trig = character_trigger(char) if char else ""
     prompt = prompt.replace("{trigger}", trig).strip()
     if force and trig and not prompt.lower().startswith(trig.lower()):
         lines = prompt.splitlines()
@@ -356,84 +434,127 @@ def _key_for(provider: str, keys: dict) -> str:
     return (keys.get(provider) or "").strip() or saved_key(provider)
 
 
+def _llm_common(state: dict, keys: dict, seed: int) -> dict:
+    provider = state.get("provider", "ollama")
+    return dict(provider=provider, model=state.get("model", ""),
+                api_key=_key_for(provider, keys), temperature=float(state.get("temperature", 0.7)),
+                max_tokens=int(state.get("max_tokens", 2048)), seed=seed or None,
+                ollama_url=state.get("ollama_url") or _llm.DEFAULT_OLLAMA_URL)
+
+
+def _chat(common: dict, **kw) -> str:
+    c = dict(common)
+    return _llm.chat(c.pop("provider"), c.pop("model"), **kw, **c)
+
+
 def generate(state: dict, image=None, keys: dict | None = None, seed: int = 0) -> dict:
-    """The prompt for one run. `image` is a PIL image (recreate mode)."""
+    """The prompt for one run. `image` is a PIL image (recreate mode).
+
+    manual    typed text; with `enhance` on, the chosen skill rewrites it (its FIX /
+              CHECK path) — the skill improves YOUR prompt, it does not replace it.
+    idea      the skill writes a prompt from an idea sentence.
+    recreate  a Grok Prompt Generator preset turns the batch image into a prompt; a
+              preset that names a skill also gets that skill as its rulebook.
+    The trigger is the character's (typed, or read from its LoRA); a trigger hard-coded
+    in a preset is replaced by it."""
     keys = keys or {}
     mode = state.get("mode", "manual")
     char = character(state.get("character_id", ""))
-    force_trigger = bool(state.get("force_trigger", True))
-    result = {"prompt": "", "notes": "", "ratio": "", "post": "", "mode": mode, "skill": ""}
-
-    if mode == "manual":
-        result["prompt"] = _apply_trigger(state.get("manual", ""), char, force_trigger)
-        return result
-    if mode == "gallery":
-        g = state.get("gallery") or {}
-        result["prompt"] = _apply_trigger(_gallery_text(g.get("id", ""), g.get("text", "")), char, force_trigger)
-        return result
-
-    skill_id = state.get("skill") or ""
-    if not skill_id:
-        raise RuntimeError("Onyx Studio: pick a skill (Prompt tab) for idea / recreate mode.")
-    text, kind, meta = skill_text(skill_id)
-    result["skill"] = skill_id
-    provider = state.get("provider", "ollama")
-    model = state.get("model", "")
-    temperature = float(state.get("temperature", 0.7))
-    max_tokens = int(state.get("max_tokens", 2048))
+    trig = character_trigger(char) if char else ""
+    force = bool(state.get("force_trigger", True))
+    result = {"prompt": "", "notes": "", "ratio": "", "post": "", "mode": mode, "skill": "", "preset": ""}
+    common = _llm_common(state, keys, seed)
     extra = (state.get("extra") or "").strip()
 
-    if mode == "recreate":
+    def skill_system(skill_id):
+        text, _kind, meta = skill_text(skill_id)
+        return render_skill(text, meta, char, state.get("ratio", ""))
+
+    if mode in ("manual", "gallery"):
+        base = state.get("manual", "") if mode == "manual" else \
+            _gallery_text((state.get("gallery") or {}).get("id", ""), (state.get("gallery") or {}).get("text", ""))
+        prompt = _apply_trigger(base, char, force)
+        if state.get("enhance") and state.get("skill") and prompt.strip():
+            result["skill"] = state["skill"]
+            answer = _chat(common, system=skill_system(state["skill"]),
+                           user=("fix: improve this prompt so it follows every rule, keep its scene, outfit, "
+                                 "pose and light.\n" + prompt + (f"\n{extra}" if extra else "") +
+                                 "\n\nReturn only the fixed prompt in one code block, then the NOTES line."))
+            parsed = _llm.parse_answer(answer)
+            if parsed["prompt"]:
+                result.update(parsed)
+                prompt = _apply_trigger(parsed["prompt"], char, force, from_llm=True)
+        result["prompt"] = prompt
+        return result
+
+    if mode == "idea":
+        if not state.get("skill"):
+            raise RuntimeError("Onyx Studio: idea mode needs a skill (Prompt tab).")
+        idea = (state.get("idea") or "").strip()
+        if not idea:
+            raise RuntimeError("Onyx Studio: idea mode — write the idea in the Prompt tab.")
+        system = skill_system(state["skill"])
+        result["skill"] = state["skill"]
+        answer = _chat(common, system=system,
+                       user=f"{idea}{chr(10) + extra if extra else ''}\n\n(Answer the request directly. Do not reply "
+                            f"READY. One prompt, in one code block, then the NOTES line.)")
+        parsed = _llm.parse_answer(answer)
+    elif mode == "recreate":
         if image is None:
             raise RuntimeError("Onyx Studio: recreate mode needs an image — add media to the batch "
                                "(Media tab) or connect the `image` input.")
-        images = [image]
-        request = "Recreate this reference photo."
-    else:
-        images = []
-        request = (state.get("idea") or "").strip()
-        if not request:
-            raise RuntimeError("Onyx Studio: idea mode — write the idea in the Prompt tab.")
-    if extra:
-        request += f"\n{extra}"
-
-    if kind == "instruction":                    # Grok preset style: the instruction goes with the image
+        slot = str(state.get("preset") or "")
+        p = _grok_presets().get(slot)
+        if not p:
+            raise RuntimeError("Onyx Studio: recreate mode — pick a Grok preset (Prompt tab).")
+        result["preset"] = slot
+        instruction = p.get("prompt", "")
         try:
             from .grok_prompt import _resolve_choices
-            text, _ = _resolve_choices(text, seed)
+            instruction, _ = _resolve_choices(instruction, seed)
         except Exception:
             pass
-        system, user = "", f"{text.strip()}\n\n{request}"
+        old = preset_trigger(p)
+        if old and trig:
+            instruction = instruction.replace(old, trig)
+        system = ""
+        if p.get("skill"):
+            sid = resolve_skill(p["skill"])
+            try:
+                system = skill_system(sid) if sid else ""
+                result["skill"] = sid
+            except Exception:
+                system = ""
+            if not system:
+                print(f"ℹ️  [Onyx Studio] preset {slot}: skill '{p['skill']}' not imported — the preset runs on its own "
+                      f"(import it in the Skills tab to add the full rulebook).")
+        user = instruction.strip()
+        if extra:
+            user += f"\n{extra}"
+        if trig:
+            user += f"\n\nTRIGGER LINE (line 1 of the prompt, alone): {trig}"
+        if system:
+            user += "\n\n(Do not reply READY. One prompt, in one code block, then the NOTES line.)"
+        answer = _chat(common, system=system, user=user, images=[image])
+        parsed = _llm.parse_answer(answer)
+        if old and trig:
+            parsed["prompt"] = parsed["prompt"].replace(old, trig)
     else:
-        system = render_skill(text, meta, char, state.get("ratio", ""))
-        user = (f"{request}\n\n(Answer the request directly. Do not reply READY. "
-                f"One prompt, in one code block, then the NOTES line.)")
+        raise RuntimeError(f"Onyx Studio: unknown mode '{mode}'.")
 
-    common = dict(api_key=_key_for(provider, keys), temperature=temperature, max_tokens=max_tokens,
-                  seed=seed or None, ollama_url=state.get("ollama_url") or _llm.DEFAULT_OLLAMA_URL)
-    answer = _llm.chat(provider, model, system=system, user=user, images=images, **common)
-    parsed = _llm.parse_answer(answer)
-
-    if state.get("double_check") and kind != "instruction" and parsed["prompt"]:
-        check = _llm.chat(provider, model, system=system,
-                          user=("check this\n" + parsed["prompt"] +
-                                "\n\nList nothing: return only the fixed prompt in one code block, "
-                                "then the NOTES line."), images=[], **common)
-        fixed = _llm.parse_answer(check)
+    if state.get("double_check") and result.get("skill") and parsed["prompt"]:
+        fixed = _llm.parse_answer(_chat(common, system=skill_system(result["skill"]),
+                                        user=("check this\n" + parsed["prompt"] +
+                                              "\n\nList nothing: return only the fixed prompt in one code "
+                                              "block, then the NOTES line.")))
         if fixed["prompt"]:
-            fixed["notes"] = fixed["notes"] or parsed["notes"]
-            fixed["ratio"] = fixed["ratio"] or parsed["ratio"]
-            fixed["post"] = fixed["post"] or parsed["post"]
+            for k in ("notes", "ratio", "post"):
+                fixed[k] = fixed[k] or parsed[k]
             parsed = fixed
-
-    if kind == "instruction":
-        trig = (meta or {}).get("trigger_word", "").strip()
-        if trig and not parsed["prompt"].lower().startswith(trig.lower()):
-            parsed["prompt"] = f"{trig} {parsed['prompt']}"
-    parsed["prompt"] = _apply_trigger(parsed["prompt"], char, force_trigger, from_llm=True)
+    parsed["prompt"] = _apply_trigger(parsed["prompt"], char, force, from_llm=True)
     result.update(parsed)
     if not result["prompt"]:
-        raise RuntimeError("Onyx Studio: the model returned no prompt. Raw answer: " + answer[:300])
+        raise RuntimeError("Onyx Studio: the model returned no prompt.")
     return result
 
 
@@ -462,11 +583,11 @@ class OnyxStudio:
     """Media batch + character LoRAs + prompt writing (manual, gallery, idea, recreate) in one node."""
 
     DESCRIPTION = (
-        "The creation hub: image + video batch, character LoRAs (applied to MODEL / CLIP), and the "
-        "prompt — typed, picked from the Prompt Gallery, or written by a skill through Ollama, local "
-        "Qwen3-VL, Grok, OpenRouter or Gemini (idea mode, or recreate mode from each batch image). "
-        "Outputs the patched MODEL / CLIP, positive and zeroed negative conditioning, the prompt, the "
-        "media, and the skill's notes (ratio, post preset for Onyx Camera Shake)."
+        "The creation hub: image + video batch, character LoRA + trigger (applied to MODEL / CLIP), and "
+        "the prompt — typed (optionally improved by a skill), sent from the Prompt Gallery, written from an "
+        "idea by a skill, or recreated from each batch image with your Grok presets. LLM: Ollama, local "
+        "Qwen3-VL, Grok, OpenRouter or Gemini. Outputs MODEL / CLIP, positive + zeroed negative, the "
+        "prompt, the media, the skill's notes, and `post` (ONYX_POST) for every Onyx post-processing node."
     )
 
     @classmethod
@@ -490,10 +611,11 @@ class OnyxStudio:
         })
         return {"required": required, "optional": optional, "hidden": {"unique_id": "UNIQUE_ID"}}
 
+    # `post` is LAST: outputs are linked by index, appending keeps saved links valid.
     RETURN_TYPES = ("MODEL", "CLIP", "CONDITIONING", "CONDITIONING", "STRING",
-                    "IMAGE", "IMAGE", "AUDIO", "FLOAT", "STRING", "STRING", "STRING")
+                    "IMAGE", "IMAGE", "AUDIO", "FLOAT", "STRING", "STRING", "STRING", _onyx_post.POST_TYPE)
     RETURN_NAMES = ("model", "clip", "positive", "negative", "prompt",
-                    "image", "video", "audio", "video_fps", "notes", "post_preset", "ratio")
+                    "image", "video", "audio", "video_fps", "notes", "post_preset", "ratio", "post")
     FUNCTION = "run"
     CATEGORY = "Onyx"
 
@@ -541,7 +663,8 @@ class OnyxStudio:
         except OnyxAPIError as e:
             raise RuntimeError(str(e)) from None
         prompt = res["prompt"]
-        add_history({"prompt": prompt, "notes": res["notes"], "mode": res["mode"], "skill": res["skill"]})
+        add_history({"prompt": prompt, "notes": res["notes"], "mode": res["mode"], "skill": res["skill"],
+                     "preset": res.get("preset", "")})
         print(f"🎬 [Onyx Studio] {res['mode']} prompt ({len(prompt)} chars)"
               + (f" · NOTES: {res['notes']}" if res["notes"] else ""))
 
@@ -561,11 +684,14 @@ class OnyxStudio:
             positive = clip.encode_from_tokens_scheduled(tokens)
             negative = _zero_out(positive)
 
+        post = _onyx_post.make(state.get("post_look", "none"), state.get("post_motion", "none"),
+                               auto_motion=res.get("post") or "")
+        res["post_look"], res["post_motion"] = post["look"], post["motion"]
         _notify(unique_id, res)
         return (model, clip, positive, negative, prompt,
                 out_image if out_image is not None else (image if image is not None else _placeholder()),
                 out_video if out_video is not None else _placeholder(),
-                audio, fps, res["notes"], res["post"] or "none", res["ratio"] or state.get("ratio", ""))
+                audio, fps, res["notes"], res["post"] or "none", res["ratio"] or state.get("ratio", ""), post)
 
 
 def _zero_out(cond):
@@ -633,7 +759,9 @@ def register_routes() -> None:
     async def _bootstrap(_r):
         loop = asyncio.get_running_loop()
         skills = await loop.run_in_executor(None, list_skills)
-        return ok(skills=skills, characters=characters(), keys=keys_status(),
+        return ok(skills=skills, presets=list_presets(), characters=characters(), keys=keys_status(),
+                  post_looks=[{"id": k, "info": _onyx_post.LOOK_INFO.get(k, "")} for k in _onyx_post.looks()],
+                  post_motions=_onyx_post.MOTIONS,
                   history=_read("history.json", [])[:30], loras=_lora_files(),
                   providers=[{"id": p, "label": _llm.PROVIDER_LABELS[p]} for p in _llm.PROVIDERS],
                   models={"xai": _reg.model_ids("grok", vision=True, include_deprecated=False),
@@ -685,6 +813,12 @@ def register_routes() -> None:
         delete_character((await request.json()).get("id", ""))
         return ok()
 
+    @inst.routes.get("/onyx/studio/lora_trigger")
+    async def _lora_trigger(request):
+        name = request.query.get("name", "")
+        trig = await asyncio.get_running_loop().run_in_executor(None, lora_trigger, name)
+        return ok(trigger=trig)
+
     @inst.routes.post("/onyx/studio/key")
     async def _key(request):
         body = await request.json()
@@ -720,7 +854,7 @@ def register_routes() -> None:
                 return generate(state, image=pil, seed=int(body.get("seed") or 0))
             res = await asyncio.get_running_loop().run_in_executor(None, work)
             add_history({"prompt": res["prompt"], "notes": res["notes"], "mode": res["mode"],
-                         "skill": res["skill"], "preview": True})
+                         "skill": res["skill"], "preset": res.get("preset", ""), "preview": True})
             return ok(**res)
         except Exception as e:
             return err(e, 200)

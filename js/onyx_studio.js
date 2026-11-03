@@ -1,8 +1,9 @@
 // Onyx Studio ✦ — the creation hub UI.
-// Tabs: Prompt (manual / gallery / idea / recreate) · Media (the batch panel of
-// the Batch Loader, embedded) · Character (LoRAs, trigger, locks) · Skills
-// (import .txt/.md, Grok presets, Worker skills) · Settings (keys, Ollama) ·
-// History. Everything the run needs is kept in the hidden `studio_state`
+// Modes: manual (optionally improved by a skill) · idea (skill) · recreate (Grok
+// presets, image -> prompt). Tabs: Prompt · Gallery (send any saved prompt to
+// the prompt) · Media (the Batch Loader's panel, embedded) · Character (LoRA +
+// trigger) · Skills (import .txt/.md) · Post (look + motion for every Onyx
+// post-processing node) · Settings (keys, Ollama) · History. Everything the run needs is kept in the hidden `studio_state`
 // widget (JSON); API keys are saved on this computer, never in the workflow.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
@@ -12,16 +13,16 @@ const NODE_SIZE = [780, 920];
 const PANEL_MIN_H = 600;
 const RATIOS = ["9:16", "3:4", "4:5", "1:1", "2:3", "16:9"];
 const MODE_INFO = {
-  manual:   { icon: "✍️", label: "Manual",   hint: "Type the prompt. {trigger} = the character's trigger line." },
-  gallery:  { icon: "🖼️", label: "Gallery",  hint: "Pick a prompt from the Onyx Prompt Gallery library." },
+  manual:   { icon: "✍️", label: "Manual",   hint: "Your prompt. {trigger} = the character's trigger. Optionally improved by a skill." },
   idea:     { icon: "💡", label: "Idea",     hint: "Describe a scene: the skill + LLM writes the prompt." },
-  recreate: { icon: "🎯", label: "Recreate", hint: "Each batch image is rewritten as a prompt for your character." },
+  recreate: { icon: "🎯", label: "Recreate", hint: "Each batch image becomes a prompt for your character, with a Grok preset." },
 };
+const LABEL = { manual: "Manual", gallery: "Gallery", idea: "Idea", recreate: "Recreate" };
 const DEFAULT_STATE = {
   mode: "manual", manual: "", idea: "", extra: "", gallery: null,
   skill: "", character_id: "", provider: "ollama", model: "", ollama_url: "http://127.0.0.1:11434",
   temperature: 0.7, max_tokens: 2048, double_check: false, force_trigger: true, ratio: "9:16",
-  extra_loras: [], tab: "prompt",
+  extra_loras: [], tab: "prompt", enhance: false, preset: "", post_look: "none", post_motion: "none",
 };
 
 // ── tiny DOM helpers ─────────────────────────────────────────────────────────
@@ -154,9 +155,19 @@ function setupStudio(node) {
   injectStyle();
   const W = (n) => node.widgets?.find((w) => w.name === n);
   let state = { ...DEFAULT_STATE };
-  let boot = { skills: [], characters: [], keys: {}, history: [], loras: [], providers: [], models: {} };
+  let boot = { skills: [], presets: [], characters: [], keys: {}, history: [], loras: [], providers: [], models: {}, post_looks: [], post_motions: [] };
+  const triggerCache = {};
+  async function loraTrigger(name) {
+    if (!name) return "";
+    if (!(name in triggerCache)) {
+      const r = await getJSON("/onyx/studio/lora_trigger?name=" + encodeURIComponent(name)).catch(() => ({}));
+      triggerCache[name] = r.trigger || "";
+    }
+    return triggerCache[name];
+  }
   let ollamaModels = [];
   let gallery = [];
+  let galleryLoaded = false;
   let lastResult = null;
   let busy = false;
 
@@ -185,7 +196,7 @@ function setupStudio(node) {
   const modeSeg = h("div", { class: "ost-seg" });
   const head = h("div", { class: "ost-head" }, h("div", { class: "ost-logo" }, "ONYX STUDIO ✦"), charPill, modeSeg);
 
-  const TABS = [["prompt", "✍️ Prompt"], ["media", "🎞️ Media"], ["character", "🧑 Character"], ["skills", "📚 Skills"], ["settings", "⚙️ Settings"], ["history", "🕘 History"]];
+  const TABS = [["prompt", "✍️ Prompt"], ["gallery", "🖼️ Gallery"], ["media", "🎞️ Media"], ["character", "🧑 Character"], ["skills", "📚 Skills"], ["post", "🎛️ Post"], ["settings", "⚙️ Settings"], ["history", "🕘 History"]];
   const tabsBar = h("div", { class: "ost-tabs" });
   const body = h("div", { class: "ost-body" });
   const pages = {};
@@ -238,11 +249,11 @@ function setupStudio(node) {
   // ── preview (Generate now) ─────────────────────────────────────────────────
   async function preview() {
     if (busy) return;
-    if (state.mode === "manual" || state.mode === "gallery") {
-      showResult({ prompt: state.mode === "manual" ? state.manual : (state.gallery?.text || ""), notes: "", mode: state.mode });
+    const items = batchItems();
+    if (state.mode === "manual" && !state.enhance) {
+      showResult({ prompt: state.manual, notes: "", mode: "manual" });
       return;
     }
-    const items = batchItems();
     const media = state.mode === "recreate" ? (items.find((m) => m.filename === state.preview_media) || items[0])?.filename : undefined;
     if (state.mode === "recreate" && !media) { toast("Recreate: add an image to the batch (Media tab).", "warn"); return; }
     busy = true; genBtn.innerHTML = '<span class="ost-spin"></span>Writing…'; genBtn.disabled = true;
@@ -258,7 +269,7 @@ function setupStudio(node) {
     outBox.className = "ost-out" + (r.prompt ? "" : " empty");
     outBox.textContent = r.prompt || "(empty)";
     fill(chips, 
-      h("span", { class: "ost-chip" }, MODE_INFO[r.mode]?.label || r.mode || ""),
+      h("span", { class: "ost-chip" }, LABEL[r.mode] || r.mode || ""),
       r.ratio ? h("span", { class: "ost-chip" }, "ratio " + r.ratio) : null,
       r.post && r.post !== "none" ? h("span", { class: "ost-chip post", title: "Connect post_preset to Onyx Camera Shake" }, "post: " + r.post) : null,
       r.prompt ? h("span", { class: "ost-chip", style: "color:var(--dim)" }, `${r.prompt.split(/\s+/).length} words`) : null,
@@ -269,6 +280,8 @@ function setupStudio(node) {
   function render() {
     renderHeader();
     if (state.tab === "prompt") renderPrompt();
+    if (state.tab === "gallery") renderGallery();
+    if (state.tab === "post") renderPost();
     if (state.tab === "character") renderCharacter();
     if (state.tab === "skills") renderSkills();
     if (state.tab === "settings") renderSettings();
@@ -276,7 +289,8 @@ function setupStudio(node) {
   }
   function renderHeader() {
     const c = curChar();
-    fill(charPill, "🧑 ", c ? h("b", {}, c.name) : h("span", { style: "color:var(--dim)" }, "no character"));
+    fill(charPill, "🧑 ", c ? h("b", {}, c.name) : h("span", { style: "color:var(--dim)" }, "no character"),
+      state.post_look && state.post_look !== "none" ? h("span", { style: "color:#ffc58a;margin-left:6px" }, "· 🎛️ " + state.post_look) : null);
     fill(modeSeg, ...Object.entries(MODE_INFO).map(([k, m]) =>
       h("button", { class: state.mode === k ? "on" : "", title: m.hint, onclick: () => set({ mode: k, tab: "prompt" }) }, `${m.icon} ${m.label}`)));
     const counts = { media: batchItems().length, skills: boot.skills.length, character: boot.characters.length };
@@ -284,7 +298,7 @@ function setupStudio(node) {
       h("div", { class: "ost-tab" + (state.tab === id ? " on" : ""), onclick: () => set({ tab: id }) }, label,
         counts[id] ? h("span", { class: "n" }, counts[id]) : null)));
     for (const [id] of TABS) pages[id].classList.toggle("on", state.tab === id);
-    genBtn.style.display = state.mode === "idea" || state.mode === "recreate" ? "" : "none";
+    genBtn.style.display = state.mode === "idea" || state.mode === "recreate" || (state.mode === "manual" && state.enhance) ? "" : "none";
   }
 
   // ── Prompt tab ─────────────────────────────────────────────────────────────
@@ -313,61 +327,66 @@ function setupStudio(node) {
         h("div", { class: "ost-col", style: "max-width:100px" }, h("label", {}, "Max tokens"), maxT)),
       keyInfo ? h("div", { class: "ost-row" }, keyInfo) : null);
   }
-  function skillCard() {
-    const sel = h("select", { onchange: (e) => set({ skill: e.target.value }) },
+  function skillSelect(onPick) {
+    return h("select", { onchange: (e) => onPick(e.target.value) },
       h("option", { value: "" }, "— choose a skill —"),
-      ["imported", "grok", "worker"].map((src) => {
-        const list = boot.skills.filter((s) => s.source === src);
+      ["imported", "worker"].map((src) => {
+        const list = boot.skills.filter((sk) => sk.source === src);
         if (!list.length) return null;
-        return h("optgroup", { label: src === "imported" ? "Imported skills" : src === "grok" ? "Grok Prompt Generator presets" : "Onyx skills (Worker)" },
-          list.map((s) => h("option", { value: s.id, selected: state.skill === s.id ? "selected" : null }, s.name)));
+        return h("optgroup", { label: src === "imported" ? "Imported skills" : "Onyx skills (Worker)" },
+          list.map((sk) => h("option", { value: sk.id, selected: state.skill === sk.id ? "selected" : null }, sk.name)));
       }));
+  }
+  function skillCard(title = "Skill") {
     const ratio = h("select", { onchange: (e) => set({ ratio: e.target.value }, false) }, RATIOS.map((r) => h("option", { value: r, selected: state.ratio === r ? "selected" : null }, r)));
     const sk = curSkill();
-    return h("div", { class: "ost-card" }, h("h4", {}, "Skill"),
+    return h("div", { class: "ost-card" }, h("h4", {}, title),
       h("div", { class: "ost-row" },
-        h("div", { class: "ost-col", style: "flex:3" }, h("label", {}, "Prompting style"), sel),
+        h("div", { class: "ost-col", style: "flex:3" }, h("label", {}, "Prompting style"), skillSelect((v) => set({ skill: v }))),
         h("div", { class: "ost-col", style: "max-width:90px" }, h("label", {}, "Ratio"), ratio)),
       h("div", { class: "ost-row" },
         toggle("Double-check pass", state.double_check, (v) => set({ double_check: v }, false), "A second call checks the prompt against the skill's rules and returns the fixed version (the two-chat method)."),
-        toggle("Force trigger line", state.force_trigger, (v) => set({ force_trigger: v }, false), "Line 1 is always the character's trigger line."),
-        sk ? h("span", { class: "ost-hint" }, sk.kind === "instruction" ? "instruction sent with the image" : "used as system prompt", sk.locked_sentence ? " · locked sentence swapped" : "") : null),
+        sk?.locked_sentence ? h("span", { class: "ost-hint" }, "rulebook with locked sentences") : null),
       !boot.skills.length ? h("div", { class: "ost-hint" }, "No skill yet: import one in the Skills tab (e.g. CANDID-SNAP-MASTER.txt).") : null);
+  }
+  function triggerHint() {
+    const c = curChar();
+    const span = h("span", { class: "ost-hint" }, c ? "trigger: …" : "no character — pick one in the Character tab");
+    if (c) (async () => {
+      let t = (c.trigger_line || "").trim(), src = "typed";
+      if (!t) { for (const r of c.loras || []) { if (r.on !== false) { t = await loraTrigger(r.lora); if (t) { src = "from LoRA"; break; } } } }
+      span.textContent = t ? `trigger: ${t} (${src})` : "⚠️ no trigger: the LoRA has none in its metadata — type it in the Character tab";
+    })();
+    return span;
   }
   function renderPrompt() {
     const p = pages.prompt;
-    const m = state.mode;
+    const m = state.mode === "gallery" ? "manual" : state.mode;
     const info = h("div", { class: "ost-hint", style: "margin-bottom:8px" }, MODE_INFO[m].icon, " ", MODE_INFO[m].hint);
+    const extra = h("input", { type: "text", value: state.extra, placeholder: m === "recreate" ? 'Optional: "curvy", "night instead", "same outfit"…' : m === "manual" ? 'Optional note for the skill: "keep it at night"…' : 'Optional: "outdoor only", "flash"…',
+      onchange: (e) => set({ extra: e.target.value }, false) });
     if (m === "manual") {
-      const ta = h("textarea", { style: "min-height:260px", placeholder: "{trigger}\nWaist-up shot, A candid phone snapshot of …", value: state.manual,
+      const ta = h("textarea", { style: "min-height:240px", placeholder: "{trigger}\nWaist-up shot, A candid phone snapshot of …", value: state.manual,
         oninput: (e) => { state.manual = e.target.value; saveState(); } });
       fill(p, info, h("div", { class: "ost-card" }, h("h4", {}, "Prompt"), ta,
-        h("div", { class: "ost-row", style: "margin-top:8px" }, toggle("Force trigger line", state.force_trigger, (v) => set({ force_trigger: v }, false)),
-          h("span", { class: "ost-hint" }, `${(state.manual || "").split(/\s+/).filter(Boolean).length} words`))));
+          h("div", { class: "ost-row", style: "margin-top:8px" },
+            toggle("Force trigger line", state.force_trigger, (v) => set({ force_trigger: v }, false)),
+            triggerHint(),
+            h("span", { class: "ost-hint", style: "margin-left:auto" }, `${(state.manual || "").split(/\s+/).filter(Boolean).length} words`),
+            h("button", { class: "ost-btn ghost", onclick: () => set({ tab: "gallery" }) }, "🖼️ From gallery…"))),
+        h("div", { class: "ost-card" }, h("h4", {}, "Improve with a skill"),
+          h("div", { class: "ost-row" },
+            toggle("Improve my prompt with a skill", state.enhance, (v) => set({ enhance: v }), "The skill rewrites YOUR prompt to follow its rules (its fix / check path): same scene, outfit, pose and light."),
+            state.enhance ? h("div", { class: "ost-col", style: "flex:2" }, skillSelect((v) => set({ skill: v }))) : null),
+          state.enhance ? h("div", { class: "ost-row" }, extra) : h("div", { class: "ost-hint" }, "Off: the prompt is used exactly as typed.")),
+        state.enhance ? llmCard() : null);
       return;
     }
-    if (m === "gallery") {
-      if (!gallery.length) loadGallery();
-      const q = (state.gallery_q || "").toLowerCase();
-      const items = gallery.filter((e) => !q || (e.name + " " + e.prompt + " " + (e.tags || []).join(" ")).toLowerCase().includes(q));
-      const search = h("input", { type: "text", style: "flex:1;width:auto", placeholder: "Search the gallery…", value: state.gallery_q || "",
-        oninput: (e) => { state.gallery_q = e.target.value; saveState(); renderPrompt(); setTimeout(() => p.querySelector("input")?.focus(), 0); } });
-      const grid = h("div", { class: "ost-grid" }, items.map((e) => h("div", {
-        class: "ost-gal" + (state.gallery?.id === e.id ? " on" : ""), title: e.prompt,
-        onclick: () => { set({ gallery: { id: e.id, text: e.prompt } }); showResult({ prompt: e.prompt, mode: "gallery" }); } },
-        e.thumb ? h("img", { src: api.apiURL("/onyx/prompt_library/thumb?id=" + e.id), loading: "lazy" }) : h("div", { class: "ph" }, "✦"),
-        h("div", { class: "t" }, e.name))));
-      fill(p, info, h("div", { class: "ost-row", style: "flex-wrap:nowrap" }, search, h("button", { class: "ost-btn ghost", onclick: loadGallery }, "↻")),
-        items.length ? grid : h("div", { class: "ost-empty" }, gallery.length ? "No match." : "The gallery is empty — save prompts with ★ Save or the Onyx Prompt Saver node."),
-        state.gallery ? h("div", { class: "ost-card", style: "margin-top:10px" }, h("h4", {}, "Selected"), h("div", { class: "ost-pre" }, state.gallery.text)) : null);
-      return;
-    }
-    const extra = h("input", { type: "text", value: state.extra, placeholder: m === "recreate" ? 'Optional: "curvy", "night instead", "same outfit"…' : 'Optional: "10 different lights", "outdoor only"…',
-      onchange: (e) => set({ extra: e.target.value }, false) });
     if (m === "idea") {
       const idea = h("textarea", { style: "min-height:110px", placeholder: "gas station at night eating chips", value: state.idea,
         oninput: (e) => { state.idea = e.target.value; saveState(); } });
-      fill(p, info, h("div", { class: "ost-card" }, h("h4", {}, "Idea"), idea, h("div", { class: "ost-row", style: "margin-top:8px" }, extra)),
+      fill(p, info, h("div", { class: "ost-card" }, h("h4", {}, "Idea"), idea, h("div", { class: "ost-row", style: "margin-top:8px" }, extra),
+          h("div", { class: "ost-row" }, triggerHint())),
         skillCard(), llmCard());
       return;
     }
@@ -375,51 +394,130 @@ function setupStudio(node) {
     const items = batchItems();
     const pick = h("select", { onchange: (e) => set({ preview_media: e.target.value }, false) },
       items.map((it) => h("option", { value: it.filename, selected: state.preview_media === it.filename ? "selected" : null }, (it.is_video ? "🎬 " : "🖼️ ") + (it.name || it.filename))));
+    const presetSel = h("select", { onchange: (e) => set({ preset: e.target.value }) },
+      h("option", { value: "" }, "— choose a Grok preset —"),
+      boot.presets.map((pr) => h("option", { value: pr.slot, selected: String(state.preset) === pr.slot ? "selected" : null },
+        `${pr.slot} · ${pr.name}${pr.skill ? "  ✦ " + pr.skill : ""}`)));
+    const pr = boot.presets.find((x) => x.slot === String(state.preset));
     fill(p, info,
       h("div", { class: "ost-card" }, h("h4", {}, "Source images"),
         items.length
           ? h("div", { class: "ost-row" }, h("span", { class: "ost-hint" }, `${items.length} item(s) in the batch — each run rewrites the next one. Queue All in the Media tab runs them all.`))
           : h("div", { class: "ost-row" }, h("span", { class: "ost-hint" }, "The batch is empty."), h("button", { class: "ost-btn", onclick: () => set({ tab: "media" }) }, "Add media →")),
-        items.length ? h("div", { class: "ost-row" }, h("div", { class: "ost-col" }, h("label", {}, "Preview with"), pick)) : null,
-        h("div", { class: "ost-row" }, extra)),
-      skillCard(), llmCard());
+        items.length ? h("div", { class: "ost-row" }, h("div", { class: "ost-col" }, h("label", {}, "Preview with"), pick)) : null),
+      h("div", { class: "ost-card" }, h("h4", {}, "Grok preset (image → prompt)"),
+        h("div", { class: "ost-row" }, presetSel),
+        pr ? h("div", { class: "ost-row" },
+          pr.embedded_trigger ? h("span", { class: "ost-hint" }, `preset trigger “${pr.embedded_trigger}” → replaced by the character's`) : null,
+          pr.skill ? h("span", { class: "ost-hint" }, `✦ uses the “${pr.skill}” skill as rulebook (if imported)`) : null) : null,
+        h("div", { class: "ost-row" }, triggerHint()),
+        h("div", { class: "ost-row" }, extra),
+        h("div", { class: "ost-row" }, toggle("Double-check pass", state.double_check, (v) => set({ double_check: v }, false), "Only for presets linked to a skill."))),
+      llmCard());
+  }
+
+  // ── Gallery tab ────────────────────────────────────────────────────────────
+  function renderGallery() {
+    const p = pages.gallery;
+    if (!gallery.length && !galleryLoaded) { galleryLoaded = true; loadGallery(); }
+    const q = (state.gallery_q || "").toLowerCase();
+    const items = gallery.filter((e) => !q || (e.name + " " + e.prompt + " " + (e.tags || []).join(" ")).toLowerCase().includes(q));
+    const search = h("input", { type: "text", style: "flex:1;width:auto", placeholder: "Search the Prompt Gallery…", value: state.gallery_q || "",
+      oninput: (e) => { state.gallery_q = e.target.value; renderGallery(); setTimeout(() => { const i = p.querySelector("input"); i?.focus(); i?.setSelectionRange(i.value.length, i.value.length); }, 0); } });
+    const sel = gallery.find((e) => e.id === state.gallery_sel);
+    const send = (how) => {
+      if (!sel) return;
+      const cur = state.manual || "";
+      const text = how === "append" && cur.trim() ? cur.replace(/\s+$/, "") + "\n" + sel.prompt : sel.prompt;
+      set({ mode: "manual", manual: text, tab: "prompt" });
+      toast(how === "append" ? "Gallery prompt appended." : "Gallery prompt sent to the prompt.", "success");
+    };
+    fill(p,
+      h("div", { class: "ost-row", style: "flex-wrap:nowrap" }, search, h("button", { class: "ost-btn ghost", onclick: () => { galleryLoaded = false; gallery = []; renderGallery(); } }, "↻")),
+      sel ? h("div", { class: "ost-card" }, h("h4", {}, sel.name), h("div", { class: "ost-pre" }, sel.prompt),
+        h("div", { class: "ost-row", style: "margin-top:8px" },
+          h("button", { class: "ost-btn pri", onclick: () => send("replace") }, "⤵ Use as prompt"),
+          h("button", { class: "ost-btn", onclick: () => send("append") }, "＋ Append to my prompt"),
+          h("button", { class: "ost-btn ghost", onclick: () => navigator.clipboard?.writeText(sel.prompt) }, "⧉ Copy"))) : null,
+      items.length ? h("div", { class: "ost-grid" }, items.map((e) => h("div", {
+          class: "ost-gal" + (state.gallery_sel === e.id ? " on" : ""), title: e.prompt,
+          onclick: () => { state.gallery_sel = e.id; saveState(); renderGallery(); },
+          ondblclick: () => { state.gallery_sel = e.id; send("replace"); } },
+          e.thumb ? h("img", { src: api.apiURL("/onyx/prompt_library/thumb?id=" + e.id), loading: "lazy" }) : h("div", { class: "ph" }, "✦"),
+          h("div", { class: "t" }, e.name))))
+        : h("div", { class: "ost-empty" }, gallery.length ? "No match." : "The gallery is empty — save prompts with ★ Save or the Onyx Prompt Saver node."),
+      h("div", { class: "ost-hint", style: "margin-top:8px" }, "Click to preview, double-click to use it directly."));
+  }
+
+  // ── Post tab ───────────────────────────────────────────────────────────────
+  function renderPost() {
+    const p = pages.post;
+    const looks = boot.post_looks.length ? boot.post_looks : [{ id: "none", info: "" }];
+    const motions = boot.post_motions.length ? boot.post_motions : ["none"];
+    const motionInfo = { none: "No camera shake.", auto: "The preset the skill wrote in its NOTES line.", soft: "Slightly soft / hazy, no smear.",
+      shake_med: "Diagonal hand-shake, eyes still readable.", shake_med_h: "Side-to-side smear + faint double image.",
+      shake_med_v: "Up-and-down smear.", shake_med_rot: "Smear + tilted frame.", shake_heavy: "Strong smear, flash-in-the-dark style." };
+    fill(p,
+      h("div", { class: "ost-hint", style: "margin-bottom:8px" }, "🎛️ Wire the node's ", h("b", {}, "post"), " output to the onyx_post input of your post-processing nodes. A look other than none overrides their settings; none = each node keeps its own."),
+      h("div", { class: "ost-card" }, h("h4", {}, "Look"),
+        h("div", { class: "ost-grid", style: "grid-template-columns:repeat(auto-fill,minmax(170px,1fr))" }, looks.map((l) => h("div", {
+          class: "ost-item" + (state.post_look === l.id ? " on" : ""), style: "flex-direction:column;align-items:flex-start;gap:3px",
+          onclick: () => set({ post_look: l.id }) }, h("div", { class: "ttl" }, l.id), h("div", { class: "sub", style: "white-space:normal" }, l.info || ""))))),
+      h("div", { class: "ost-card" }, h("h4", {}, "Motion (Onyx Camera Shake)"),
+        h("div", { class: "ost-grid", style: "grid-template-columns:repeat(auto-fill,minmax(170px,1fr))" }, motions.map((m) => h("div", {
+          class: "ost-item" + (state.post_motion === m ? " on" : ""), style: "flex-direction:column;align-items:flex-start;gap:3px",
+          onclick: () => set({ post_motion: m }) }, h("div", { class: "ttl" }, m), h("div", { class: "sub", style: "white-space:normal" }, motionInfo[m] || ""))))));
   }
 
   // ── Character tab ──────────────────────────────────────────────────────────
   let draft = null;
+  function loraRowsEditor(rows, onChange, autoTrigger) {
+    const box = h("div", {});
+    const draw = () => fill(box,
+      h("div", { class: "ost-lora", style: "color:var(--dim);font-size:11px" }, h("span"), h("span", {}, "LoRA file"), h("span", {}, "model"), h("span", {}, "clip"), h("span")),
+      ...rows.map((r, i) => h("div", { class: "ost-lora" },
+        h("input", { type: "checkbox", checked: r.on !== false, onchange: (e) => { r.on = e.target.checked; onChange(); } }),
+        h("select", { onchange: async (e) => { r.lora = e.target.value; onChange(); if (autoTrigger) autoTrigger(r.lora); } },
+          [r.lora, ...boot.loras.filter((x) => x !== r.lora)].filter(Boolean).map((f) => h("option", { value: f, selected: f === r.lora ? "selected" : null }, f))),
+        h("input", { type: "number", step: 0.05, value: r.sm ?? 1, onchange: (e) => { r.sm = Number(e.target.value); onChange(); } }),
+        h("input", { type: "number", step: 0.05, value: r.sc ?? r.sm ?? 1, onchange: (e) => { r.sc = Number(e.target.value); onChange(); } }),
+        h("button", { class: "ost-btn ghost bad", style: "padding:4px 6px", onclick: () => { rows.splice(i, 1); onChange(); draw(); } }, "✕"))),
+      h("button", { class: "ost-btn", onclick: () => { rows.push({ lora: boot.loras[0] || "", sm: 1, sc: 1, on: true }); onChange(); draw(); if (autoTrigger) autoTrigger(boot.loras[0]); } }, "+ LoRA"));
+    draw();
+    return box;
+  }
   function renderCharacter() {
     const p = pages.character;
     const list = h("div", { class: "ost-list" },
       boot.characters.map((c) => h("div", { class: "ost-item" + (state.character_id === c.id ? " on" : ""),
         onclick: () => { draft = null; set({ character_id: c.id }); } },
-        h("div", { class: "grow" }, h("div", { class: "ttl" }, c.name), h("div", { class: "sub" }, c.trigger_line || "no trigger")),
+        h("div", { class: "grow" }, h("div", { class: "ttl" }, c.name), h("div", { class: "sub" }, c.trigger_line || "trigger from LoRA")),
         h("span", { class: "ost-badge" }, `${(c.loras || []).length} LoRA`))),
-      h("button", { class: "ost-btn", onclick: () => { draft = { name: "New character", trigger_line: "", body: "", hair_lock: "", extra_rules: "", loras: [] }; renderCharacter(); } }, "+ New character"),
+      h("button", { class: "ost-btn", onclick: () => { draft = { name: "New character", trigger_line: "", loras: [] }; renderCharacter(); } }, "+ New character"),
       state.character_id ? h("button", { class: "ost-btn ghost", onclick: () => set({ character_id: "" }) }, "Use no character") : null);
     const c = draft || (curChar() ? JSON.parse(JSON.stringify(curChar())) : null);
-    if (!c) { fill(p, h("div", { class: "ost-split" }, list, h("div", { class: "ost-empty" }, "Select or create a character: its LoRAs are applied to MODEL / CLIP, and its trigger line, body and hair lock fill the skill."))); return; }
+    if (!c) {
+      fill(p, h("div", { class: "ost-split" }, list, h("div", { class: "ost-empty" }, "A character = its LoRA + its trigger word. Create one: the LoRA is applied to MODEL / CLIP and the trigger starts every prompt.")));
+      return;
+    }
     draft = c;
-    const field = (label, key, ph, area) => h("div", { class: "ost-col" }, h("label", {}, label),
-      area ? h("textarea", { style: "min-height:56px", value: c[key] || "", placeholder: ph, oninput: (e) => { c[key] = e.target.value; } })
-           : h("input", { type: "text", value: c[key] || "", placeholder: ph, oninput: (e) => { c[key] = e.target.value; } }));
-    const loraRows = h("div", {});
-    const drawLoras = () => fill(loraRows, 
-      h("div", { class: "ost-lora", style: "color:var(--dim);font-size:11px" }, h("span"), h("span", {}, "LoRA file"), h("span", {}, "model"), h("span", {}, "clip"), h("span")),
-      ...(c.loras || []).map((r, i) => h("div", { class: "ost-lora" },
-        h("input", { type: "checkbox", checked: r.on !== false, onchange: (e) => { r.on = e.target.checked; } }),
-        h("select", { onchange: (e) => { r.lora = e.target.value; } }, [r.lora, ...boot.loras.filter((x) => x !== r.lora)].filter(Boolean).map((f) => h("option", { value: f, selected: f === r.lora ? "selected" : null }, f))),
-        h("input", { type: "number", step: 0.05, value: r.sm ?? 1, onchange: (e) => { r.sm = Number(e.target.value); } }),
-        h("input", { type: "number", step: 0.05, value: r.sc ?? r.sm ?? 1, onchange: (e) => { r.sc = Number(e.target.value); } }),
-        h("button", { class: "ost-btn ghost bad", style: "padding:4px 6px", onclick: () => { c.loras.splice(i, 1); drawLoras(); } }, "✕"))),
-      h("button", { class: "ost-btn", onclick: () => { (c.loras ||= []).push({ lora: boot.loras[0] || "", sm: 1, sc: 1, on: true }); drawLoras(); } }, "+ LoRA"));
-    drawLoras();
+    const trigInput = h("input", { type: "text", value: c.trigger_line || "", placeholder: "empty = read from the LoRA", oninput: (e) => { c.trigger_line = e.target.value; } });
+    const trigInfo = h("span", { class: "ost-hint" });
+    const autoTrigger = async (name) => {
+      const t = await loraTrigger(name);
+      trigInfo.textContent = t ? `LoRA trigger: ${t}` : "this LoRA has no trigger in its metadata — type it";
+      if (t && !c.trigger_line) { trigInput.placeholder = `${t} (from LoRA)`; }
+    };
+    const firstOn = (c.loras || []).find((r) => r.on !== false);
+    if (firstOn) autoTrigger(firstOn.lora);
     const editor = h("div", {},
-      h("div", { class: "ost-card" }, h("h4", {}, "Identity"),
-        h("div", { class: "ost-row" }, field("Name", "name", "Mia"), field("Trigger line", "trigger_line", "candid_snap, mia woman")),
-        h("div", { class: "ost-row" }, field("Body (fills BODY in the skill)", "body", "a slim woman with …", true)),
-        h("div", { class: "ost-row" }, field("Hair lock — replaces the skill's locked sentence", "hair_lock", "Her long wavy auburn hair falls past her shoulders.", true)),
-        h("div", { class: "ost-row" }, field("Extra rules (appended to the skill)", "extra_rules", "Feet in frame: white sneakers. Never glasses.", true))),
-      h("div", { class: "ost-card" }, h("h4", {}, "Character LoRAs (applied to MODEL / CLIP)"), loraRows),
+      h("div", { class: "ost-card" }, h("h4", {}, "Character"),
+        h("div", { class: "ost-row" },
+          h("div", { class: "ost-col" }, h("label", {}, "Name"), h("input", { type: "text", value: c.name || "", oninput: (e) => { c.name = e.target.value; } })),
+          h("div", { class: "ost-col", style: "flex:2" }, h("label", {}, "Trigger word"), trigInput)),
+        h("div", { class: "ost-row" }, trigInfo,
+          h("button", { class: "ost-btn ghost", style: "margin-left:auto", onclick: async () => { const r = (c.loras || []).find((x) => x.on !== false); const t = r ? await loraTrigger(r.lora) : ""; if (t) { c.trigger_line = t; trigInput.value = t; } else toast("No trigger in this LoRA's metadata.", "warn"); } }, "↧ Fill from LoRA"))),
+      h("div", { class: "ost-card" }, h("h4", {}, "Character LoRA(s) — applied to MODEL / CLIP"), loraRowsEditor((c.loras ||= []), () => {}, autoTrigger)),
       h("div", { class: "ost-row" },
         h("button", { class: "ost-btn pri", onclick: async () => {
           const r = await postJSON("/onyx/studio/character/save", { character: c });
@@ -431,18 +529,11 @@ function setupStudio(node) {
           if (!confirm(`Delete ${c.name}?`)) return;
           await postJSON("/onyx/studio/character/delete", { id: c.id });
           boot.characters = boot.characters.filter((x) => x.id !== c.id); draft = null; set({ character_id: "" });
-        } }, "Delete") : null));
-    // Workflow-only LoRAs
-    const extra = h("div", { class: "ost-card" }, h("h4", {}, "Extra LoRAs — this workflow only"),
-      ...(state.extra_loras || []).map((r, i) => h("div", { class: "ost-lora" },
-        h("input", { type: "checkbox", checked: r.on !== false, onchange: (e) => { r.on = e.target.checked; saveState(); } }),
-        h("select", { onchange: (e) => { r.lora = e.target.value; saveState(); } }, [r.lora, ...boot.loras.filter((x) => x !== r.lora)].filter(Boolean).map((f) => h("option", { value: f, selected: f === r.lora ? "selected" : null }, f))),
-        h("input", { type: "number", step: 0.05, value: r.sm ?? 1, onchange: (e) => { r.sm = Number(e.target.value); saveState(); } }),
-        h("input", { type: "number", step: 0.05, value: r.sc ?? 1, onchange: (e) => { r.sc = Number(e.target.value); saveState(); } }),
-        h("button", { class: "ost-btn ghost bad", style: "padding:4px 6px", onclick: () => { state.extra_loras.splice(i, 1); set({}); } }, "✕"))),
-      h("button", { class: "ost-btn", onclick: () => { (state.extra_loras ||= []).push({ lora: boot.loras[0] || "", sm: 1, sc: 1, on: true }); set({}); } }, "+ LoRA"),
-      h("div", { class: "ost-hint", style: "margin-top:6px" }, "Style / realism LoRAs for this workflow (e.g. candid_snap 1.0, RealisticSnapshot 0.6). Saved in the workflow, not in the character."));
-    fill(p, h("div", { class: "ost-split" }, list, h("div", {}, editor, extra)));
+        } }, "Delete") : null),
+      h("div", { class: "ost-card", style: "margin-top:10px" }, h("h4", {}, "Extra LoRAs — this workflow only"),
+        loraRowsEditor((state.extra_loras ||= []), () => saveState()),
+        h("div", { class: "ost-hint", style: "margin-top:6px" }, "Style / realism LoRAs for this workflow. Saved in the workflow, not in the character.")));
+    fill(p, h("div", { class: "ost-split" }, list, editor));
   }
 
   // ── Skills tab ─────────────────────────────────────────────────────────────
@@ -485,7 +576,7 @@ function setupStudio(node) {
         h("div", { class: "ost-pre" }, openText));
     }
     fill(p, input, drop, h("div", { style: "height:10px" }), list.childNodes.length ? list : h("div", { class: "ost-empty" }, "No skill yet."), detail,
-      h("div", { class: "ost-hint", style: "margin-top:10px" }, "Imported skills are stored in ", h("code", {}, (boot.studio_dir || "") + "/skills"), ", on this computer only. Grok presets come from the Grok Prompt Generator node."));
+      h("div", { class: "ost-hint", style: "margin-top:10px" }, "Imported skills are stored in ", h("code", {}, (boot.studio_dir || "") + "/skills"), ", on this computer only. Skills improve a manual prompt, write from an idea, or serve as the rulebook of a Grok preset (Recreate)."));
   }
 
   // ── Settings tab ───────────────────────────────────────────────────────────
@@ -517,7 +608,7 @@ function setupStudio(node) {
     const hist = r.history || [];
     fill(p, hist.length ? h("div", { class: "ost-list" }, hist.map((e) => h("div", { class: "ost-item", style: "align-items:flex-start", onclick: () => showResult(e) },
       h("span", { class: "ost-badge" }, (MODE_INFO[e.mode]?.icon || "") + " " + (e.preview ? "preview" : "run")),
-      h("div", { class: "grow" }, h("div", { class: "sub" }, `${fmtAge(e.ts)} · ${e.skill || e.mode}${e.notes ? " · " + e.notes : ""}`),
+      h("div", { class: "grow" }, h("div", { class: "sub" }, `${fmtAge(e.ts)} · ${e.preset ? "preset " + e.preset : (e.skill || e.mode)}${e.notes ? " · " + e.notes : ""}`),
         h("div", { style: "white-space:pre-wrap;font-size:12px;max-height:54px;overflow:hidden" }, e.prompt)),
       h("button", { class: "ost-btn ghost", onclick: (ev) => { ev.stopPropagation(); set({ mode: "manual", manual: e.prompt, tab: "prompt" }); } }, "Use")))) :
       h("div", { class: "ost-empty" }, "No prompt generated yet."));
