@@ -229,3 +229,74 @@ class OpenCVPlanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _load_pack_module(name):
+    """Import one pack module through the doc generator's ComfyUI stubs."""
+    import runpy
+    gen = runpy.run_path(os.path.join(ROOT, "tools", "gen_nodes_doc.py"), run_name="gen_for_tests")
+    pkg = gen["PKG"]
+    if pkg not in sys.modules:
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()):
+            gen["load_pack"]()
+    return sys.modules[f"{pkg}.{name}"]
+
+
+class H3VfxTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.vfx = _load_pack_module("nodes.onyx_h3_vfx")
+
+    def test_trigger_and_source_tags(self):
+        v = self.vfx
+        mode = v.resolve(v.VFX_EDIT)
+        out = v.apply_prompt_rules("Make the jacket in <Video 1> red, like <Video 2>.", mode,
+                                   source_audio_guided=False)
+        self.assertEqual(out, "vfx_edit: Make the jacket in the source video red, like <Video 1>.")
+
+    def test_trigger_not_doubled_and_audio(self):
+        v = self.vfx
+        mode = v.resolve(v.VFX_STYLE)
+        out = v.apply_prompt_rules("style_transfer: keep <Audio 1>", mode, source_audio_guided=True)
+        self.assertEqual(out, "style_transfer: keep the source soundtrack")
+
+    def test_required_reference(self):
+        v = self.vfx
+        with self.assertRaises(RuntimeError):
+            v.check_inputs(v.resolve(v.VFX_EDIT_FRAME), has_source_video=True, image_count=0, node="T")
+        with self.assertRaises(RuntimeError):
+            v.check_inputs(v.resolve(v.VFX_EDIT), has_source_video=False, image_count=0, node="T")
+
+    def test_postprocess_shapes(self):
+        v = self.vfx
+        mode = v.resolve(v.VFX_EDIT)
+        self.assertEqual(v.postprocess_result(("a <Video 1>", "{}"), mode, source_audio_guided=False,
+                                              has_audio_input=False, node="T"),
+                         ("vfx_edit: a the source video", "{}"))
+        wrapped = v.postprocess_result({"ui": {}, "result": ("x", "{}")}, None,
+                                       source_audio_guided=False, has_audio_input=True, node="T")
+        self.assertEqual(wrapped["result"], ("x", "{}"))
+
+
+class SetupCheckTests(unittest.TestCase):
+    def test_missing_nodes_models_and_renamed(self):
+        from utils import onyx_setup_check as sc
+        fake_nodes = mock.MagicMock(NODE_CLASS_MAPPINGS={"KSampler": 1, "UNETLoader": 1})
+        fp = mock.MagicMock(folder_names_and_paths={"loras": 1, "vae": 1})
+        fp.get_filename_list = lambda folder: {"loras": ["sub/my_lora.safetensors"], "vae": ["ok.safetensors"]}[folder]
+        with mock.patch.dict(sys.modules, {"nodes": fake_nodes, "folder_paths": fp}):
+            sc._cache.update(at=0.0, files=None)
+            r = sc.check(["KSampler", "PathchSageAttentionKJ"], [
+                {"node_type": "VAELoader", "widget": "vae_name", "value": "ok.safetensors"},
+                {"node_type": "LoraLoaderModelOnly", "widget": "lora_name", "value": "my_lora.safetensors"},
+                {"node_type": "UNETLoader", "widget": "unet_name", "value": "minimax_h3_ref2va_pruned_int8_convrot.safetensors"},
+                {"node_type": "LoadImage", "widget": "image", "value": "photo.png"},
+            ])
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["missing_nodes"][0]["pack"], "ComfyUI-KJNodes")
+        self.assertEqual(len(r["missing_models"]), 1)
+        self.assertEqual(r["missing_models"][0]["folder"], "diffusion_models")
+        self.assertTrue(r["missing_models"][0]["url"].startswith("https://huggingface.co/"))
+        self.assertEqual(r["elsewhere"][0]["found_as"], "sub/my_lora.safetensors")

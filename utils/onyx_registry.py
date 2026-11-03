@@ -91,9 +91,11 @@ def _build() -> dict:
     data = _read_json(_DEFAULTS_FILE)
     data.setdefault("models", {})
     data.setdefault("pricing", {})
+    data.setdefault("requirements", {})
     for layer in (_read_json(_REMOTE_CACHE).get("data") or {}, _read_json(_OVERRIDE_FILE)):
         _merge_models(data["models"], layer.get("models"))
         _deep_merge(data["pricing"], layer.get("pricing"))
+        _deep_merge(data["requirements"], layer.get("requirements"))
     _deep_merge(data["pricing"], _read_json(_PRICING_OVERRIDE_FILE))
     return data
 
@@ -140,7 +142,7 @@ def refresh_from_worker(force: bool = False) -> bool:
         if resp.status_code != 200:
             return False      # endpoint not deployed yet / Worker down: keep what we have
         data = resp.json()
-        if not isinstance(data, dict) or not ("models" in data or "pricing" in data):
+        if not isinstance(data, dict) or not any(k in data for k in ("models", "pricing", "requirements")):
             return False
     except Exception:
         return False

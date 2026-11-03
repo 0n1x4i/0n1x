@@ -60,6 +60,7 @@ from .nodes.onyx_temporal_mask_smooth import OnyxTemporalMaskSmooth
 from .nodes.onyx_depth_colormap import OnyxDepthColormap
 from .nodes.onyx_mask_to_box import OnyxMaskToBox
 from .nodes.onyx_session import OnyxSessionNode
+from .nodes.onyx_h3_vfx import OnyxH3VfxLora
 
 # Post-processing nodes (dossier avec espace + noms unicode -> importlib)
 import importlib.util as _ilu, os as _os
@@ -138,6 +139,8 @@ try:
     _onyx_registry.start_background_refresh()
     from .utils import onyx_cost as _onyx_cost
     _onyx_cost.register_routes()
+    from .utils import onyx_setup_check as _onyx_setup_check
+    _onyx_setup_check.register_routes()
 except Exception as _e:
     print(f"[Onyx] Registry / cost routes failed: {_e}")
 if _onyx_opencv is not None:
@@ -196,6 +199,7 @@ NODE_CLASS_MAPPINGS["OnyxTemporalMaskSmooth"] = OnyxTemporalMaskSmooth
 NODE_CLASS_MAPPINGS["OnyxDepthColormap"] = OnyxDepthColormap
 NODE_CLASS_MAPPINGS["OnyxMaskToBox"] = OnyxMaskToBox
 NODE_CLASS_MAPPINGS["OnyxSessionNode"] = OnyxSessionNode
+NODE_CLASS_MAPPINGS["OnyxH3VfxLora"] = OnyxH3VfxLora
 if Onyx_Renoise:     NODE_CLASS_MAPPINGS["Onyx_Renoise"]     = Onyx_Renoise
 if Onyx_Camera_Look: NODE_CLASS_MAPPINGS["Onyx_Camera_Look"] = Onyx_Camera_Look
 if Onyx_Apply_LUT:   NODE_CLASS_MAPPINGS["Onyx_Apply_LUT"]   = Onyx_Apply_LUT
@@ -254,6 +258,7 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxTemporalMaskSmooth"] = "Onyx Temporal Mask Smoot
 NODE_DISPLAY_NAME_MAPPINGS["OnyxDepthColormap"] = "Onyx Depth Colormap"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxMaskToBox"] = "Onyx Mask To Box"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxSessionNode"] = "Onyx Session"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxH3VfxLora"] = "Onyx H3 VFX LoRA"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Renoise"]     = "Onyx Renoise"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Camera_Look"] = "📷 Onyx Camera Look"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Apply_LUT"]   = "🎨 Onyx Apply LUT"

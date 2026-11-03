@@ -191,8 +191,18 @@ def load_pack():
     sys.modules[PKG] = mod
     import contextlib
     import io
-    with contextlib.redirect_stdout(io.StringIO()):   # the pack's startup banner
-        spec.loader.exec_module(mod)
+    # ComfyUI's own top-level modules ("nodes", "server"...) must not resolve to
+    # the pack's folders of the same name when the pack root is on sys.path
+    # (running from the pack folder, or from the tests).
+    saved_path = sys.path[:]
+    root = os.path.normcase(os.path.abspath(ROOT))
+    sys.path[:] = [p for p in sys.path
+                   if os.path.normcase(os.path.abspath(p or os.getcwd())) != root]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):   # the pack's startup banner
+            spec.loader.exec_module(mod)
+    finally:
+        sys.path[:] = saved_path
     return mod
 
 

@@ -39,32 +39,58 @@ async function pendingCount() {
         return QUEUE_CHUNK;
     }
 }
-async function waitUntil(predicate) {
-    while (!(await predicate())) await new Promise(r => setTimeout(r, QUEUE_POLL_MS));
+async function waitUntil(predicate, shouldStop = () => false) {
+    while (!shouldStop() && !(await predicate())) await new Promise(r => setTimeout(r, QUEUE_POLL_MS));
 }
-async function queueInChunks(total, chunkSize, onProgress) {
+async function queueInChunks(total, chunkSize, onProgress, shouldStop = () => false) {
     let sent = 0;
-    while (sent < total) {
+    while (sent < total && !shouldStop()) {
         const batch = Math.min(chunkSize, total - sent);
         await app.queuePrompt(0, batch);
         sent += batch;
         onProgress?.(sent, total);
         if (sent >= total) break;
-        await waitUntil(async () => (await pendingCount()) <= QUEUE_LOW_WATER);
+        await waitUntil(async () => (await pendingCount()) <= QUEUE_LOW_WATER, shouldStop);
     }
     return sent;
 }
+
+// ── Stop propre ─────────────────────────────────────────────────────────────
+// Le bouton Cancel de ComfyUI n'arrete que la tache EN COURS : les taches en
+// attente partent quand meme, et la boucle Queue All continuait d'envoyer les
+// paquets suivants. Stop = 1) plus aucun paquet, 2) suppression des taches en
+// attente de CE node (POST /queue {delete}), 3) /interrupt si la tache en
+// cours est la sienne. Les autres workflows en file ne sont pas touches.
+function promptUsesNode(entry, nodeId) {
+    const prompt = Array.isArray(entry) ? entry[2] : null;
+    return !!prompt && prompt[String(nodeId)]?.class_type === "OnyxImageBatchLoader";
+}
+async function stopBatch(nodeId) {
+    let q;
+    try { q = await (await api.fetchApi("/queue")).json(); } catch { return { deleted: 0, interrupted: false }; }
+    const pending = (q.queue_pending || []).filter(e => promptUsesNode(e, nodeId)).map(e => e[1]);
+    if (pending.length) {
+        await api.fetchApi("/queue", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ delete: pending }),
+        }).catch(() => {});
+    }
+    const running = (q.queue_running || []).some(e => promptUsesNode(e, nodeId));
+    if (running) await api.fetchApi("/interrupt", { method: "POST" }).catch(() => {});
+    return { deleted: pending.length, interrupted: running };
+}
 // Mode consume : chaque run retire un item de la liste, donc on attend que la
 // file soit VIDE avant de reconstruire le paquet suivant a partir de la liste.
-async function queueConsuming(getRemaining, chunkSize, onProgress) {
+async function queueConsuming(getRemaining, chunkSize, onProgress, shouldStop = () => false) {
     let sent = 0, guard = 0;
-    while (getRemaining() > 0 && guard < 10000) {
+    while (getRemaining() > 0 && guard < 10000 && !shouldStop()) {
         const batch = Math.min(chunkSize, getRemaining());
         const before = getRemaining();
         await app.queuePrompt(0, batch);
         sent += batch;
         onProgress?.(sent, before);
-        await waitUntil(async () => (await pendingCount()) === 0);
+        await waitUntil(async () => (await pendingCount()) === 0, shouldStop);
+        if (shouldStop()) break;
         if (getRemaining() >= before) {
             console.warn("[Onyx Batch] nothing was consumed — stopping to avoid a loop.");
             break;
@@ -787,30 +813,46 @@ function setupBatchLoader(node) {
         if (changed) { syncBatch(); render(); }
     }
 
+    let stopRequested = false;
     queueBtn.addEventListener("click", async () => {
+        // Pendant un Queue All, le meme bouton devient "Stop".
+        if (queueBtn.dataset.busy === "1") {
+            if (stopRequested) return;
+            stopRequested = true;
+            queueBtn.textContent = "■ stopping…";
+            const r = await stopBatch(node.id);
+            console.log(`[Onyx Batch] stopped: ${r.deleted} pending job(s) removed` +
+                        (r.interrupted ? ", running job interrupted." : "."));
+            queueBtn.textContent = `■ stopped (${r.deleted} removed)`;
+            return;
+        }
         const elig = eligibleIds().length;
-        if (!elig || queueBtn.dataset.busy === "1") return;
+        if (!elig) return;
         const consume = !!getVal("consume_on_load", false);
         const chunk = Math.max(1, Math.min(QUEUE_CHUNK, parseInt(getVal("queue_batch_size", QUEUE_CHUNK), 10) || QUEUE_CHUNK));
+        stopRequested = false;
         queueBtn.dataset.busy = "1";
-        queueBtn.disabled = true;
+        queueBtn.title = "Click to STOP: removes this node's pending jobs and interrupts the running one.";
+        const shouldStop = () => stopRequested;
         const progress = (sent, total) => {
-            queueBtn.textContent = sent >= total ? `⏳ ${sent}/${total}` : `⏳ ${sent}/${total} · waiting`;
+            if (stopRequested) return;
+            queueBtn.textContent = (sent >= total ? `⏳ ${sent}/${total}` : `⏳ ${sent}/${total} · waiting`) + "  ■ Stop";
         };
         try {
             if (consume) {
-                queueBtn.textContent = `⏳ 0/${elig}`;
-                await queueConsuming(() => eligibleIds().length, chunk, progress);
+                queueBtn.textContent = `⏳ 0/${elig}  ■ Stop`;
+                await queueConsuming(() => eligibleIds().length, chunk, progress, shouldStop);
             } else if (elig <= chunk) {
                 await app.queuePrompt(0, elig);
             } else {
-                queueBtn.textContent = `⏳ 0/${elig}`;
-                await queueInChunks(elig, chunk, progress);
+                queueBtn.textContent = `⏳ 0/${elig}  ■ Stop`;
+                await queueInChunks(elig, chunk, progress, shouldStop);
             }
         } catch (e) {
             console.error("[Onyx Batch] queuePrompt error:", e);
         } finally {
             queueBtn.dataset.busy = "0";
+            queueBtn.title = "";
             render();
         }
     });

@@ -42,6 +42,7 @@ import os
 from .onyx_h3_guides import GUIDE_BASE_TEXT, GUIDE_REF_TEXT
 from .onyx_remote_exec import load_remote
 from ..utils import onyx_registry as _reg
+from . import onyx_h3_vfx as _h3vfx
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -466,6 +467,10 @@ class OnyxH3ContextIR:
                                "providers and by models older than Gemini 3). high = deepest analysis. A "
                                "model that does not accept the chosen level is retried with its own "
                                "default."}),
+                # Added LAST (positional widget values, see above).
+                "vfx_mode": (_h3vfx.VFX_MODES, {
+                    "default": _h3vfx.VFX_NONE,
+                    "tooltip": _h3vfx.VFX_TOOLTIP}),
             },
         }
 
@@ -493,8 +498,22 @@ class OnyxH3ContextIR:
             pinned_lead_seconds=0.0, transcribe_speech=False,
             motion_from_video_only=False, keyframes_match_model=False,
             extra_prompt_rules=False, kie_api_key="", video_analysis_fps=8.0, seed=0,
-            remove_observations=True, gemini_thinking_mode="high"):
+            remove_observations=True, gemini_thinking_mode="high",
+            vfx_mode=_h3vfx.VFX_NONE):
         ensure_profile_ready()
+
+        # ── H3 VFX mode: checks + inputs, before anything is sent ──────────
+        vfx = _h3vfx.resolve(vfx_mode) if "H3" in str(target_model) else None
+        if vfx_mode != _h3vfx.VFX_NONE and vfx is None:
+            print(f"⚠️  [H3 Context-IR] vfx_mode '{vfx_mode}' only applies to MiniMax H3 targets — ignored.")
+        if vfx is not None:
+            connected = [img for img in (image_1, image_2, image_3, image_4, image_5, image_6, images_batch)
+                         if img is not None]
+            _h3vfx.check_inputs(vfx, has_source_video=video is not None, image_count=len(connected),
+                                node="H3 Context-IR")
+            if vfx.reference_rule == "none":
+                # vfx_edit: H3 gets no reference image, so pass A must not describe one.
+                image_1 = image_2 = image_3 = image_4 = image_5 = image_6 = images_batch = None
 
         guides_text = _load_guides(guide_folder)
 
@@ -510,7 +529,9 @@ class OnyxH3ContextIR:
                 kie["remove_observations"] = True            # new core only
         if gemini_thinking_mode != "high":
             kie["gemini_thinking_mode"] = gemini_thinking_mode   # new core only; "high" = the model's own default
-        return ns["run_impl"](
+        if vfx is not None:
+            kie["vfx_mode"] = vfx.mode       # new core only: lets pass B write an edit instruction
+        call_args = (
             OnyxH3ContextIR._grounding_cache, guides_text,
             intent, duration_seconds, aspect_ratio, target_model,
             provider, model, max_tokens,
@@ -522,8 +543,23 @@ class OnyxH3ContextIR:
             grounding_override, window_start_seconds,
             pinned_lead_seconds, transcribe_speech,
             motion_from_video_only, keyframes_match_model,
-            extra_prompt_rules, **kie,
+            extra_prompt_rules,
         )
+        try:
+            result = ns["run_impl"](*call_args, **kie)
+        except TypeError as e:
+            # A server core older than vfx_mode refuses the keyword before doing
+            # any work (no API call made yet): run it without, the local
+            # post-processing below still applies the VFX rules to the prompt.
+            if "vfx_mode" not in str(e):
+                raise
+            kie.pop("vfx_mode", None)
+            result = ns["run_impl"](*call_args, **kie)
+
+        has_audio = any(a is not None for a in (video_audio, ref_audio_1, ref_audio_2))
+        return _h3vfx.postprocess_result(
+            result, vfx, source_audio_guided=video_audio is not None,
+            has_audio_input=has_audio, node="H3 Context-IR")
 
 
 NODE_CLASS_MAPPINGS = {"OnyxH3ContextIR": OnyxH3ContextIR}

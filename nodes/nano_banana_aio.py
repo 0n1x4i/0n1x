@@ -226,7 +226,15 @@ def _load_vertex_json_folder(folder_path: str) -> list:
     return json_files
 
 _YUNET_MIN_BYTES = 200_000        # le modele reel fait ~232 Ko
+# Empreinte du fichier officiel (opencv_zoo, face_detection_yunet_2023mar.onnx,
+# 232 589 octets), verifiee le 2026-11-03 contre GitHub LFS. Un fichier qui ne
+# correspond pas (miroir corrompu, page d'erreur, fichier tronque ou remplace)
+# est refuse au lieu d'etre charge par OpenCV.
+_YUNET_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 _YUNET_SOURCES = [
+    # media.githubusercontent.com sert le vrai contenu des fichiers git-LFS.
+    "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/"
+    "face_detection_yunet/face_detection_yunet_2023mar.onnx",
     # Le miroir jsDelivr sert le contenu reel meme quand le fichier est suivi
     # par git-LFS, la ou l'URL /raw/ de GitHub peut renvoyer un pointeur texte.
     "https://cdn.jsdelivr.net/gh/opencv/opencv_zoo@main/models/"
@@ -257,6 +265,11 @@ def _yunet_problem(path: str):
     # Un ONNX est un protobuf : le premier champ est ir_version (0x08).
     if magic not in (b"\x08", b"\x0a", b"\x12"):
         return f"ce n'est pas un fichier ONNX (premier octet {magic!r})"
+    import hashlib
+    with open(path, "rb") as fh:
+        digest = hashlib.sha256(fh.read()).hexdigest()
+    if digest != _YUNET_SHA256:
+        return f"empreinte SHA-256 inattendue ({digest[:12]}…) — fichier modifie ou corrompu"
     return None
 
 
