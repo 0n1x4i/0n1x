@@ -65,6 +65,8 @@ from .nodes.onyx_conditioning_cache import OnyxConditioningCache
 from .nodes.onyx_studio import OnyxStudio
 from .nodes.onyx_camera_shake import OnyxCameraShake
 from .nodes.onyx_post_style import OnyxPostStyle
+from .nodes.onyx_post_studio import OnyxPostStudio
+from .nodes import onyx_post_studio as _onyx_post_studio_mod
 from .nodes.onyx_famegrid import OnyxFameGridColorFinish
 from .nodes.onyx_more_jpeg import OnyxMoreJPEG
 from .nodes.onyx_realism_injector import OnyxRealismInjector
@@ -155,6 +157,7 @@ try:
     from .utils import onyx_setup_check as _onyx_setup_check
     _onyx_setup_check.register_routes()
     _onyx_studio_mod.register_routes()
+    _onyx_post_studio_mod.register_routes()
 except Exception as _e:
     print(f"[Onyx] Registry / cost routes failed: {_e}")
 if _onyx_opencv is not None:
@@ -218,6 +221,7 @@ NODE_CLASS_MAPPINGS["OnyxConditioningCache"] = OnyxConditioningCache
 NODE_CLASS_MAPPINGS["OnyxStudio"] = OnyxStudio
 NODE_CLASS_MAPPINGS["OnyxCameraShake"] = OnyxCameraShake
 NODE_CLASS_MAPPINGS["OnyxPostStyle"] = OnyxPostStyle
+NODE_CLASS_MAPPINGS["OnyxPostStudio"] = OnyxPostStudio
 NODE_CLASS_MAPPINGS["OnyxFameGridColorFinish"] = OnyxFameGridColorFinish
 NODE_CLASS_MAPPINGS["OnyxMoreJPEG"] = OnyxMoreJPEG
 NODE_CLASS_MAPPINGS["OnyxRealismInjector"] = OnyxRealismInjector
@@ -294,6 +298,7 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxConditioningCache"] = "Onyx Conditioning Cache (
 NODE_DISPLAY_NAME_MAPPINGS["OnyxStudio"] = "Onyx Studio ✦"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxCameraShake"] = "Onyx Camera Shake"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxPostStyle"] = "Onyx Post Style"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxPostStudio"] = "Onyx Post Studio ✦"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxFameGridColorFinish"] = "Onyx FameGrid Color Finish"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxMoreJPEG"] = "Onyx More JPEG"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxRealismInjector"] = "Onyx Realism Injector"

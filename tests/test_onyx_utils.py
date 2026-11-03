@@ -519,3 +519,77 @@ class StudioEncodeCacheTests(unittest.TestCase):
             self.assertEqual(node.check_lazy_status(idea, "9", g), ["clip"])         # prompt changes
             del g["9"]["inputs"]["clip"]
             self.assertEqual(node.check_lazy_status(state, "9", g), [])              # nothing to load
+
+
+class PostStudioTests(unittest.TestCase):
+    def setUp(self):
+        self.ps = _load_pack_module("nodes.onyx_post_studio")
+
+    def test_chain_order_is_the_crispy_workflow_with_motion_last(self):
+        self.assertEqual(self.ps.STAGE_KEYS, ["color", "skin", "grade", "camera", "grain", "jpeg", "motion"])
+
+    def _fake(self, calls, name, extra=None):
+        class Fake:
+            FUNCTION = "go"
+
+            @classmethod
+            def INPUT_TYPES(cls):
+                return {"required": {"image": ("IMAGE",), "amount": ("FLOAT", {"default": 1.0}),
+                                     **(extra or {})}}
+
+            def go(self, image, amount, onyx_post=None, **kw):
+                calls.append((name, amount, kw))
+                return (image + [name],)
+        return Fake
+
+    def test_runs_enabled_stages_in_order_with_values(self):
+        ps, calls = self.ps, []
+        classes = {k: self._fake(calls, k) for k in ps.STAGE_KEYS}
+        with mock.patch.object(ps, "stage_class", lambda k: classes.get(k)), \
+             mock.patch.object(ps, "defaults", lambda k, cls=None: {"amount": 1.0}):
+            out, timings = ps.run_chain([], {"stages": {"grain": {"on": False},
+                                                       "skin": {"v": {"amount": "0.5", "bogus": 3}}}})
+        self.assertEqual(out, ["color", "skin", "grade", "camera", "jpeg", "motion"])
+        self.assertEqual(calls[1], ("skin", 0.5, {}))               # coerced, unknown key dropped
+        self.assertEqual([k for k, _ in timings], out)
+
+    def test_preview_skips_a_failing_stage_but_a_run_raises(self):
+        ps = self.ps
+
+        class Boom:
+            FUNCTION = "go"
+
+            @classmethod
+            def INPUT_TYPES(cls):
+                return {"required": {"image": ("IMAGE",)}}
+
+            def go(self, image, **kw):
+                raise RuntimeError("no licence")
+        calls = []
+        classes = {k: (Boom if k == "grain" else self._fake(calls, k)) for k in ps.STAGE_KEYS}
+        with mock.patch.object(ps, "stage_class", lambda k: classes.get(k)), \
+             mock.patch.object(ps, "defaults", lambda k, cls=None: {"amount": 1.0} if k != "grain" else {}):
+            out, timings = ps.run_chain([], {}, preview=True)
+            self.assertNotIn("grain", out)
+            self.assertIn(("grain", "no licence"), timings)
+            with self.assertRaises(RuntimeError):
+                ps.run_chain([], {})
+
+    def test_widgets_are_grouped_by_enable_switches(self):
+        ps = self.ps
+
+        class Suite:
+            @classmethod
+            def INPUT_TYPES(cls):
+                return {"required": {"image": ("IMAGE",)},
+                        "optional": {"enable_glow": ("BOOLEAN", {"default": False}),
+                                     "glow_radius": ("FLOAT", {"default": 2.0, "min": 0, "max": 9}),
+                                     "global_mix": ("FLOAT", {"default": 1.0}),
+                                     "mode": (["a", "b"],), "enabled": ("BOOLEAN", {}),
+                                     "hook": ("STRING", {"forceInput": True})}}
+        params = {p["name"]: p for p in ps._params(Suite)}
+        self.assertEqual(set(params), {"enable_glow", "glow_radius", "global_mix", "mode"})
+        self.assertTrue(params["enable_glow"]["switch"])
+        self.assertEqual(params["glow_radius"]["group"], "glow")
+        self.assertEqual(params["global_mix"]["group"], "main")
+        self.assertEqual(params["mode"]["default"], "a")
