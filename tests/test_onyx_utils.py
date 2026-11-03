@@ -300,3 +300,37 @@ class SetupCheckTests(unittest.TestCase):
         self.assertEqual(r["missing_models"][0]["folder"], "diffusion_models")
         self.assertTrue(r["missing_models"][0]["url"].startswith("https://huggingface.co/"))
         self.assertEqual(r["elsewhere"][0]["found_as"], "sub/my_lora.safetensors")
+
+
+class StudioTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.st = _load_pack_module("nodes.onyx_studio")
+        cls.llm = _load_pack_module("utils.onyx_llm")
+
+    def test_parse_answer(self):
+        r = self.llm.parse_answer("READY\n```\nmia woman\nA shot.\n```\nNOTES: ratio 4:5 · post: shake_med_h")
+        self.assertEqual(r["prompt"], "mia woman\nA shot.")
+        self.assertEqual((r["ratio"], r["post"]), ("4:5", "shake_med_h"))
+        r = self.llm.parse_answer("<think>hmm</think>plain prompt text")
+        self.assertEqual((r["prompt"], r["post"]), ("plain prompt text", ""))
+
+    def test_render_skill_swaps_character(self):
+        text = ("TRIGGER_LINE = style_x, anna woman\nBODY = a petite woman\nOUTPUT = raw\n"
+                'S2 HAIR LOCK "Her hair is a short dark cut that sits\n'
+                '   just above her collar."\nExample:\nstyle_x, anna woman\nA candid snapshot of a petite woman.')
+        meta = {"locked_sentence": "Her hair is a short dark cut that sits just above her collar."}
+        char = {"trigger_line": "mia woman", "body": "a slim woman", "hair_lock": "Her long red hair."}
+        out = self.st.render_skill(text, meta, char, "4:5")
+        self.assertNotIn("anna", out)
+        self.assertNotIn("petite", out)
+        self.assertIn("Her long red hair.", out)
+        self.assertIn("OUTPUT = chat", out)
+        self.assertNotIn("short dark cut", out)
+
+    def test_trigger_handling(self):
+        char = {"trigger_line": "mia woman"}
+        self.assertEqual(self.st._apply_trigger("{trigger}, on a bench", char, True), "mia woman, on a bench")
+        self.assertEqual(self.st._apply_trigger("on a bench", char, True), "mia woman\non a bench")
+        self.assertEqual(self.st._apply_trigger("anna woman\nA shot.", char, True, from_llm=True), "mia woman\nA shot.")
+        self.assertEqual(self.st._apply_trigger("on a bench", char, False), "on a bench")

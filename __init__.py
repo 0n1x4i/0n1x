@@ -62,6 +62,9 @@ from .nodes.onyx_mask_to_box import OnyxMaskToBox
 from .nodes.onyx_session import OnyxSessionNode
 from .nodes.onyx_h3_vfx import OnyxH3VfxLora
 from .nodes.onyx_conditioning_cache import OnyxConditioningCache
+from .nodes.onyx_studio import OnyxStudio
+from .nodes.onyx_camera_shake import OnyxCameraShake
+from .nodes import onyx_studio as _onyx_studio_mod
 
 # Post-processing nodes (dossier avec espace + noms unicode -> importlib)
 import importlib.util as _ilu, os as _os
@@ -142,6 +145,7 @@ try:
     _onyx_cost.register_routes()
     from .utils import onyx_setup_check as _onyx_setup_check
     _onyx_setup_check.register_routes()
+    _onyx_studio_mod.register_routes()
 except Exception as _e:
     print(f"[Onyx] Registry / cost routes failed: {_e}")
 if _onyx_opencv is not None:
@@ -202,6 +206,8 @@ NODE_CLASS_MAPPINGS["OnyxMaskToBox"] = OnyxMaskToBox
 NODE_CLASS_MAPPINGS["OnyxSessionNode"] = OnyxSessionNode
 NODE_CLASS_MAPPINGS["OnyxH3VfxLora"] = OnyxH3VfxLora
 NODE_CLASS_MAPPINGS["OnyxConditioningCache"] = OnyxConditioningCache
+NODE_CLASS_MAPPINGS["OnyxStudio"] = OnyxStudio
+NODE_CLASS_MAPPINGS["OnyxCameraShake"] = OnyxCameraShake
 if Onyx_Renoise:     NODE_CLASS_MAPPINGS["Onyx_Renoise"]     = Onyx_Renoise
 if Onyx_Camera_Look: NODE_CLASS_MAPPINGS["Onyx_Camera_Look"] = Onyx_Camera_Look
 if Onyx_Apply_LUT:   NODE_CLASS_MAPPINGS["Onyx_Apply_LUT"]   = Onyx_Apply_LUT
@@ -262,6 +268,8 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxMaskToBox"] = "Onyx Mask To Box"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxSessionNode"] = "Onyx Session"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3VfxLora"] = "Onyx H3 VFX LoRA"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxConditioningCache"] = "Onyx Conditioning Cache (text encode)"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxStudio"] = "Onyx Studio ✦"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxCameraShake"] = "Onyx Camera Shake"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Renoise"]     = "Onyx Renoise"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Camera_Look"] = "📷 Onyx Camera Look"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Apply_LUT"]   = "🎨 Onyx Apply LUT"

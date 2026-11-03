@@ -264,7 +264,10 @@ function hideNativeWidget(w) {
 }
 
 // ── Main setup ──────────────────────────────────────────────────────────────
-function setupBatchLoader(node) {
+// opts.mount: an element to build the panel into (used by Onyx Studio, which
+// embeds this exact media panel in one of its tabs). Without it the panel is
+// the node's own DOM widget, as before.
+function setupBatchLoader(node, opts = {}) {
     injectStyle();
     node.properties ||= {};
 
@@ -878,7 +881,8 @@ function setupBatchLoader(node) {
     api.addEventListener("onyx_batch_loader_consume", consumeHandler);
 
     // ── Widget ─────────────────────────────────────────────────────────────
-    node.addDOMWidget("images_display", "ONYX_BATCH_DISPLAY", root, {
+    if (opts.mount) opts.mount.appendChild(root);
+    else node.addDOMWidget("images_display", "ONYX_BATCH_DISPLAY", root, {
         serialize: false,
         getValue: () => undefined,
         setValue: () => {},
@@ -922,7 +926,7 @@ function setupBatchLoader(node) {
         origRemoved?.();
     };
 
-    node.size = [...DEFAULT_NODE_SIZE];   // une seule fois, a la creation
+    if (!opts.mount) node.size = [...DEFAULT_NODE_SIZE];   // une seule fois, a la creation
     render();
 }
 
@@ -937,3 +941,9 @@ app.registerExtension({
         };
     },
 });
+
+// Embeds the batch media panel (upload, links, thumbnails, video settings,
+// Queue All / Stop) into `container`, driven by `node`'s batch widgets.
+export function mountBatchPanel(node, container) {
+    setupBatchLoader(node, { mount: container });
+}
