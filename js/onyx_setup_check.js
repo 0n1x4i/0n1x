@@ -2,9 +2,12 @@
 // node packs (with the pack name and link) and model files (with the models/
 // folder and the download link), BEFORE you queue.
 //
-// Runs by itself when a workflow containing Onyx nodes is loaded (silent when
-// everything is there), and on demand: right-click the canvas ->
-// "Onyx: Check workflow setup". Backend: utils/onyx_setup_check.py.
+// No node to add: this is a frontend extension, active as soon as the pack is
+// installed. It runs by itself every time a workflow is opened (any workflow,
+// silent when everything is there; turn it off in Settings -> Onyx), and on
+// demand: right-click the canvas -> "Onyx: Check workflow setup", or the
+// "Check workflow setup" button on the Onyx Session node.
+// Backend: utils/onyx_setup_check.py.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
@@ -120,13 +123,40 @@ async function runCheck({ manual = false } = {}) {
   }
 }
 
+const SETTING_ID = "Onyx.SetupCheck.OnOpen";
+
+function autoCheckEnabled() {
+  try {
+    const v = app.extensionManager?.setting?.get?.(SETTING_ID) ?? app.ui?.settings?.getSettingValue?.(SETTING_ID);
+    return v !== false;
+  } catch { return true; }
+}
+
 app.registerExtension({
   name: "Onyx.SetupCheck",
 
+  settings: [{
+    id: SETTING_ID,
+    category: ["Onyx", "Setup check", "On open"],
+    name: "Check missing node packs and model files when a workflow is opened",
+    type: "boolean",
+    defaultValue: true,
+  }],
+
   async afterConfigureGraph() {
-    // Only for workflows that use the pack, and once the graph is fully built.
-    const hasOnyx = allNodes(app.graph).some((n) => /^Onyx|^Onyx_/.test(n.type || ""));
-    if (hasOnyx) setTimeout(() => runCheck(), 800);
+    // Every workflow, once the graph is fully built. Silent when nothing is missing.
+    if (autoCheckEnabled() && allNodes(app.graph).length) setTimeout(() => runCheck(), 800);
+  },
+
+  async beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData.name !== "OnyxSessionNode") return;
+    const created = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+      const r = created?.apply(this, arguments);
+      const w = this.addWidget("button", "🔍 Check workflow setup", null, () => runCheck({ manual: true }));
+      if (w) w.serialize = false;          // never written into the saved workflow
+      return r;
+    };
   },
 
   setup() {

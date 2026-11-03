@@ -61,6 +61,7 @@ from .nodes.onyx_depth_colormap import OnyxDepthColormap
 from .nodes.onyx_mask_to_box import OnyxMaskToBox
 from .nodes.onyx_session import OnyxSessionNode
 from .nodes.onyx_h3_vfx import OnyxH3VfxLora
+from .nodes.onyx_conditioning_cache import OnyxConditioningCache
 
 # Post-processing nodes (dossier avec espace + noms unicode -> importlib)
 import importlib.util as _ilu, os as _os
@@ -200,6 +201,7 @@ NODE_CLASS_MAPPINGS["OnyxDepthColormap"] = OnyxDepthColormap
 NODE_CLASS_MAPPINGS["OnyxMaskToBox"] = OnyxMaskToBox
 NODE_CLASS_MAPPINGS["OnyxSessionNode"] = OnyxSessionNode
 NODE_CLASS_MAPPINGS["OnyxH3VfxLora"] = OnyxH3VfxLora
+NODE_CLASS_MAPPINGS["OnyxConditioningCache"] = OnyxConditioningCache
 if Onyx_Renoise:     NODE_CLASS_MAPPINGS["Onyx_Renoise"]     = Onyx_Renoise
 if Onyx_Camera_Look: NODE_CLASS_MAPPINGS["Onyx_Camera_Look"] = Onyx_Camera_Look
 if Onyx_Apply_LUT:   NODE_CLASS_MAPPINGS["Onyx_Apply_LUT"]   = Onyx_Apply_LUT
@@ -259,6 +261,7 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxDepthColormap"] = "Onyx Depth Colormap"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxMaskToBox"] = "Onyx Mask To Box"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxSessionNode"] = "Onyx Session"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3VfxLora"] = "Onyx H3 VFX LoRA"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxConditioningCache"] = "Onyx Conditioning Cache (text encode)"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Renoise"]     = "Onyx Renoise"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Camera_Look"] = "📷 Onyx Camera Look"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Apply_LUT"]   = "🎨 Onyx Apply LUT"
