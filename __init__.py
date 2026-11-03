@@ -67,6 +67,7 @@ from .nodes.onyx_camera_shake import OnyxCameraShake
 from .nodes.onyx_post_style import OnyxPostStyle
 from .nodes.onyx_post_studio import OnyxPostStudio
 from .nodes.onyx_phone_fx import NODE_CLASS_MAPPINGS as _PHONE_FX, NODE_DISPLAY_NAME_MAPPINGS as _PHONE_FX_NAMES
+from .nodes.onyx_lens_character import OnyxLensCharacter
 from .nodes import onyx_post_studio as _onyx_post_studio_mod
 from .nodes.onyx_famegrid import OnyxFameGridColorFinish
 from .nodes.onyx_more_jpeg import OnyxMoreJPEG
@@ -224,6 +225,7 @@ NODE_CLASS_MAPPINGS["OnyxCameraShake"] = OnyxCameraShake
 NODE_CLASS_MAPPINGS["OnyxPostStyle"] = OnyxPostStyle
 NODE_CLASS_MAPPINGS["OnyxPostStudio"] = OnyxPostStudio
 NODE_CLASS_MAPPINGS.update(_PHONE_FX)
+NODE_CLASS_MAPPINGS["OnyxLensCharacter"] = OnyxLensCharacter
 NODE_CLASS_MAPPINGS["OnyxFameGridColorFinish"] = OnyxFameGridColorFinish
 NODE_CLASS_MAPPINGS["OnyxMoreJPEG"] = OnyxMoreJPEG
 NODE_CLASS_MAPPINGS["OnyxRealismInjector"] = OnyxRealismInjector
@@ -233,7 +235,7 @@ if OnyxPostProcessSuite:
 # (Onyx Studio / Onyx Post Style), applied around its own code.
 from .utils import onyx_post as _onyx_post_mod
 for _pp_cls in (Onyx_Renoise, Onyx_Camera_Look, Onyx_Apply_LUT, Onyx_Clarity, Onyx_Dehaze,
-                Onyx_Match_Levels, Onyx_Skin_Tone):
+                Onyx_Match_Levels, Onyx_Skin_Tone, OnyxLensCharacter):
     if _pp_cls is not None:
         _onyx_post_mod.wire(_pp_cls)
 
@@ -302,6 +304,7 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxCameraShake"] = "Onyx Camera Shake"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxPostStyle"] = "Onyx Post Style"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxPostStudio"] = "Onyx Post Studio ✦"
 NODE_DISPLAY_NAME_MAPPINGS.update(_PHONE_FX_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS["OnyxLensCharacter"] = "Onyx Lens Character"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxFameGridColorFinish"] = "Onyx FameGrid Color Finish"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxMoreJPEG"] = "Onyx More JPEG"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxRealismInjector"] = "Onyx Realism Injector"

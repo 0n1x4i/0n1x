@@ -555,11 +555,10 @@ class PostStudioTests(unittest.TestCase):
         with mock.patch.object(ps, "stage_class", lambda k: classes.get(k)), \
              mock.patch.object(ps, "defaults", lambda k, cls=None: {"amount": 1.0}):
             out, timings = ps.run_chain([], {"stages": {"grain": {"on": False}, "hdr": {"on": True},
-                                                       "levels": {"on": True},
                                                        "skin": {"v": {"amount": "0.5", "bogus": 3}}}})
         self.assertEqual(out, ["color", "skin", "grade", "camera", "hdr", "jpeg", "motion"])
         self.assertEqual(calls[1], ("skin", 0.5, {}))               # coerced, unknown key dropped
-        self.assertIn(("levels", "needs the `reference` input"), timings)   # on, but no reference
+
 
     def test_preview_skips_a_failing_stage_but_a_run_raises(self):
         ps = self.ps

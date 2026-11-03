@@ -43,7 +43,7 @@ function injectStyle() {
   if (document.getElementById("onyx-post-studio-style")) return;
   const css = `
 .ops{--bg:#0c0c10;--p1:#121218;--p2:#17171f;--p3:#1d1d27;--ln:#24242f;--ln2:#33333f;--tx:#ececf3;--dim:#8a8c99;--ac:#9fb4ff;--ac2:#c7d2ff;--ok:#3ecf8e;--warm:#ffc58a;
-  display:flex;flex-direction:column;width:100%;height:100%;box-sizing:border-box;background:var(--bg);color:var(--tx);
+  display:flex;flex-direction:column;position:relative;width:100%;height:100%;box-sizing:border-box;background:var(--bg);color:var(--tx);
   border:1px solid var(--ln);border-radius:12px;overflow:hidden;font:12.5px/1.45 Inter,"Segoe UI",system-ui,sans-serif}
 .ops *{box-sizing:border-box}
 .ops-head{display:flex;align-items:center;gap:10px;padding:10px 12px;background:linear-gradient(120deg,#1b1a2b 0%,#141420 55%,#261a14 100%);border-bottom:1px solid var(--ln)}
@@ -121,6 +121,39 @@ function injectStyle() {
   document.head.append(h("style", { id: "onyx-post-studio-style", html: css }));
 }
 
+// The browser's prompt dialog does not exist in ComfyUI Desktop (Electron): a
+// small inline dialog inside the node instead. Resolves to the text, or null.
+function askText(host, title, value, cls) {
+  return new Promise((resolve) => {
+    const inp = document.createElement("input");
+    inp.type = "text"; inp.value = value || "";
+    inp.style.cssText = "width:100%;background:#17171f;color:#ececf3;border:1px solid #46507e;border-radius:8px;padding:7px 9px;font:13px Inter,system-ui,sans-serif;outline:none;margin:10px 0";
+    const box = document.createElement("div");
+    box.style.cssText = "position:absolute;inset:0;z-index:50;background:rgba(5,5,9,.6);display:flex;align-items:center;justify-content:center";
+    const card = document.createElement("div");
+    card.style.cssText = "width:min(340px,90%);background:#121218;border:1px solid #33333f;border-radius:12px;padding:14px;box-shadow:0 10px 40px #000a;color:#ececf3;font:600 12.5px Inter,system-ui,sans-serif";
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:8px;justify-content:flex-end";
+    const done = (v) => { box.remove(); resolve(v); };
+    const mk = (label, primary, fn) => { const b = document.createElement("button"); b.className = cls + (primary ? " pri" : " ghost"); b.textContent = label; b.onclick = fn; return b; };
+    row.append(mk("Cancel", false, () => done(null)), mk("Save", true, () => done(inp.value.trim() || value || "")));
+    card.append(title, inp, row);
+    box.append(card);
+    box.addEventListener("pointerdown", (e) => { e.stopPropagation(); if (e.target === box) done(null); });
+    inp.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") done(inp.value.trim() || value || ""); if (e.key === "Escape") done(null); });
+    host.append(box);
+    setTimeout(() => { inp.focus(); inp.select(); }, 0);
+  });
+}
+// Tell the workflow tab its graph changed (autosave / "modified" dot), debounced.
+let _trackTimer = null;
+function markChanged(app) {
+  clearTimeout(_trackTimer);
+  _trackTimer = setTimeout(() => {
+    try { app.extensionManager?.workflow?.activeWorkflow?.changeTracker?.checkState?.(); } catch { /* older frontend */ }
+  }, 250);
+}
+
 function hideWidget(w) {
   if (!w) return;
   w.hidden = true; w.computeSize = () => [0, -4]; w.draw = () => {};
@@ -143,7 +176,7 @@ function setupPostStudio(node) {
       state = { stages: s.stages || {}, tab: s.tab || "chain", view: { ...state.view, ...(s.view || {}) }, current_preset: s.current_preset };
     } catch { /* keep */ }
   };
-  const saveState = () => { const w = W("post_state"); if (w) w.value = JSON.stringify(state); app.graph?.setDirtyCanvas(true, true); };
+  const saveState = () => { const w = W("post_state"); if (w) w.value = JSON.stringify(state); app.graph?.setDirtyCanvas(true, true); markChanged(app); };
   readState();
 
   const stageDef = (k) => spec.stages.find((s) => s.key === k);
@@ -158,7 +191,7 @@ function setupPostStudio(node) {
 
   // ── skeleton ───────────────────────────────────────────────────────────────
   const root = h("div", { class: "ops" });
-  root.addEventListener("keydown", (e) => { if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) e.stopPropagation(); }, true);
+  root.addEventListener("keydown", (e) => { if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) e.stopPropagation(); });   // bubble phase: the input's own keys run first
   root.addEventListener("wheel", (e) => {
     const sc = e.target.closest?.(".ops-page,.ops-tim");
     if (sc && sc.scrollHeight > sc.clientHeight) e.stopPropagation();
@@ -284,7 +317,7 @@ function setupPostStudio(node) {
         title: pr ? `${pr.name}\nclick: load · right-click: delete` : "empty slot",
         onclick: async () => {
           if (saveMode) {
-            const name = window.prompt(`Name for preset ${i}`, pr?.name || `Preset ${i}`);
+            const name = await askText(root, `Name for preset ${i}`, pr?.name || `Preset ${i}`, "ops-btn");
             if (name === null) return;
             const r = await postJSON("/onyx/post_studio/preset/save", { slot: i, name, state: { stages: state.stages } });
             if (!r.ok) return toast(r.error, "error");
