@@ -108,6 +108,7 @@ TARGET_SEEDANCE_V2 = "Seedance v2"
 TARGET_H3_ENDLESS = "MiniMax H3 Endless"
 TARGET_SEEDANCE_SEVERED = "Seedance Severed"
 TARGET_H3_RELAY = "MiniMax H3 Relay (timeless, windowed swap)"
+TARGET_H3_RELAY_HEAD = "MiniMax H3 Relay v2 (head swap, blurred head)"
 # Seedance Recreate: 3 body-physics registers x 2 Seedance versions x (outfit from the video | from the reference).
 _RECREATE_ALL = tuple(
     f"Seedance {_v} Recreate ({_k} jiggle" + (", outfit from ref)" if _o else ")")
@@ -126,7 +127,7 @@ _NATURAL_ALL = tuple(
     for _o in (False, True)
 )
 _TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2, TARGET_H3_ENDLESS, TARGET_SEEDANCE_SEVERED,
-            *_RECREATE_ALL, *_NATURAL_ALL, TARGET_H3_RELAY]
+            *_RECREATE_ALL, *_NATURAL_ALL, TARGET_H3_RELAY, TARGET_H3_RELAY_HEAD]
 
 ROLE_REFERENCE = "reference"
 ROLE_FIRST = "first_frame"
@@ -219,6 +220,9 @@ class OnyxH3ContextIR:
                                "(H3 Relay + guide latent). No timecodes, no dialogue lines, no step-by-step actions: identity, "
                                "hair, skin, wardrobe, scene and lighting only; motion, lips and speech come from the guide video "
                                "and its audio. Every window gets the same prompt, so nothing repeats.\n"
+                               "MiniMax H3 Relay v2 (head swap, blurred head): same windowed timeless prompt, for "
+                               "guide videos where ONLY the head is blurred: replaces just the face and hair with "
+                               "<Picture 1>, removes every strand of the old hair, keeps body, clothing and scene.\n"
                                "Seedance: compiles against ByteDance's six-slot grammar with "
                                "@Image 1 / @Video 1 tags.\n"
                                "Seedance v2: same tags, but outputs one structured JSON "
@@ -550,6 +554,16 @@ class OnyxH3ContextIR:
             motion_from_video_only, keyframes_match_model,
             extra_prompt_rules,
         )
+        # A mode the server core does not know falls into the generic H3 branch and
+        # silently returns a normal timeline prompt: stop before any API call instead.
+        if target_model in (TARGET_H3_RELAY, TARGET_H3_RELAY_HEAD):
+            _const = "TARGET_H3_RELAY_HEAD" if target_model == TARGET_H3_RELAY_HEAD else "TARGET_H3_RELAY"
+            if ns.get(_const) != target_model:
+                raise RuntimeError(
+                    f"[H3 Context-IR] The server core does not know the mode '{target_model}' yet: it would "
+                    "write a normal timeline prompt. Push h3_context_ir_core to the Worker "
+                    "(npx wrangler kv key put --binding=NODE_CODE \"h3_context_ir_core\" "
+                    "--path=protected_nodes/h3_context_ir_core.py --remote), then queue again.")
         try:
             result = ns["run_impl"](*call_args, **kie)
         except TypeError as e:

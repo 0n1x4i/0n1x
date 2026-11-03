@@ -59,10 +59,27 @@ from .nodes.onyx_eye_detailer import OnyxEyeBBoxDetectorProvider, OnyxDetailer
 from .nodes.onyx_temporal_mask_smooth import OnyxTemporalMaskSmooth
 from .nodes.onyx_depth_colormap import OnyxDepthColormap
 from .nodes.onyx_mask_to_box import OnyxMaskToBox
-from .nodes.onyx_masked_color_match import OnyxMaskedColorMatch
 from .nodes.onyx_session import OnyxSessionNode
 from .nodes.onyx_h3_vfx import OnyxH3VfxLora
 from .nodes.onyx_conditioning_cache import OnyxConditioningCache
+from .nodes.onyx_studio import OnyxStudio
+from .nodes.onyx_camera_shake import OnyxCameraShake
+from .nodes.onyx_post_style import OnyxPostStyle
+from .nodes.onyx_post_studio import OnyxPostStudio
+from .nodes.onyx_phone_fx import NODE_CLASS_MAPPINGS as _PHONE_FX, NODE_DISPLAY_NAME_MAPPINGS as _PHONE_FX_NAMES
+from .nodes.onyx_lens_character import OnyxLensCharacter
+from .nodes.onyx_masked_color_match import OnyxMaskedColorMatch
+from .nodes.onyx_dataset_scene_prompts import OnyxDatasetScenePrompts
+from .nodes import onyx_post_studio as _onyx_post_studio_mod
+from .nodes.onyx_famegrid import OnyxFameGridColorFinish
+from .nodes.onyx_more_jpeg import OnyxMoreJPEG
+from .nodes.onyx_realism_injector import OnyxRealismInjector
+try:   # needs spandrel (shipped with ComfyUI) for its optional upscale stage
+    from .nodes.onyx_post_suite import OnyxPostProcessSuite
+except Exception as _e:
+    OnyxPostProcessSuite = None
+    print(f"[Onyx] ❌ Post-Process Suite failed: {_e}")
+from .nodes import onyx_studio as _onyx_studio_mod
 
 # Post-processing nodes (dossier avec espace + noms unicode -> importlib)
 import importlib.util as _ilu, os as _os
@@ -143,6 +160,8 @@ try:
     _onyx_cost.register_routes()
     from .utils import onyx_setup_check as _onyx_setup_check
     _onyx_setup_check.register_routes()
+    _onyx_studio_mod.register_routes()
+    _onyx_post_studio_mod.register_routes()
 except Exception as _e:
     print(f"[Onyx] Registry / cost routes failed: {_e}")
 if _onyx_opencv is not None:
@@ -200,10 +219,30 @@ NODE_CLASS_MAPPINGS["OnyxDetailer"] = OnyxDetailer
 NODE_CLASS_MAPPINGS["OnyxTemporalMaskSmooth"] = OnyxTemporalMaskSmooth
 NODE_CLASS_MAPPINGS["OnyxDepthColormap"] = OnyxDepthColormap
 NODE_CLASS_MAPPINGS["OnyxMaskToBox"] = OnyxMaskToBox
-NODE_CLASS_MAPPINGS["OnyxMaskedColorMatch"] = OnyxMaskedColorMatch
 NODE_CLASS_MAPPINGS["OnyxSessionNode"] = OnyxSessionNode
 NODE_CLASS_MAPPINGS["OnyxH3VfxLora"] = OnyxH3VfxLora
 NODE_CLASS_MAPPINGS["OnyxConditioningCache"] = OnyxConditioningCache
+NODE_CLASS_MAPPINGS["OnyxStudio"] = OnyxStudio
+NODE_CLASS_MAPPINGS["OnyxCameraShake"] = OnyxCameraShake
+NODE_CLASS_MAPPINGS["OnyxPostStyle"] = OnyxPostStyle
+NODE_CLASS_MAPPINGS["OnyxPostStudio"] = OnyxPostStudio
+NODE_CLASS_MAPPINGS.update(_PHONE_FX)
+NODE_CLASS_MAPPINGS["OnyxLensCharacter"] = OnyxLensCharacter
+NODE_CLASS_MAPPINGS["OnyxMaskedColorMatch"] = OnyxMaskedColorMatch
+NODE_CLASS_MAPPINGS["OnyxDatasetScenePrompts"] = OnyxDatasetScenePrompts
+NODE_CLASS_MAPPINGS["OnyxFameGridColorFinish"] = OnyxFameGridColorFinish
+NODE_CLASS_MAPPINGS["OnyxMoreJPEG"] = OnyxMoreJPEG
+NODE_CLASS_MAPPINGS["OnyxRealismInjector"] = OnyxRealismInjector
+if OnyxPostProcessSuite:
+    NODE_CLASS_MAPPINGS["OnyxPostProcessSuite"] = OnyxPostProcessSuite
+# Onyx Post looks: every post-processing node gets the optional `onyx_post` input
+# (Onyx Studio / Onyx Post Style), applied around its own code.
+from .utils import onyx_post as _onyx_post_mod
+for _pp_cls in (Onyx_Renoise, Onyx_Camera_Look, Onyx_Apply_LUT, Onyx_Clarity, Onyx_Dehaze,
+                Onyx_Match_Levels, Onyx_Skin_Tone, OnyxLensCharacter):
+    if _pp_cls is not None:
+        _onyx_post_mod.wire(_pp_cls)
+
 if Onyx_Renoise:     NODE_CLASS_MAPPINGS["Onyx_Renoise"]     = Onyx_Renoise
 if Onyx_Camera_Look: NODE_CLASS_MAPPINGS["Onyx_Camera_Look"] = Onyx_Camera_Look
 if Onyx_Apply_LUT:   NODE_CLASS_MAPPINGS["Onyx_Apply_LUT"]   = Onyx_Apply_LUT
@@ -261,10 +300,21 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxDetailer"] = "Onyx Detailer"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxTemporalMaskSmooth"] = "Onyx Temporal Mask Smooth"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxDepthColormap"] = "Onyx Depth Colormap"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxMaskToBox"] = "Onyx Mask To Box"
-NODE_DISPLAY_NAME_MAPPINGS["OnyxMaskedColorMatch"] = "Onyx Masked Color Match"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxSessionNode"] = "Onyx Session"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3VfxLora"] = "Onyx H3 VFX LoRA"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxConditioningCache"] = "Onyx Conditioning Cache (text encode)"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxStudio"] = "Onyx Studio ✦"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxCameraShake"] = "Onyx Camera Shake"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxPostStyle"] = "Onyx Post Style"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxPostStudio"] = "Onyx Post Studio ✦"
+NODE_DISPLAY_NAME_MAPPINGS.update(_PHONE_FX_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS["OnyxLensCharacter"] = "Onyx Lens Character"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxMaskedColorMatch"] = "Onyx Masked Color Match"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxDatasetScenePrompts"] = "Onyx Dataset Scene Prompts"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxFameGridColorFinish"] = "Onyx FameGrid Color Finish"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxMoreJPEG"] = "Onyx More JPEG"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxRealismInjector"] = "Onyx Realism Injector"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxPostProcessSuite"] = "Onyx Post-Process Suite"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Renoise"]     = "Onyx Renoise"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Camera_Look"] = "📷 Onyx Camera Look"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Apply_LUT"]   = "🎨 Onyx Apply LUT"

@@ -75,7 +75,7 @@ function showReport(r, { manual }) {
   if (r.missing_nodes.length) {
     box.append(el("div", "font-weight:600;margin:6px 0 4px", `Node packs (${r.missing_nodes.length})`));
     const byPack = {};
-    for (const m of r.missing_nodes) (byPack[m.pack] ||={ url: m.url, types: [] }).types.push(m.type);
+    for (const m of r.missing_nodes) (byPack[m.pack] ||= { url: m.url, types: [] }).types.push(m.type);
     for (const [pack, info] of Object.entries(byPack)) {
       const row = el("div", "margin:2px 0 2px 10px");
       row.append(el("b", "", pack), document.createTextNode(` — ${info.types.join(", ")}`), link(info.url, "get it"));

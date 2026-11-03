@@ -63,7 +63,9 @@ async function queueInChunks(total, chunkSize, onProgress, shouldStop = () => fa
 // cours est la sienne. Les autres workflows en file ne sont pas touches.
 function promptUsesNode(entry, nodeId) {
     const prompt = Array.isArray(entry) ? entry[2] : null;
-    return !!prompt && prompt[String(nodeId)]?.class_type === "OnyxImageBatchLoader";
+    const cls = prompt?.[String(nodeId)]?.class_type;
+    // The panel also lives inside Onyx Studio: its queued prompts carry that class.
+    return cls === "OnyxImageBatchLoader" || cls === "OnyxStudio";
 }
 async function stopBatch(nodeId) {
     let q;
@@ -264,7 +266,11 @@ function hideNativeWidget(w) {
 }
 
 // ── Main setup ──────────────────────────────────────────────────────────────
-function setupBatchLoader(node) {
+// opts.mount: an element to build the panel into (used by Onyx Studio, which
+// embeds this exact media panel in one of its tabs). Without it the panel is
+// the node's own DOM widget, as before.
+function setupBatchLoader(node, opts = {}) {
+    const panelApi = {};
     injectStyle();
     node.properties ||= {};
 
@@ -700,7 +706,11 @@ function setupBatchLoader(node) {
         root.classList.remove("dragging");
         if (!isExternalDrag(e)) return;
         e.preventDefault(); e.stopPropagation();
-        const dt = e.dataTransfer;
+        acceptDrop(e.dataTransfer);
+    });
+    // Reads the drop synchronously (a DataTransfer is only readable during the
+    // event), then imports. Also used by Onyx Studio for drops outside this panel.
+    function acceptDrop(dt) {
         // f.type est parfois vide depuis l'explorateur Windows : l'extension sert de repli.
         const files = [...(dt.files || [])].filter(
             f => f.type.startsWith("image/") || f.type.startsWith("video/") || VIDEO_RE.test(f.name));
@@ -714,8 +724,13 @@ function setupBatchLoader(node) {
             handleFiles(files);
         } else if (urls.length) {
             handleUrls(urls);
+        } else {
+            return false;
         }
-    });
+        return true;
+    }
+    panelApi.acceptDrop = acceptDrop;
+    panelApi.isExternalDrag = isExternalDrag;
 
     urlBtn.addEventListener("click", () => {
         const txt = prompt("Paste one or more links (Instagram, TikTok, Pinterest, image/video URL…), separated by spaces or new lines:");
@@ -878,7 +893,8 @@ function setupBatchLoader(node) {
     api.addEventListener("onyx_batch_loader_consume", consumeHandler);
 
     // ── Widget ─────────────────────────────────────────────────────────────
-    node.addDOMWidget("images_display", "ONYX_BATCH_DISPLAY", root, {
+    if (opts.mount) opts.mount.appendChild(root);
+    else node.addDOMWidget("images_display", "ONYX_BATCH_DISPLAY", root, {
         serialize: false,
         getValue: () => undefined,
         setValue: () => {},
@@ -922,8 +938,9 @@ function setupBatchLoader(node) {
         origRemoved?.();
     };
 
-    node.size = [...DEFAULT_NODE_SIZE];   // une seule fois, a la creation
+    if (!opts.mount) node.size = [...DEFAULT_NODE_SIZE];   // une seule fois, a la creation
     render();
+    return panelApi;
 }
 
 app.registerExtension({
@@ -937,3 +954,11 @@ app.registerExtension({
         };
     },
 });
+
+// Embeds the batch media panel (upload, links, thumbnails, video settings,
+// Queue All / Stop) into `container`, driven by `node`'s batch widgets.
+// Returns { acceptDrop(dataTransfer), isExternalDrag(event) } so the host node
+// can route drops made anywhere on it to this panel.
+export function mountBatchPanel(node, container) {
+    return setupBatchLoader(node, { mount: container });
+}

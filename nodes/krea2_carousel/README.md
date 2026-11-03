@@ -13,7 +13,7 @@ Share package for Jnk. Contains the Beta custom-node source and a cleaned workfl
    ```
 
 3. Install the separate packs listed below, restart ComfyUI, then hard-refresh the browser.
-4. Load the JSON in `workflows/`, select your installed model files, and load YOUR master image.
+4. Load the Krea2 Carousel workflow (shared separately, not shipped in the pack), select your installed model files, and load YOUR master image.
    The master selection and reference batch intentionally start empty.
 
 This ZIP contains Python/JavaScript source only. Model weights, LoRA files, photos,

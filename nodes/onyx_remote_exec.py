@@ -89,7 +89,7 @@ def load_remote(name: str, extra_globals: dict = None) -> dict:
     try:
         resp = requests.post(
             _CODE_URL, json={"token": token, "node_id": node_id, "name": name},
-            timeout=_REQUEST_TIMEOUT,
+            timeout=_REQUEST_TIMEOUT, headers=_NO_BROTLI,
         )
         data = resp.json()
     except Exception as e:
@@ -125,6 +125,11 @@ def load_remote(name: str, extra_globals: dict = None) -> dict:
 # ---------------------------------------------------------------------------
 
 _VALIDATION_TTL = 20  # seconds: a helper called in a tight loop does not hit the network each time
+# Cloudflare answers with Brotli when the client accepts it, and some urllib3 + brotli
+# combinations fail to decode large responses (the protected cores are several hundred
+# KB): "brotli: decoder process called with data when 'can_accept_more_data()' is False".
+# Ask for gzip only.
+_NO_BROTLI = {"Accept-Encoding": "gzip, deflate"}
 _lock = threading.RLock()
 _ENTRIES: dict = {}   # name -> {"hash", "ns", "checked"}
 _MODULES: dict = {}   # (bundle, key, package) -> {"hash", "ns"}
@@ -143,7 +148,7 @@ def _request(name: str, have_hash: str = None) -> dict:
     if have_hash:
         payload["have_hash"] = have_hash
     try:
-        resp = requests.post(_CODE_URL, json=payload, timeout=_REQUEST_TIMEOUT)
+        resp = requests.post(_CODE_URL, json=payload, timeout=_REQUEST_TIMEOUT, headers=_NO_BROTLI)
         data = resp.json()
     except Exception as e:
         raise RuntimeError(f"Sync error SS-205: could not reach the server ({e}).")
