@@ -268,6 +268,7 @@ function hideNativeWidget(w) {
 // embeds this exact media panel in one of its tabs). Without it the panel is
 // the node's own DOM widget, as before.
 function setupBatchLoader(node, opts = {}) {
+    const panelApi = {};
     injectStyle();
     node.properties ||= {};
 
@@ -703,7 +704,11 @@ function setupBatchLoader(node, opts = {}) {
         root.classList.remove("dragging");
         if (!isExternalDrag(e)) return;
         e.preventDefault(); e.stopPropagation();
-        const dt = e.dataTransfer;
+        acceptDrop(e.dataTransfer);
+    });
+    // Reads the drop synchronously (a DataTransfer is only readable during the
+    // event), then imports. Also used by Onyx Studio for drops outside this panel.
+    function acceptDrop(dt) {
         // f.type est parfois vide depuis l'explorateur Windows : l'extension sert de repli.
         const files = [...(dt.files || [])].filter(
             f => f.type.startsWith("image/") || f.type.startsWith("video/") || VIDEO_RE.test(f.name));
@@ -717,8 +722,13 @@ function setupBatchLoader(node, opts = {}) {
             handleFiles(files);
         } else if (urls.length) {
             handleUrls(urls);
+        } else {
+            return false;
         }
-    });
+        return true;
+    }
+    panelApi.acceptDrop = acceptDrop;
+    panelApi.isExternalDrag = isExternalDrag;
 
     urlBtn.addEventListener("click", () => {
         const txt = prompt("Paste one or more links (Instagram, TikTok, Pinterest, image/video URL…), separated by spaces or new lines:");
@@ -928,6 +938,7 @@ function setupBatchLoader(node, opts = {}) {
 
     if (!opts.mount) node.size = [...DEFAULT_NODE_SIZE];   // une seule fois, a la creation
     render();
+    return panelApi;
 }
 
 app.registerExtension({
@@ -944,6 +955,8 @@ app.registerExtension({
 
 // Embeds the batch media panel (upload, links, thumbnails, video settings,
 // Queue All / Stop) into `container`, driven by `node`'s batch widgets.
+// Returns { acceptDrop(dataTransfer), isExternalDrag(event) } so the host node
+// can route drops made anywhere on it to this panel.
 export function mountBatchPanel(node, container) {
-    setupBatchLoader(node, { mount: container });
+    return setupBatchLoader(node, { mount: container });
 }

@@ -751,7 +751,31 @@ function setupStudio(node) {
   }
 
   // ── mount ──────────────────────────────────────────────────────────────────
-  mountBatchPanel(node, pages.media);   // the Batch Loader's own panel, inside the Media tab
+  const batchPanel = mountBatchPanel(node, pages.media);   // the Batch Loader's own panel, inside the Media tab
+
+  // Drop anywhere on the Studio: .txt / .md -> skills, images / videos / links ->
+  // the media batch (the Media tab and the Skills drop zone handle their own
+  // drops first and stop them there). Without this, a drop outside the Media
+  // tab fell through to ComfyUI, which made a Load Image node of it.
+  const isSkillFile = (f) => /\.(txt|md)$/i.test(f.name);
+  root.addEventListener("dragover", (e) => {
+    if (!batchPanel?.isExternalDrag?.(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    root.style.outline = "2px dashed #9fb4ff"; root.style.outlineOffset = "-4px";
+    try { e.dataTransfer.dropEffect = "copy"; } catch (_) {}
+  });
+  root.addEventListener("dragleave", (e) => { if (!root.contains(e.relatedTarget)) root.style.outline = ""; });
+  root.addEventListener("drop", (e) => {
+    root.style.outline = "";
+    if (e.defaultPrevented || !batchPanel?.isExternalDrag?.(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    const files = [...(e.dataTransfer.files || [])];
+    if (files.length && files.every(isSkillFile)) { importFiles(files); set({ tab: "skills" }); return; }
+    if (batchPanel.acceptDrop(e.dataTransfer)) {
+      toast("Added to the media batch.", "success");
+      if (state.mode !== "recreate" || state.tab !== "prompt") set({ tab: "media" });
+    }
+  });
   hideWidget(W("studio_state"));
   setTimeout(() => hideWidget(W("studio_state")), 300);
   node.addDOMWidget("studio_panel", "ONYX_STUDIO", root, {
