@@ -1529,10 +1529,10 @@ Real-lens character on GPU: focus blur with polygon bokeh, longitudinal and late
 | Name | Type | Required | Default | Range | Description |
 |------|------|----------|---------|-------|-------------|
 | `image` | `IMAGE` | yes | — |  |  |
-| `focus_mode` | Dropdown: `radial`, `gradient_top`, `gradient_bottom`, `depth_input`, `flat` | yes | `flat` |  | Where the lens is in focus. flat = no focus blur (lens character only). |
+| `focus_mode` | Dropdown: `radial`, `gradient_top`, `flat` | yes | `flat` |  | Where the lens is in focus. flat = no focus blur (lens character only). |
 | `blur_strength` | `FLOAT` | yes | `0.0` | 0.0 – 50.0 (step 0.5) | Out-of-focus blur radius in pixels. 0 = no blur. |
 | `focus_center_x` | `FLOAT` | yes | `0.5` | 0.0 – 1.0 (step 0.01) |  |
-| `focus_center_y` | `FLOAT` | yes | `0.42` | 0.0 – 1.0 (step 0.01) | Radial: focus centre. Gradients: sharp line. Depth: focus plane (0 near … 1 far). |
+| `focus_center_y` | `FLOAT` | yes | `0.42` | 0.0 – 1.0 (step 0.01) | Radial: focus centre. gradient_top: the sharp line. |
 | `focus_size` | `FLOAT` | yes | `0.38` | 0.0 – 1.0 (step 0.01) |  |
 | `focus_feather` | `FLOAT` | yes | `0.55` | 0.01 – 2.0 (step 0.01) |  |
 | `aperture_blades` | `INT` | yes | `7` | 0 – 16 | Bokeh shape: 0-2 = round, 3+ = polygon with that many blades. |
@@ -1543,7 +1543,6 @@ Real-lens character on GPU: focus blur with polygon bokeh, longitudinal and late
 | `edge_softness` | `FLOAT` | yes | `0.18` | 0.0 – 1.0 (step 0.01) | Field curvature: extra softness toward the edges (needs blur_strength > 0). |
 | `bokeh_highlight` | `FLOAT` | yes | `0.5` | 0.0 – 2.0 (step 0.01) | Bloom of bright highlights inside the bokeh. |
 | `invert` | `BOOLEAN` | yes | `False` |  | Swap sharp and blurred areas. |
-| `depth_map` | `IMAGE` | no | — |  | For focus_mode = depth_input. |
 | `onyx_post` | `ONYX_POST` | no | — |  | From Onyx Studio (post output) or Onyx Post Style. A look other than 'none' overrides this node's settings. |
 
 ### Outputs
@@ -1662,7 +1661,7 @@ The whole post chain in one node, in order: color finish → skin & eyes → gra
 | `image` | `IMAGE` | yes | — |  |  |
 | `post_state` | `STRING` | yes | `{}` |  |  |
 | `onyx_post` | `ONYX_POST` | no | — |  | From Onyx Studio (post output) or Onyx Post Style. A look other than 'none' overrides this node's settings. |
-| `depth_map` | `IMAGE` | no | — |  | Optional depth map for Skin & eyes and Lens character (bright = near). |
+| `depth_map` | `IMAGE` | no | — |  | Optional depth map for Skin & eyes (bright = near). |
 | `motion_override` | `STRING` | no | — |  | A Camera Shake preset name (e.g. Onyx Studio's post_preset). 'none' = no shake, empty = the Motion tab's preset. |
 
 ### Outputs

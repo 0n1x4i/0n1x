@@ -82,7 +82,7 @@ STAGE_KEYS = [s["key"] for s in STAGES]
 # New stages start switched off: the Crispy chain is unchanged until you turn them on.
 _DEFAULT_OFF = {"skintone", "dehaze", "clarity", "lut", "lens", "smudge", "clip", "hdr", "chroma"}
 # Extra node inputs a stage receives from the Post Studio's own optional inputs.
-_STAGE_INPUTS = {"skin": {"depth_map": "depth_map"}
+_STAGE_INPUTS = {"skin": {"depth_map": "depth_map"},
                  "motion": {"motion_override": "preset_override"}}
 _NEEDS: dict = {}                       # stage -> input it cannot run without (skipped with a note)
 _HIDDEN_PARAMS = {"enabled"}            # Camera Look's own on/off = the stage switch
