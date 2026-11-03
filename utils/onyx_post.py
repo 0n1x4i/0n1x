@@ -20,7 +20,8 @@ Looks (the whole chain at once):
   golden   warm low sun: warmer white balance, soft glow
 
 Motion (independent of the look, drives Onyx Camera Shake):
-  none · auto (the preset the skill wrote in its NOTES line) · soft ·
+  none (Camera Shake switched off) · manual (Camera Shake keeps its own
+  settings) · auto (the preset the skill wrote in its NOTES line) · soft ·
   shake_med · shake_med_h · shake_med_v · shake_med_rot · shake_heavy
 
 A node key absent from a look = that node keeps its own settings. The special
@@ -36,7 +37,7 @@ from __future__ import annotations
 import copy
 
 POST_TYPE = "ONYX_POST"
-MOTIONS = ["none", "auto", "soft", "shake_med", "shake_med_h", "shake_med_v", "shake_med_rot", "shake_heavy"]
+MOTIONS = ["none", "manual", "auto", "soft", "shake_med", "shake_med_h", "shake_med_v", "shake_med_rot", "shake_heavy"]
 
 # Base = the current "Onyx Krea 4K Crispy" workflow values, node by node.
 _CRISPY = {
@@ -159,11 +160,14 @@ def make(look: str = "none", motion: str = "none", auto_motion: str = "", overri
     """Build the ONYX_POST value. `auto_motion` = the preset a skill chose (NOTES)."""
     all_looks = looks()
     nodes = copy.deepcopy(all_looks.get(look, {}))
-    m = (auto_motion or "none") if motion == "auto" else motion
-    if m and m != "none":
+    # none   = no camera shake (the Camera Shake node is switched off)
+    # manual = the Camera Shake node keeps its own settings
+    # auto   = the preset the skill wrote in its NOTES (none when it wrote none)
+    m = (auto_motion or "none") if motion == "auto" else (motion or "none")
+    if m == "manual":
+        nodes.pop("OnyxCameraShake", None)
+    else:
         nodes.setdefault("OnyxCameraShake", {})["preset"] = m
-    elif motion != "none" or look != "none":
-        nodes.setdefault("OnyxCameraShake", {})["preset"] = "none"
     for node, values in (overrides or {}).items():
         nodes.setdefault(node, {}).update(values or {})
     return {"look": look, "motion": m or "none", "nodes": nodes}
@@ -172,8 +176,6 @@ def make(look: str = "none", motion: str = "none", auto_motion: str = "", overri
 def settings_for(node_key: str, post) -> dict:
     """The overriding settings for one node, {} when nothing applies."""
     if not isinstance(post, dict):
-        return {}
-    if post.get("look", "none") == "none" and post.get("motion", "none") == "none":
         return {}
     return dict((post.get("nodes") or {}).get(node_key) or {})
 
@@ -191,7 +193,7 @@ def apply(node_key: str, kwargs: dict, post) -> tuple:
             out[k] = v
     changed = [k for k in s if k in kwargs and kwargs[k] != s[k]]
     if changed or bypass:
-        print(f"🎛️  [Onyx Post] {node_key}: look '{post.get('look')}'"
+        print(f"🎛️  [Onyx Post] {node_key}: look '{post.get('look')}', motion '{post.get('motion')}'"
               + (" → bypassed" if bypass else f" → {len(changed)} setting(s) overridden"))
     return out, bypass
 

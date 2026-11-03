@@ -361,6 +361,15 @@ class PostLookTests(unittest.TestCase):
         self.assertEqual(self.p.make("none", "shake_heavy")["nodes"], {"OnyxCameraShake": {"preset": "shake_heavy"}})
         self.assertEqual(self.p.make("amateur", "none")["nodes"]["OnyxCameraShake"]["preset"], "none")
 
+    def test_motion_none_switches_off_manual_keeps_node_settings(self):
+        kw = {"preset": "shake_med", "strength": 1.0}
+        off = self.p.make("none", "none")
+        self.assertEqual(self.p.apply("OnyxCameraShake", kw, off)[0]["preset"], "none")
+        manual = self.p.make("none", "manual")
+        self.assertEqual(self.p.apply("OnyxCameraShake", kw, manual), (kw, False))
+        self.assertNotIn("OnyxCameraShake", self.p.make("amateur", "manual")["nodes"])
+        self.assertIn("manual", self.p.MOTIONS)
+
     def test_wire_adds_input_and_applies(self):
         calls = {}
 
@@ -444,3 +453,69 @@ class StudioCacheKeyTests(unittest.TestCase):
                 self.assertNotEqual(k1, st.OnyxStudio.IS_CHANGED(state, "{}", 1))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class ConditioningCacheTests(unittest.TestCase):
+    def setUp(self):
+        self.cc = _load_pack_module("nodes.onyx_conditioning_cache")
+        self.tmp = tempfile.mkdtemp()
+        self._dir = mock.patch.object(self.cc, "CACHE_DIR", self.tmp)
+        self._dir.start()
+        self.cc._memory.clear()
+
+    def tearDown(self):
+        self._dir.stop()
+        self.cc._memory.clear()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_fingerprint_follows_the_encoder_chain(self):
+        g = {"1": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_3_4b.safetensors"}},
+             "2": {"class_type": "OnyxConditioningCache", "inputs": {"text": "x", "clip": ["1", 0]}}}
+        fp = self.cc.encoder_fingerprint(g, "2")
+        self.assertTrue(fp)
+        g["1"]["inputs"]["clip_name"] = "qwen_3_8b.safetensors"
+        self.assertNotEqual(fp, self.cc.encoder_fingerprint(g, "2"))
+        self.assertEqual(self.cc.encoder_fingerprint(None, "2"), "")
+
+    def test_prune_deletes_least_recently_used_first(self):
+        for i, name in enumerate(["old", "mid", "new"]):
+            path = os.path.join(self.tmp, f"{name}.pt")
+            with open(path, "wb") as f:
+                f.write(b"x" * 1000)
+            os.utime(path, (1000 + i, 1000 + i))
+        self.assertEqual(self.cc.prune(2500), 1)
+        self.assertEqual(sorted(os.listdir(self.tmp)), ["mid.pt", "new.pt"])
+        self.assertEqual(self.cc.stats()["files"], 2)
+        self.assertEqual(self.cc.clear(), 2)
+
+
+class StudioEncodeCacheTests(unittest.TestCase):
+    def setUp(self):
+        self.st = _load_pack_module("nodes.onyx_studio")
+
+    def test_only_fixed_prompts_are_cacheable(self):
+        st = self.st
+        self.assertEqual(st._cacheable_prompt({"mode": "manual", "manual": "a red car"}), "a red car")
+        self.assertIsNone(st._cacheable_prompt({"mode": "manual", "manual": "x", "cond_cache": False}))
+        self.assertIsNone(st._cacheable_prompt({"mode": "manual", "manual": "x", "enhance": True, "skill": "s"}))
+        self.assertIsNone(st._cacheable_prompt({"mode": "idea", "idea": "x", "skill": "s"}))
+        self.assertIsNone(st._cacheable_prompt({"mode": "recreate"}))
+
+    def test_encoder_is_requested_unless_cached_and_clip_output_unused(self):
+        st = self.st
+        g = {"5": {"class_type": "CLIPLoader", "inputs": {"clip_name": "t5.safetensors"}},
+             "9": {"class_type": "OnyxStudio", "inputs": {"clip": ["5", 0]}},
+             "10": {"class_type": "KSampler", "inputs": {"positive": ["9", 2]}}}
+        state = json.dumps({"mode": "manual", "manual": "a red car"})
+        node = st.OnyxStudio()
+        with mock.patch.object(st._cond_cache, "lookup", return_value=None):
+            self.assertEqual(node.check_lazy_status(state, "9", g), ["clip"])        # not cached yet
+        with mock.patch.object(st._cond_cache, "lookup", return_value=[["c", {}]]):
+            self.assertEqual(node.check_lazy_status(state, "9", g), [])              # cached: no encoder
+            g["11"] = {"class_type": "Other", "inputs": {"clip": ["9", 1]}}
+            self.assertEqual(node.check_lazy_status(state, "9", g), ["clip"])        # clip output used
+            del g["11"]
+            idea = json.dumps({"mode": "idea", "idea": "x", "skill": "s"})
+            self.assertEqual(node.check_lazy_status(idea, "9", g), ["clip"])         # prompt changes
+            del g["9"]["inputs"]["clip"]
+            self.assertEqual(node.check_lazy_status(state, "9", g), [])              # nothing to load

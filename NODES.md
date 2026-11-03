@@ -732,7 +732,7 @@ The creation hub: image + video batch, character LoRA + trigger (applied to MODE
 | `fps` | `FLOAT` | no | — |  | Overrides Force fps when connected (0 = native). |
 | `frame_load_cap` | `INT` | no | — |  | Overrides Frame load cap when connected (0 = no limit). |
 | `model` | `MODEL` | no | — |  | Diffusion model: the character's LoRAs are applied to it. |
-| `clip` | `CLIP` | no | — |  | Text encoder: LoRAs applied, then the prompt is encoded here. |
+| `clip` | `CLIP` | no | — |  | Text encoder: LoRAs applied, then the prompt is encoded here. With the encode cache on (Settings) and a fixed prompt, it is not even loaded once the prompt has been encoded (unless the clip output is used). |
 | `image` | `IMAGE` | no | — |  | Optional reference image. Overrides the batch item for recreate mode. |
 | `grok_api_key` | `STRING` | no | — |  |  |
 | `gemini_api_key` | `STRING` | no | — |  |  |
@@ -898,14 +898,14 @@ Pass-through node that strips all metadata from images and returns clean tensors
 
 **Class:** `OnyxConditioningCache` · **Category:** `Onyx/Conditioning`
 
-Drop-in replacement for CLIP Text Encode in workflows with a fixed prompt. The first run encodes and saves; later runs (even after a restart) read the saved result and the text encoder is never loaded. Change the text and it encodes once more. Put it before ReferenceLatent / guide nodes. Changed the text encoder? Change cache_name.
+Drop-in replacement for CLIP Text Encode in workflows with a fixed prompt. The first run encodes and saves; later runs (even after a restart) read the saved result and the text encoder is never loaded. Change the text (or the encoder / its LoRAs) and it encodes once more. Put it before ReferenceLatent / guide nodes. The cache folder is capped at 300 MB (oldest entries deleted first).
 
 ### Inputs
 
 | Name | Type | Required | Default | Range | Description |
 |------|------|----------|---------|-------|-------------|
 | `text` | `STRING` | yes | — |  | The prompt. Same text = no encoder load. |
-| `cache_name` | `STRING` | yes | `klein_refiner` |  | Name of the cache entry. Use a different name per text encoder (e.g. klein_4b / klein_9b): the encoder is not part of the key. |
+| `cache_name` | `STRING` | yes | `klein_refiner` |  | Label of the cache files (only used to name them). |
 | `clip` | `CLIP` | no | — |  | Text encoder (CLIPLoader). LAZY: only loaded when this prompt has never been encoded. Must be connected for the first run. |
 
 ### Outputs
@@ -1426,7 +1426,7 @@ shake.py as a node: soft, shake_med (diagonal), shake_med_h (side-to-side + doub
 | `images` | `IMAGE` | yes | — |  |  |
 | `preset` | Dropdown: `none`, `soft`, `shake_med`, `shake_med_h`, `shake_med_v`, `shake_med_rot`, `shake_heavy` | yes | `shake_med` |  |  |
 | `strength` | `FLOAT` | yes | `1.0` | 0.0 – 2.0 (step 0.05) | 1 = shake.py exactly. |
-| `preset_override` | `STRING` | no | — |  | A preset name as text (e.g. Onyx Studio's post_preset). Not empty = replaces the preset above; empty = the preset above is used; 'none' = no shake for this image. |
+| `preset_override` | `STRING` | no | — |  | A preset name as text (e.g. Onyx Studio's post_preset). Not empty = replaces the preset above; 'none' = no shake for this image; empty (Studio motion 'manual') = this node's own settings. |
 | `onyx_post` | `ONYX_POST` | no | — |  | From Onyx Studio (post output) or Onyx Post Style. A look other than 'none' overrides this node's settings. |
 
 ### Outputs
@@ -1506,7 +1506,7 @@ One choice for the whole post-processing chain: crispy, clean, amateur, night, f
 | Name | Type | Required | Default | Range | Description |
 |------|------|----------|---------|-------|-------------|
 | `look` | Dropdown: `none`, `crispy`, `clean`, `amateur`, `night`, `flash`, `golden` | yes | `none` |  | none: Each node keeps its own settings.<br>crispy: The 4K Crispy workflow as tuned: clean detail, light grain, skin shine.<br>clean: Sharp and clean: almost no grain, no phone degradation.<br>amateur: Everyday phone photo: light noise, mild noise-reduction smear, JPEG 88-92.<br>night: Low light: heavy phone noise, cooler white balance, bloom on lights.<br>flash: Direct phone flash: harder contrast, shine on skin, light falloff at the edges.<br>golden: Warm low sun: warmer white balance, soft glow. |
-| `motion` | Dropdown: `none`, `auto`, `soft`, `shake_med`, `shake_med_h`, `shake_med_v`, `shake_med_rot`, `shake_heavy` | yes | `none` |  | Camera Shake preset. auto = the one given to `auto_motion` (e.g. Onyx Studio's post_preset, chosen by the skill). |
+| `motion` | Dropdown: `none`, `manual`, `auto`, `soft`, `shake_med`, `shake_med_h`, `shake_med_v`, `shake_med_rot`, `shake_heavy` | yes | `none` |  | Camera Shake preset. none = no shake; manual = the Camera Shake node keeps its own settings; auto = the one given to `auto_motion` (e.g. Onyx Studio's post_preset, chosen by the skill). |
 | `auto_motion` | `STRING` | no | — |  |  |
 
 ### Outputs

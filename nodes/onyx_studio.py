@@ -26,7 +26,8 @@ A skill can carry a CONFIG block (lines like `TRIGGER_LINE = ...`, `BODY = ...`,
 those lines from the selected character before each call, forces OUTPUT = chat,
 and replaces the skill's locked sentence (e.g. the hair lock) with the
 character's own. The answer's code block becomes the prompt, its NOTES line
-becomes `notes` (+ `ratio`). `post_preset` = the motion chosen (or the skill's in auto), empty when none.
+becomes `notes` (+ `ratio`). `post_preset` = the motion chosen (or the skill's in auto); 'none' switches the
+Camera Shake off, empty (motion 'manual') = the shake node keeps its own settings.
 
 LLM back-ends: Ollama (local), Qwen3-VL local (transformers), Grok, OpenRouter,
 Gemini — see utils/onyx_llm.py. API keys are stored on this computer
@@ -44,6 +45,7 @@ import time
 import uuid
 
 from .onyx_render_profile import ensure_profile_ready
+from . import onyx_conditioning_cache as _cond_cache
 from ..utils import onyx_llm as _llm
 from ..utils import onyx_registry as _reg
 from ..utils.onyx_http import OnyxAPIError
@@ -632,7 +634,11 @@ class OnyxStudio:
         optional = dict(spec.get("optional", {}))
         optional.update({
             "model": ("MODEL", {"tooltip": "Diffusion model: the character's LoRAs are applied to it."}),
-            "clip": ("CLIP", {"tooltip": "Text encoder: LoRAs applied, then the prompt is encoded here."}),
+            "clip": ("CLIP", {"lazy": True,
+                              "tooltip": "Text encoder: LoRAs applied, then the prompt is encoded here. With "
+                                         "the encode cache on (Settings) and a fixed prompt, it is not even "
+                                         "loaded once the prompt has been encoded (unless the clip output "
+                                         "is used)."}),
             "image": ("IMAGE", {"tooltip": "Optional reference image. Overrides the batch item for "
                                            "recreate mode."}),
             "grok_api_key": ("STRING", {"forceInput": True}),
@@ -643,7 +649,8 @@ class OnyxStudio:
                              "tooltip": "Varies the LLM answer between runs (sent to the provider). "
                                         "Also resolves {a|b} choices in Grok presets."}),
         })
-        return {"required": required, "optional": optional, "hidden": {"unique_id": "UNIQUE_ID"}}
+        return {"required": required, "optional": optional,
+                "hidden": {"unique_id": "UNIQUE_ID", "onyx_graph": "PROMPT"}}
 
     # `post` is LAST: outputs are linked by index, appending keeps saved links valid.
     RETURN_TYPES = ("MODEL", "CLIP", "CONDITIONING", "CONDITIONING", "STRING",
@@ -675,8 +682,25 @@ class OnyxStudio:
                 pass
         return hashlib.sha256(f"{studio_state}|{seed}|{char}|{skill_mtime}".encode()).hexdigest()
 
+    def check_lazy_status(self, studio_state="{}", unique_id=None, onyx_graph=None, clip=None, seed=0, **_):
+        """The text encoder is needed unless the encode cache already holds this
+        (fixed) prompt and nothing downstream uses the clip output."""
+        if clip is not None or not _input_linked(onyx_graph, unique_id, "clip"):
+            return []
+        if _output_used(onyx_graph, unique_id, 1):          # 1 = the `clip` output
+            return ["clip"]
+        try:
+            state = json.loads(studio_state or "{}")
+        except ValueError:
+            return ["clip"]
+        text = _cacheable_prompt(state, int(seed or 0))
+        if text is None or _cond_cache.lookup(text, "studio", _encode_key(state, onyx_graph, unique_id)) is None:
+            return ["clip"]
+        return []
+
     def run(self, studio_state="{}", unique_id=None, model=None, clip=None, image=None,
-            grok_api_key=None, gemini_api_key=None, openrouter_api_key=None, seed=0, **batch_kwargs):
+            grok_api_key=None, gemini_api_key=None, openrouter_api_key=None, seed=0, onyx_graph=None,
+            **batch_kwargs):
         ensure_profile_ready()
         try:
             state = json.loads(studio_state or "{}")
@@ -714,19 +738,28 @@ class OnyxStudio:
               + (f" · NOTES: {res['notes']}" if res["notes"] else ""))
 
         # 3. Character LoRAs on MODEL / CLIP.
-        char = character(state.get("character_id", ""))
-        rows = [{"lora": r["lora"], "mode": "ON", "sm": r.get("sm", 1.0), "sc": r.get("sc", 1.0)}
-                for r in (char.get("loras") or []) if r.get("on", True)]
-        rows += [{"lora": r["lora"], "mode": "ON", "sm": r.get("sm", 1.0), "sc": r.get("sc", 1.0)}
-                 for r in (state.get("extra_loras") or []) if r.get("lora") and r.get("on", True)]
+        rows = _lora_rows(state)
         if model is not None and rows:
             from .onyx_lora_trigger_stack import OnyxLoraTriggerStack
             model, clip, _, report, _ = OnyxLoraTriggerStack().apply(model, prompt, json.dumps(rows), clip)
         # 4. Encode.
+        #    Fixed prompt (manual / gallery without a skill rewrite) + cache on: encoded
+        #    once, then read from disk. A prompt that changes every run is never cached.
         positive = negative = None
-        if clip is not None:
+        cached_text = _cacheable_prompt(state, int(seed or 0))
+        cache_on = cached_text is not None and cached_text == prompt
+        enc_key = _encode_key(state, onyx_graph, unique_id) if cache_on else ""
+        if cache_on:
+            positive = _cond_cache.lookup(prompt, "studio", enc_key)
+            if positive is not None:
+                print("♻️  [Onyx Studio] prompt encoding read from cache"
+                      + (" — text encoder not loaded." if clip is None else "."))
+        if positive is None and clip is not None:
             tokens = clip.tokenize(prompt)
             positive = clip.encode_from_tokens_scheduled(tokens)
+            if cache_on:
+                _cond_cache.store(prompt, "studio", positive, enc_key)
+        if positive is not None:
             negative = _zero_out(positive)
 
         post = _onyx_post.make(state.get("post_look", "none"), state.get("post_motion", "none"),
@@ -745,7 +778,7 @@ class OnyxStudio:
         return (model, clip, positive, negative, prompt,
                 out_image if out_image is not None else (image if image is not None else _placeholder()),
                 out_video if out_video is not None else _placeholder(),
-                audio, fps, res["notes"], "" if post["motion"] == "none" else post["motion"],
+                audio, fps, res["notes"], "" if post["motion"] == "manual" else post["motion"],
                 ratio_label, post, width, height, latent)
 
 
@@ -782,6 +815,55 @@ def empty_latent(width: int, height: int, batch: int = 1) -> dict:
         pass
     import torch
     return {"samples": torch.zeros([batch, 4, height // 8, width // 8])}
+
+
+def _lora_rows(state: dict) -> list:
+    """Character LoRAs + extra LoRAs, as rows for the LoRA Trigger Stack."""
+    char = character(state.get("character_id", ""))
+    rows = [{"lora": r["lora"], "mode": "ON", "sm": r.get("sm", 1.0), "sc": r.get("sc", 1.0)}
+            for r in (char.get("loras") or []) if r.get("on", True)]
+    rows += [{"lora": r["lora"], "mode": "ON", "sm": r.get("sm", 1.0), "sc": r.get("sc", 1.0)}
+             for r in (state.get("extra_loras") or []) if r.get("lora") and r.get("on", True)]
+    return rows
+
+
+def _cacheable_prompt(state: dict, seed: int = 0):
+    """The prompt when it is the same every run (manual / gallery, no skill
+    rewrite) and the encode cache is on; None otherwise (nothing is cached)."""
+    if not state.get("cond_cache", True) or state.get("mode", "manual") not in ("manual", "gallery"):
+        return None
+    if state.get("enhance") and state.get("skill"):
+        return None                                   # an LLM rewrite: changes every run
+    try:
+        return generate(state, image=None, keys={}, seed=seed)["prompt"] or None
+    except Exception:
+        return None
+
+
+def _encode_key(state: dict, graph, unique_id) -> str:
+    """What makes an encoding unique besides the text: the encoder chain in the
+    workflow + the LoRAs this node puts on CLIP (name + clip strength)."""
+    loras = [[r["lora"], r.get("sc", 1.0)] for r in _lora_rows(state)]
+    fp = _cond_cache.encoder_fingerprint(graph, unique_id, "clip")
+    return hashlib.sha256(json.dumps([fp, loras], default=str).encode()).hexdigest()[:16]
+
+
+def _input_linked(graph, unique_id, name: str) -> bool:
+    if not isinstance(graph, dict) or unique_id is None:
+        return True                                   # unknown graph: behave as before
+    v = ((graph.get(str(unique_id)) or {}).get("inputs") or {}).get(name)
+    return isinstance(v, list) and len(v) == 2
+
+
+def _output_used(graph, unique_id, index: int) -> bool:
+    if not isinstance(graph, dict) or unique_id is None:
+        return True
+    want = str(unique_id)
+    for node in graph.values():
+        for v in ((node or {}).get("inputs") or {}).values():
+            if isinstance(v, list) and len(v) == 2 and str(v[0]) == want and v[1] == index:
+                return True
+    return False
 
 
 def _zero_out(cond):
@@ -857,6 +939,21 @@ def register_routes() -> None:
                   models={"xai": _reg.model_ids("grok", vision=True, include_deprecated=False),
                           "gemini": _reg.model_ids("gemini_text", include_deprecated=False)},
                   modes=MODES, studio_dir=studio_dir(), presets_saved=presets(), res_aspects=RES_ASPECTS)
+
+    @inst.routes.get("/onyx/studio/encode_cache")
+    async def _encode_cache_stats(request):
+        try:
+            return ok(**_cond_cache.stats())
+        except Exception as e:
+            return err(e)
+
+    @inst.routes.post("/onyx/studio/encode_cache/clear")
+    async def _encode_cache_clear(request):
+        try:
+            removed = _cond_cache.clear()
+            return ok(removed=removed, **_cond_cache.stats())
+        except Exception as e:
+            return err(e)
 
     @inst.routes.post("/onyx/studio/skill/import")
     async def _skill_import(request):

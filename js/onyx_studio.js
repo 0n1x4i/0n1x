@@ -22,7 +22,7 @@ const DEFAULT_STATE = {
   mode: "manual", manual: "", idea: "", extra: "", gallery: null,
   skill: "", character_id: "", provider: "ollama", model: "", ollama_url: "http://127.0.0.1:11434",
   temperature: 0.7, max_tokens: 2048, double_check: false, force_trigger: true, ratio: "9:16",
-  extra_loras: [], tab: "prompt", enhance: false, preset: "", post_look: "none", post_motion: "none",
+  extra_loras: [], tab: "prompt", enhance: false, preset: "", post_look: "none", post_motion: "none", cond_cache: true,
   res: { mp: 1.0, mult: 32, follow_skill: false, batch: 1 },
 };
 
@@ -522,7 +522,7 @@ function setupStudio(node) {
   function postQuickCard() {
     const looks = boot.post_looks.length ? boot.post_looks.map((l) => l.id) : ["none"];
     const motions = boot.post_motions.length ? boot.post_motions : ["none"];
-    const motionLabel = (m) => m === "auto" ? "auto (the skill decides)" : m;
+    const motionLabel = (m) => m === "auto" ? "auto (the skill decides)" : m === "manual" ? "manual (shake node's settings)" : m === "none" ? "none (no shake)" : m;
     return h("div", { class: "ost-card" }, h("h4", {}, "Post look & motion"),
       h("div", { class: "ost-row" },
         h("div", { class: "ost-col" }, h("label", {}, "Look"),
@@ -591,7 +591,7 @@ function setupStudio(node) {
     const p = pages.post;
     const looks = boot.post_looks.length ? boot.post_looks : [{ id: "none", info: "" }];
     const motions = boot.post_motions.length ? boot.post_motions : ["none"];
-    const motionInfo = { none: "No camera shake.", auto: "The preset the skill wrote in its NOTES line.", soft: "Slightly soft / hazy, no smear.",
+    const motionInfo = { none: "No camera shake (the Camera Shake node is switched off).", manual: "The Camera Shake node keeps its own settings.", auto: "The preset the skill wrote in its NOTES line.", soft: "Slightly soft / hazy, no smear.",
       shake_med: "Diagonal hand-shake, eyes still readable.", shake_med_h: "Side-to-side smear + faint double image.",
       shake_med_v: "Up-and-down smear.", shake_med_rot: "Smear + tilted frame.", shake_heavy: "Strong smear, flash-in-the-dark style." };
     fill(p,
@@ -734,8 +734,25 @@ function setupStudio(node) {
         h("div", { class: "ost-row" }, h("div", { class: "ost-col", style: "flex:2" }, h("label", {}, "Server URL"), url),
           h("button", { class: "ost-btn", onclick: () => refreshOllama(false) }, "Test & list models")),
         h("div", { class: "ost-hint" }, ollamaModels.length ? `${ollamaModels.length} model(s): ${ollamaModels.slice(0, 8).join(", ")}${ollamaModels.length > 8 ? "…" : ""}` : "No model listed. For recreate mode use a vision model: qwen3-vl, qwen2.5vl, gemma3, llava.")),
+      encodeCacheCard(),
       h("div", { class: "ost-card" }, h("h4", {}, "Storage"),
         h("div", { class: "ost-hint" }, "Skills, characters, keys and history: ", h("code", {}, boot.studio_dir || "?"))));
+  }
+
+  // Prompt encode cache: a fixed prompt (manual / gallery, no skill rewrite) is
+  // encoded once and read back from disk; the text encoder is then not loaded.
+  function encodeCacheCard() {
+    const info = h("div", { class: "ost-hint" }, "…");
+    const fmt = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.round(b / 1024) + " KB";
+    const show = (r) => { if (r && r.ok !== false) fill(info, `${r.files} prompt(s) cached · ${fmt(r.bytes || 0)} of ${fmt(r.cap_bytes || 0)} max (oldest deleted first)`); };
+    getJSON("/onyx/studio/encode_cache").then(show).catch(() => fill(info, ""));
+    return h("div", { class: "ost-card" }, h("h4", {}, "Prompt encode cache"),
+      h("label", { style: "display:flex;gap:6px;align-items:center" },
+        h("input", { type: "checkbox", checked: state.cond_cache !== false ? "checked" : null, onchange: (e) => set({ cond_cache: e.target.checked }, false) }),
+        "Cache the encoded prompt when it does not change"),
+      h("div", { class: "ost-hint" }, "Manual / gallery prompt without a skill rewrite: encoded once, then read from disk — the text encoder is not even loaded (unless the clip output is wired). Idea, recreate and enhanced prompts change every run: never cached."),
+      h("div", { class: "ost-row", style: "align-items:center" }, info,
+        h("button", { class: "ost-btn ghost bad", onclick: async () => { const r = await postJSON("/onyx/studio/encode_cache/clear", {}); show(r); toast(`${r.removed || 0} cached prompt(s) deleted.`, "success"); } }, "Clear")));
   }
 
   // ── History tab ────────────────────────────────────────────────────────────

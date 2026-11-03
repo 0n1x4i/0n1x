@@ -28,7 +28,8 @@ class OnyxPostStyle:
                 "look": (list(_post.looks()), {"default": "none",
                          "tooltip": "\n".join(f"{k}: {v}" for k, v in _post.LOOK_INFO.items())}),
                 "motion": (_post.MOTIONS, {"default": "none",
-                           "tooltip": "Camera Shake preset. auto = the one given to `auto_motion` "
+                           "tooltip": "Camera Shake preset. none = no shake; manual = the Camera Shake node "
+                                      "keeps its own settings; auto = the one given to `auto_motion` "
                                       "(e.g. Onyx Studio's post_preset, chosen by the skill)."}),
             },
             "optional": {

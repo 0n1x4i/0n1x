@@ -102,8 +102,8 @@ class OnyxCameraShake:
             "optional": {
                 "preset_override": ("STRING", {"forceInput": True,
                     "tooltip": "A preset name as text (e.g. Onyx Studio's post_preset). Not empty = "
-                               "replaces the preset above; empty = the preset above is used; "
-                               "'none' = no shake for this image."}),
+                               "replaces the preset above; 'none' = no shake for this image; "
+                               "empty (Studio motion 'manual') = this node's own settings."}),
                 **_onyx_post.POST_INPUT,
             },
         }
