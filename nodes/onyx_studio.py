@@ -648,10 +648,10 @@ class OnyxStudio:
     # `post` is LAST: outputs are linked by index, appending keeps saved links valid.
     RETURN_TYPES = ("MODEL", "CLIP", "CONDITIONING", "CONDITIONING", "STRING",
                     "IMAGE", "IMAGE", "AUDIO", "FLOAT", "STRING", "STRING", "STRING", _onyx_post.POST_TYPE,
-                    "INT", "INT")
+                    "INT", "INT", "LATENT")
     RETURN_NAMES = ("model", "clip", "positive", "negative", "prompt",
                     "image", "video", "audio", "video_fps", "notes", "post_preset", "ratio", "post",
-                    "width", "height")
+                    "width", "height", "latent")
     FUNCTION = "run"
     CATEGORY = "Onyx"
 
@@ -729,12 +729,14 @@ class OnyxStudio:
             print(f"⚠️  [Onyx Studio] resolution: {e} — 1024x1024 used.")
             width, height, ratio_label = 1024, 1024, state.get("ratio", "1:1")
         res["width"], res["height"] = width, height
+        batch = max(1, int((state.get("res") or {}).get("batch", 1) or 1))
+        latent = empty_latent(width, height, batch)
         print(f"📐 [Onyx Studio] {width} x {height} ({ratio_label})")
         _notify(unique_id, res)
         return (model, clip, positive, negative, prompt,
                 out_image if out_image is not None else (image if image is not None else _placeholder()),
                 out_video if out_video is not None else _placeholder(),
-                audio, fps, res["notes"], post["motion"], ratio_label, post, width, height)
+                audio, fps, res["notes"], post["motion"], ratio_label, post, width, height, latent)
 
 
 RES_ASPECTS = ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "21:9", "5:4", "4:5", "from image (input)"]
@@ -755,6 +757,21 @@ def resolution(state: dict, skill_ratio: str, image=None):
     if isinstance(out, dict):
         out = out.get("result", ())
     return int(out[0]), int(out[1]), str(out[2] if len(out) > 2 else ratio)
+
+
+def empty_latent(width: int, height: int, batch: int = 1) -> dict:
+    """The same empty latent as ComfyUI's Empty Latent Image (4 channels, /8). The
+    sampler adapts an all-zero latent to the model's own channel count (Krea 2,
+    Flux, Qwen...), exactly as it does for the core node."""
+    try:
+        import nodes as _comfy_nodes
+        out = _comfy_nodes.EmptyLatentImage().generate(width, height, batch)[0]
+        if isinstance(out, dict) and hasattr(out.get("samples"), "shape"):
+            return out
+    except Exception:
+        pass
+    import torch
+    return {"samples": torch.zeros([batch, 4, height // 8, width // 8])}
 
 
 def _zero_out(cond):

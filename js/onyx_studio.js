@@ -23,7 +23,7 @@ const DEFAULT_STATE = {
   skill: "", character_id: "", provider: "ollama", model: "", ollama_url: "http://127.0.0.1:11434",
   temperature: 0.7, max_tokens: 2048, double_check: false, force_trigger: true, ratio: "9:16",
   extra_loras: [], tab: "prompt", enhance: false, preset: "", post_look: "none", post_motion: "none",
-  res: { mp: 1.0, mult: 32, follow_skill: false },
+  res: { mp: 1.0, mult: 32, follow_skill: false, batch: 1 },
 };
 
 // ── tiny DOM helpers ─────────────────────────────────────────────────────────
@@ -135,6 +135,11 @@ function injectStyle() {
 .ost-drop{border:2px dashed var(--ln2);border-radius:10px;padding:14px;text-align:center;color:var(--dim);cursor:pointer}
 .ost-drop.hot{border-color:var(--ac);color:var(--tx);background:rgba(159,180,255,.06)}
 .ost-empty{color:var(--dim);text-align:center;padding:24px 10px}
+.ost-sbs{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:10px;align-items:stretch}
+.ost-sbs .img{background:#0f0f15;border:1px solid var(--ln);border-radius:9px;display:flex;align-items:center;justify-content:center;min-height:240px;overflow:hidden}
+.ost-sbs .img img{max-width:100%;max-height:320px;object-fit:contain;display:block}
+.ost-sbs .txt{background:var(--p2);border:1px solid var(--ln);border-radius:9px;padding:9px;font-size:12px;line-height:1.5;white-space:pre-wrap;overflow:auto;max-height:320px;user-select:text}
+.ost-sbs .txt.empty{color:var(--dim);font-style:italic;display:flex;align-items:center;justify-content:center;text-align:center}
 .ost-presets{display:flex;align-items:center;gap:5px;padding:6px 10px;background:var(--p1);border-bottom:1px solid var(--ln);flex-wrap:wrap}
 .ost-presets .lbl{color:var(--dim);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-right:4px}
 .ost-ps{min-width:28px;max-width:118px;padding:4px 8px;border-radius:7px;border:1px solid var(--ln2);background:var(--p2);color:var(--dim);
@@ -176,6 +181,8 @@ function setupStudio(node) {
   }
   let ollamaModels = [];
   let gallery = [];
+  const mediaPrompts = {};      // filename -> last prompt written for it (preview or run)
+  let runMedia = null;          // the batch item the current run is processing
   let galleryLoaded = false;
   let lastResult = null;
   let busy = false;
@@ -324,7 +331,8 @@ function setupStudio(node) {
     try {
       const r = await postJSON("/onyx/studio/preview", { state, media, seed: Math.floor(Math.random() * 1e9) });
       if (!r.ok) throw new Error(r.error);
-      showResult(r);
+      showResult({ ...r, media });
+      if (media) { mediaPrompts[media] = r.prompt; if (state.tab === "prompt" && state.mode === "recreate") renderPrompt(); }
     } catch (e) { toast(String(e.message || e), "error"); }
     finally { busy = false; genBtn.textContent = "✦ Generate now"; genBtn.disabled = false; }
   }
@@ -467,7 +475,7 @@ function setupStudio(node) {
         items.length
           ? h("div", { class: "ost-row" }, h("span", { class: "ost-hint" }, `${items.length} item(s) in the batch — each run rewrites the next one. Queue All in the Media tab runs them all.`))
           : h("div", { class: "ost-row" }, h("span", { class: "ost-hint" }, "The batch is empty."), h("button", { class: "ost-btn", onclick: () => set({ tab: "media" }) }, "Add media →")),
-        items.length ? h("div", { class: "ost-row" }, h("div", { class: "ost-col" }, h("label", {}, "Preview with"), pick)) : null),
+        items.length ? sideBySide(items, pick) : null),
       h("div", { class: "ost-card" }, h("h4", {}, "Grok preset (image → prompt)"),
         h("div", { class: "ost-row" }, presetSel),
         pr ? h("div", { class: "ost-row" },
@@ -494,7 +502,7 @@ function setupStudio(node) {
       } catch { preview.textContent = "preview unavailable"; }
     };
     refresh();
-    return h("div", { class: "ost-card" }, h("h4", {}, "Format (width / height outputs)"),
+    return h("div", { class: "ost-card" }, h("h4", {}, "Format (latent · width / height outputs)"),
       h("div", { class: "ost-row" },
         h("div", { class: "ost-col" }, h("label", {}, "Aspect ratio"),
           h("select", { onchange: (e) => { set({ ratio: e.target.value }, false); refresh(); } },
@@ -502,7 +510,9 @@ function setupStudio(node) {
         h("div", { class: "ost-col", style: "max-width:120px" }, h("label", {}, "Megapixels"),
           h("input", { type: "number", min: 0.05, max: 20, step: 0.01, value: res.mp, onchange: (e) => { res.mp = Number(e.target.value) || 1; saveState(); refresh(); } })),
         h("div", { class: "ost-col", style: "max-width:100px" }, h("label", {}, "Multiple of"),
-          h("input", { type: "number", min: 1, max: 128, step: 1, value: res.mult, onchange: (e) => { res.mult = parseInt(e.target.value, 10) || 32; saveState(); refresh(); } }))),
+          h("input", { type: "number", min: 1, max: 128, step: 1, value: res.mult, onchange: (e) => { res.mult = parseInt(e.target.value, 10) || 32; saveState(); refresh(); } })),
+        h("div", { class: "ost-col", style: "max-width:90px" }, h("label", {}, "Batch size"),
+          h("input", { type: "number", min: 1, max: 64, step: 1, value: res.batch || 1, title: "Images per run: the size of the latent output.", onchange: (e) => { res.batch = Math.max(1, parseInt(e.target.value, 10) || 1); saveState(); } }))),
       h("div", { class: "ost-row" }, preview,
         toggle("Follow the skill's ratio", res.follow_skill, (v) => { res.follow_skill = v; saveState(); }, "When the skill writes a ratio in its NOTES line, the width / height follow it.")));
   }
@@ -521,6 +531,25 @@ function setupStudio(node) {
           h("select", { onchange: (e) => set({ post_motion: e.target.value }) },
             motions.map((m) => h("option", { value: m, selected: state.post_motion === m ? "selected" : null }, motionLabel(m)))))),
       h("div", { class: "ost-hint" }, "Pick a motion yourself, or auto to use the one the skill writes in its NOTES. Sent through the post and post_preset outputs."));
+  }
+
+  // Recreate: the source image and the prompt written for it, side by side.
+  function sideBySide(items, pick) {
+    const idx = Math.max(0, items.findIndex((it) => it.filename === state.preview_media));
+    const it = items[idx] || items[0];
+    if (!state.preview_media && it) { state.preview_media = it.filename; saveState(); }
+    const step = (d) => { const n = items[(idx + d + items.length) % items.length]; set({ preview_media: n.filename }); };
+    const text = mediaPrompts[it.filename];
+    return h("div", {},
+      h("div", { class: "ost-row" },
+        h("button", { class: "ost-btn ghost", onclick: () => step(-1), title: "Previous item" }, "◀"),
+        h("div", { class: "ost-col", style: "flex:1" }, pick),
+        h("button", { class: "ost-btn ghost", onclick: () => step(1), title: "Next item" }, "▶"),
+        h("span", { class: "ost-hint" }, `${idx + 1} / ${items.length}`)),
+      h("div", { class: "ost-sbs" },
+        h("div", { class: "img" }, h("img", { src: api.apiURL("/onyx/view/" + encodeURIComponent(it.thumbnail || it.filename)), alt: it.name || it.filename })),
+        text ? h("div", { class: "txt" }, text)
+             : h("div", { class: "txt empty" }, "No prompt written for this image yet.\n✦ Generate now writes it here, and every queued run fills it in live.")));
   }
 
   // ── Gallery tab ────────────────────────────────────────────────────────────
@@ -733,10 +762,28 @@ function setupStudio(node) {
   const origConfigure = node.onConfigure?.bind(node);
   node.onConfigure = function (info) { origConfigure?.(info); readState(); render(); };
 
-  const onResult = ({ detail }) => { if (String(detail?.node) === String(node.id)) showResult(detail); };
+  const onResult = ({ detail }) => {
+    if (String(detail?.node) !== String(node.id)) return;
+    const media = runMedia;
+    if (media) mediaPrompts[media] = detail.prompt;
+    showResult({ ...detail, media });
+    if (media && state.mode === "recreate" && state.tab === "prompt") { state.preview_media = media; saveState(); renderPrompt(); }
+  };
   api.addEventListener("onyx.studio.result", onResult);
+  // The batch engine announces which item it loads; remember it for the result that follows.
+  const onBatchItem = ({ detail }) => {
+    if (String(detail?.node_id) !== String(node.id)) return;
+    const b = batch(); const id = (b.order || [])[detail.current_index ?? -1];
+    const meta = (b.images || []).find((m) => m.id === id);
+    runMedia = meta ? meta.filename : null;
+  };
+  api.addEventListener("onyx_batch_loader_update", onBatchItem);
   const origRemoved = node.onRemoved?.bind(node);
-  node.onRemoved = function () { api.removeEventListener("onyx.studio.result", onResult); origRemoved?.(); };
+  node.onRemoved = function () {
+    api.removeEventListener("onyx.studio.result", onResult);
+    api.removeEventListener("onyx_batch_loader_update", onBatchItem);
+    origRemoved?.();
+  };
 
   // The media panel changes batch_data on its own: refresh counts now and then.
   let lastBatch = "";

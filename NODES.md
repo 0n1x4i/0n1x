@@ -758,6 +758,7 @@ The creation hub: image + video batch, character LoRA + trigger (applied to MODE
 | `post` | `ONYX_POST` |  |
 | `width` | `INT` |  |
 | `height` | `INT` |  |
+| `latent` | `LATENT` |  |
 
 ---
 
