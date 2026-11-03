@@ -22,6 +22,7 @@ from PIL import Image
 from .nodes.onyx_render_profile import ensure_profile_ready
 
 from .nodes.onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+from .utils import onyx_registry as _reg
 
 
 def _onyx_core():
@@ -30,28 +31,19 @@ def _onyx_core():
 
 _PROVIDERS = ["Gemini", "Grok", "Vertex"]
 
-_GEMINI_MODELS = [
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-]
+# Model lists come from the pack-wide registry (utils/registry_defaults.json,
+# refreshed from the Worker). Ids this node already shipped are kept in
+# `always` so saved workflows keep loading even if the registry drops them.
+_GEMINI_MODELS = _reg.model_ids("gemini_text", always=(
+    "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite",
+    "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash",
+))
 
-_GROK_MODELS = [
-    # Vision-capable models (support image input)
-    "grok-4.20-0309-reasoning",
-    "grok-4.20-0309-non-reasoning",
-    "grok-4-1-fast-reasoning",
-    "grok-4-1-fast-non-reasoning",
-    "grok-2-vision-1212",
-    # Text-only models (no image input)
-    "grok-3",
-    "grok-3-fast",
-    "grok-3-mini",
-    "grok-3-mini-fast",
-]
+_GROK_MODELS = _reg.model_ids("grok", always=(
+    "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning",
+    "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning",
+    "grok-2-vision-1212", "grok-3", "grok-3-fast", "grok-3-mini", "grok-3-mini-fast",
+))
 
 # The `model` dropdown is declared with every id, because ComfyUI validates the
 # widget value server-side and would reject a Grok id if the list only held
@@ -64,14 +56,7 @@ _ALL_MODELS = _GEMINI_MODELS + _GROK_MODELS
 # Levels are NOT uniform across models — 3.1 Pro and the 2.5 family reject
 # "minimal" — so an unsupported pick is dropped rather than sent and 400'd.
 _THINKING_LEVELS  = ["default", "minimal", "low", "medium", "high"]
-_THINKING_SUPPORT = {
-    "gemini-3.6-flash":       {"minimal", "low", "medium", "high"},
-    "gemini-3.5-flash":       {"minimal", "low", "medium", "high"},
-    "gemini-3.5-flash-lite":  {"minimal", "low", "medium", "high"},
-    "gemini-3.1-pro-preview": {"low", "medium", "high"},
-    "gemini-2.5-pro":         {"low", "medium", "high"},
-    "gemini-2.5-flash":       {"low", "medium", "high"},
-}
+_THINKING_SUPPORT = _reg.thinking_support("gemini_text")  # registry: "thinking" per model
 
 # ── Deprecated sampling parameters ──────────────────────────────────────────
 # "Starting with Gemini 3.6 Flash and Gemini 3.5 Flash-Lite, temperature, top_p
@@ -81,12 +66,9 @@ _THINKING_SUPPORT = {
 # Listed explicitly rather than derived from the version number: Gemini's
 # numbering isn't monotonic (3.5 Flash-Lite shipped *after* 3.5 Flash), so a
 # ">= 3.5" test would wrongly strip temperature from 3.5 Flash.
-# ⚠️  Add every new Gemini model to this set — the deprecation applies to all
-# future releases, and sending temperature to them will eventually be a 400.
-_GEMINI_NO_SAMPLING = {
-    "gemini-3.6-flash",
-    "gemini-3.5-flash-lite",
-}
+# ⚠️  Every new Gemini model gets "no_sampling": true in utils/registry_defaults.json
+# (or in the Worker's /registry) — the deprecation applies to all future releases.
+_GEMINI_NO_SAMPLING = _reg.no_sampling_models("gemini_text")
 
 
 def _is_grok_model(*args, **kwargs):
@@ -728,6 +710,7 @@ class OnyxGeminiPromptNode:
         return float("nan")
 
     def generate(self, *args, **kwargs):
+        _reg.warn_if_deprecated(kwargs.get("model", ""), node="Prompt Generator")
         return _onyx_core()['OnyxGeminiPromptNode'].generate(self, *args, **kwargs)
 
 

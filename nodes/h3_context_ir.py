@@ -41,6 +41,8 @@ import os
 
 from .onyx_h3_guides import GUIDE_BASE_TEXT, GUIDE_REF_TEXT
 from .onyx_remote_exec import load_remote
+from ..utils import onyx_registry as _reg
+from . import onyx_h3_vfx as _h3vfx
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -105,6 +107,7 @@ TARGET_SEEDANCE = "Seedance"
 TARGET_SEEDANCE_V2 = "Seedance v2"
 TARGET_H3_ENDLESS = "MiniMax H3 Endless"
 TARGET_SEEDANCE_SEVERED = "Seedance Severed"
+TARGET_H3_RELAY = "MiniMax H3 Relay (timeless, windowed swap)"
 # Seedance Recreate: 3 body-physics registers x 2 Seedance versions x (outfit from the video | from the reference).
 _RECREATE_ALL = tuple(
     f"Seedance {_v} Recreate ({_k} jiggle" + (", outfit from ref)" if _o else ")")
@@ -123,7 +126,7 @@ _NATURAL_ALL = tuple(
     for _o in (False, True)
 )
 _TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2, TARGET_H3_ENDLESS, TARGET_SEEDANCE_SEVERED,
-            *_RECREATE_ALL, *_NATURAL_ALL]
+            *_RECREATE_ALL, *_NATURAL_ALL, TARGET_H3_RELAY]
 
 ROLE_REFERENCE = "reference"
 ROLE_FIRST = "first_frame"
@@ -133,30 +136,22 @@ _ROLES = [ROLE_REFERENCE, ROLE_FIRST, ROLE_LAST]
 # Verifie sur ai.google.dev/gemini-api/docs/models (page datee du 2026-09-02) :
 # 3.8 et 3.7 flash sont tous deux en Stable. Les combos ComfyUI serialisent la
 # CHAINE et non l'index, donc reordonner cette liste ne casse aucun workflow.
-_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-]
+_MODELS = _reg.model_ids("gemini_text", always=(
+    "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash",
+    "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash",
+))
 
 _PROVIDERS = ["Gemini", "Vertex", "Grok", "Kie"]   # Kie: same Gemini models / Kie Grok models, Kie.ai key
 
 # Meme liste que _GROK_MODELS dans grok_prompt.py, modeles vision en tete.
-_GROK_MODELS = [
-    "grok-4.20-0309-reasoning",
-    "grok-4.20-0309-non-reasoning",
-    "grok-4-1-fast-reasoning",
-    "grok-4-1-fast-non-reasoning",
-    "grok-2-vision-1212",
-]
+_GROK_MODELS = _reg.model_ids("grok", vision=True, always=(
+    "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning",
+    "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-2-vision-1212",
+))
 
 # Grok models sold by Kie.ai (provider=Kie only); with Kie, the Gemini models
 # above are used as they are.
-_KIE_GROK_MODELS = ["grok-4-7", "grok-4-6", "grok-4-5", "grok-4-3"]
+_KIE_GROK_MODELS = _reg.model_ids("kie_grok", always=("grok-4-7", "grok-4-6", "grok-4-5", "grok-4-3"))
 
 # Gemini 3 image token counts, from the media-resolution guide: 1120 at the
 # default, 280 at low - a factor of four on every keyframe. The same guide
@@ -220,6 +215,10 @@ class OnyxH3ContextIR:
                                "in ONE pass (15-30 s+): one continuous take, action beats every 3-5 s, "
                                "each speaker's speech in a single <d> block and one sentence fixing "
                                "the voice for the whole clip.\n"
+                               "MiniMax H3 Relay (timeless, windowed swap): for character-swap workflows that render in windows "
+                               "(H3 Relay + guide latent). No timecodes, no dialogue lines, no step-by-step actions: identity, "
+                               "hair, skin, wardrobe, scene and lighting only; motion, lips and speech come from the guide video "
+                               "and its audio. Every window gets the same prompt, so nothing repeats.\n"
                                "Seedance: compiles against ByteDance's six-slot grammar with "
                                "@Image 1 / @Video 1 tags.\n"
                                "Seedance v2: same tags, but outputs one structured JSON "
@@ -473,6 +472,10 @@ class OnyxH3ContextIR:
                                "providers and by models older than Gemini 3). high = deepest analysis. A "
                                "model that does not accept the chosen level is retried with its own "
                                "default."}),
+                # Added LAST (positional widget values, see above).
+                "vfx_mode": (_h3vfx.VFX_MODES, {
+                    "default": _h3vfx.VFX_NONE,
+                    "tooltip": _h3vfx.VFX_TOOLTIP}),
             },
         }
 
@@ -500,11 +503,26 @@ class OnyxH3ContextIR:
             pinned_lead_seconds=0.0, transcribe_speech=False,
             motion_from_video_only=False, keyframes_match_model=False,
             extra_prompt_rules=False, kie_api_key="", video_analysis_fps=8.0, seed=0,
-            remove_observations=True, gemini_thinking_mode="high"):
+            remove_observations=True, gemini_thinking_mode="high",
+            vfx_mode=_h3vfx.VFX_NONE):
         ensure_profile_ready()
+
+        # ── H3 VFX mode: checks + inputs, before anything is sent ──────────
+        vfx = _h3vfx.resolve(vfx_mode) if "H3" in str(target_model) else None
+        if vfx_mode != _h3vfx.VFX_NONE and vfx is None:
+            print(f"⚠️  [H3 Context-IR] vfx_mode '{vfx_mode}' only applies to MiniMax H3 targets — ignored.")
+        if vfx is not None:
+            connected = [img for img in (image_1, image_2, image_3, image_4, image_5, image_6, images_batch)
+                         if img is not None]
+            _h3vfx.check_inputs(vfx, has_source_video=video is not None, image_count=len(connected),
+                                node="H3 Context-IR")
+            if vfx.reference_rule == "none":
+                # vfx_edit: H3 gets no reference image, so pass A must not describe one.
+                image_1 = image_2 = image_3 = image_4 = image_5 = image_6 = images_batch = None
 
         guides_text = _load_guides(guide_folder)
 
+        _reg.warn_if_deprecated(model, node="H3 Context-IR")
         ns = load_remote("h3_context_ir_core", extra_globals={"__file__": __file__})
         # only sent when used: a server-side core older than Kie still runs the rest
         kie = {"kie_api_key": kie_api_key} if (kie_api_key or "").strip() else {}
@@ -516,7 +534,9 @@ class OnyxH3ContextIR:
                 kie["remove_observations"] = True            # new core only
         if gemini_thinking_mode != "high":
             kie["gemini_thinking_mode"] = gemini_thinking_mode   # new core only; "high" = the model's own default
-        return ns["run_impl"](
+        if vfx is not None:
+            kie["vfx_mode"] = vfx.mode       # new core only: lets pass B write an edit instruction
+        call_args = (
             OnyxH3ContextIR._grounding_cache, guides_text,
             intent, duration_seconds, aspect_ratio, target_model,
             provider, model, max_tokens,
@@ -528,8 +548,23 @@ class OnyxH3ContextIR:
             grounding_override, window_start_seconds,
             pinned_lead_seconds, transcribe_speech,
             motion_from_video_only, keyframes_match_model,
-            extra_prompt_rules, **kie,
+            extra_prompt_rules,
         )
+        try:
+            result = ns["run_impl"](*call_args, **kie)
+        except TypeError as e:
+            # A server core older than vfx_mode refuses the keyword before doing
+            # any work (no API call made yet): run it without, the local
+            # post-processing below still applies the VFX rules to the prompt.
+            if "vfx_mode" not in str(e):
+                raise
+            kie.pop("vfx_mode", None)
+            result = ns["run_impl"](*call_args, **kie)
+
+        has_audio = any(a is not None for a in (video_audio, ref_audio_1, ref_audio_2))
+        return _h3vfx.postprocess_result(
+            result, vfx, source_audio_guided=video_audio is not None,
+            has_audio_input=has_audio, node="H3 Context-IR")
 
 
 NODE_CLASS_MAPPINGS = {"OnyxH3ContextIR": OnyxH3ContextIR}

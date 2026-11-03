@@ -1,0 +1,404 @@
+{
+  "schema": 1,
+  "updated": "2026-11-01",
+  "_comment": "Defaults shipped with the pack. The Worker can serve a newer copy at /registry (same shape); it is merged on top of this file at startup, so a new model or a new price reaches every install without a pack release. Ids are NEVER removed from a dropdown, even when retired: ComfyUI saves the chosen string in the workflow and would refuse to load it if the option disappeared. Retired ids are flagged deprecated instead: sorted last, and a warning names the replacement when one is run.",
+  "models": {
+    "gemini_text": {
+      "default": "gemini-3.6-flash",
+      "entries": [
+        {
+          "id": "gemini-3.8-flash",
+          "thinking": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "no_sampling": true
+        },
+        {
+          "id": "gemini-3.7-flash",
+          "thinking": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "no_sampling": true
+        },
+        {
+          "id": "gemini-3.6-flash",
+          "thinking": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "no_sampling": true
+        },
+        {
+          "id": "gemini-3.5-flash",
+          "thinking": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "no_sampling": false
+        },
+        {
+          "id": "gemini-3.5-flash-lite",
+          "thinking": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "no_sampling": true
+        },
+        {
+          "id": "gemini-3.1-pro-preview",
+          "thinking": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "no_sampling": false
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "thinking": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "no_sampling": false
+        },
+        {
+          "id": "gemini-2.5-flash",
+          "thinking": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "no_sampling": false
+        }
+      ]
+    },
+    "grok": {
+      "default": "grok-4.20-0309-reasoning",
+      "entries": [
+        {
+          "id": "grok-4.20-0309-reasoning",
+          "vision": true
+        },
+        {
+          "id": "grok-4.20-0309-non-reasoning",
+          "vision": true
+        },
+        {
+          "id": "grok-4-1-fast-reasoning",
+          "vision": true
+        },
+        {
+          "id": "grok-4-1-fast-non-reasoning",
+          "vision": true
+        },
+        {
+          "id": "grok-2-vision-1212",
+          "vision": true,
+          "deprecated": true,
+          "replacement": "grok-4-1-fast-non-reasoning"
+        },
+        {
+          "id": "grok-3",
+          "vision": false
+        },
+        {
+          "id": "grok-3-fast",
+          "vision": false
+        },
+        {
+          "id": "grok-3-mini",
+          "vision": false
+        },
+        {
+          "id": "grok-3-mini-fast",
+          "vision": false
+        }
+      ]
+    },
+    "kie_grok": {
+      "default": "grok-4-7",
+      "entries": [
+        {
+          "id": "grok-4-7"
+        },
+        {
+          "id": "grok-4-6"
+        },
+        {
+          "id": "grok-4-5"
+        },
+        {
+          "id": "grok-4-3"
+        }
+      ]
+    }
+  },
+  "pricing": {
+    "currency": "USD",
+    "updated": "2026-11-01",
+    "_comment": "Price per generated image (image section, keyed by image_size) or per second of video (video section, keyed by resolution). '*' = any size. '_reference' is the model owner's list price, used as an indicative figure for a provider whose own price is not listed here (shown with a ≈ and the word 'indicative'). Fill in or correct your own rates: a local override file _cache/pricing_override.json (same shape as this 'pricing' block) wins over everything.",
+    "image": {
+      "Nano Banana Pro": {
+        "GOOGLE": {
+          "1K": 0.134,
+          "2K": 0.134,
+          "4K": 0.24
+        },
+        "WAVESPEED": {
+          "*": 0.14
+        },
+        "_reference": {
+          "1K": 0.134,
+          "2K": 0.134,
+          "4K": 0.24,
+          "8K": 0.24
+        }
+      },
+      "Nano Banana 2": {
+        "GOOGLE": {
+          "1K": 0.067,
+          "2K": 0.101,
+          "4K": 0.151
+        },
+        "_reference": {
+          "1K": 0.067,
+          "2K": 0.101,
+          "4K": 0.151
+        }
+      },
+      "Seedream 4.5": {
+        "FAL": {
+          "*": 0.04
+        },
+        "_reference": {
+          "*": 0.04
+        }
+      }
+    },
+    "video": {
+      "Veo 3.1": {
+        "GOOGLE": {
+          "720p": 0.4,
+          "1080p": 0.4
+        },
+        "_reference": {
+          "720p": 0.4,
+          "1080p": 0.4
+        }
+      },
+      "Veo 3.1 Fast": {
+        "GOOGLE": {
+          "720p": 0.1,
+          "1080p": 0.12
+        },
+        "_reference": {
+          "720p": 0.1,
+          "1080p": 0.12
+        }
+      },
+      "Veo 3.1 Lite": {
+        "GOOGLE": {
+          "720p": 0.05,
+          "1080p": 0.08
+        },
+        "_reference": {
+          "720p": 0.05,
+          "1080p": 0.08
+        }
+      },
+      "Kling 3.0": {
+        "WAVESPEED": {
+          "*": 0.084
+        }
+      }
+    }
+  },
+  "requirements": {
+    "_comment": "Used by Onyx Setup Check. node_packs: node class -> the pack that provides it. models: file name -> ComfyUI models/ sub-folder and download link. url null = not known yet: fill it in (here or in the Worker's /registry).",
+    "node_packs": {
+      "Krea2EditGroundedEncode": {
+        "pack": "comfyui-krea2edit (tested 1.2.5)",
+        "url": "https://github.com/lbouaraba/comfyui-krea2edit"
+      },
+      "Krea2EditModelPatch": {
+        "pack": "comfyui-krea2edit (tested 1.2.5)",
+        "url": "https://github.com/lbouaraba/comfyui-krea2edit"
+      },
+      "PathchSageAttentionKJ": {
+        "pack": "ComfyUI-KJNodes",
+        "url": "https://github.com/kijai/ComfyUI-KJNodes"
+      },
+      "Power Lora Loader (rgthree)": {
+        "pack": "rgthree-comfy",
+        "url": "https://github.com/rgthree/rgthree-comfy"
+      },
+      "NodeForge_Image_BatchLoader": {
+        "pack": "nodeforge-lab",
+        "url": null
+      },
+      "VHS_LoadVideo": {
+        "pack": "ComfyUI-VideoHelperSuite",
+        "url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+      },
+      "VHS_VideoCombine": {
+        "pack": "ComfyUI-VideoHelperSuite",
+        "url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+      },
+      "MiniMaxH3AddGuide": {
+        "pack": "ComfyUI core v0.34.0 or later (update ComfyUI)",
+        "url": "https://github.com/Comfy-Org/ComfyUI"
+      },
+      "MiniMaxH3ReferenceToVideo": {
+        "pack": "ComfyUI core with MiniMax H3 support (update ComfyUI)",
+        "url": "https://github.com/Comfy-Org/ComfyUI"
+      },
+      "MiniMaxH3PDDAccApply": {
+        "pack": "ComfyUI-MiniMax-H3-PDD-Acc",
+        "url": "https://github.com/Jalen-Brunson/ComfyUI-MiniMax-H3-PDD-Acc"
+      },
+      "OnyxConditioningCache": {
+        "pack": "Onyx pack (update it: git pull in custom_nodes/Onyx)",
+        "url": "https://github.com/0n1x4i/0n1x"
+      },
+      "Image Comparer (rgthree)": {
+        "pack": "rgthree-comfy",
+        "url": "https://github.com/rgthree/rgthree-comfy"
+      },
+      "SkinDetailer": {
+        "pack": "ComfyUI_FearnworksNodes",
+        "url": "https://github.com/fearnworks/ComfyUI_FearnworksNodes"
+      },
+      "FameGridColorFinish": {
+        "pack": "ComfyUI_FearnworksNodes",
+        "url": "https://github.com/fearnworks/ComfyUI_FearnworksNodes"
+      },
+      "CurvesAdjustPro": {
+        "pack": "ComfyUI_FearnworksNodes",
+        "url": "https://github.com/fearnworks/ComfyUI_FearnworksNodes"
+      },
+      "LevelsAdjust": {
+        "pack": "ComfyUI_FearnworksNodes",
+        "url": "https://github.com/fearnworks/ComfyUI_FearnworksNodes"
+      },
+      "Int": {
+        "pack": "ComfyUI_FearnworksNodes",
+        "url": "https://github.com/fearnworks/ComfyUI_FearnworksNodes"
+      },
+      "LensFX": {
+        "pack": "CRT-Nodes",
+        "url": "https://github.com/PGCRT/CRT-Nodes"
+      },
+      "CRT Post-Process Suite": {
+        "pack": "CRT-Nodes",
+        "url": "https://github.com/PGCRT/CRT-Nodes"
+      },
+      "ConditioningAddImageReference": {
+        "pack": "ComfyUi-TextEncodeEditAdvanced",
+        "url": "https://github.com/BigStationW/ComfyUi-TextEncodeEditAdvanced"
+      },
+      "AnyAdapterNode": {
+        "pack": "DemonAlone-nodes-ComfyUI",
+        "url": "https://github.com/DemonAlone/DemonAlone-nodes-ComfyUI"
+      },
+      "MoreJPEG": {
+        "pack": "comfyui-realisim-enhancor",
+        "url": "https://github.com/amrnidal999-tech/comfyui-realisim-enhancor"
+      },
+      "RealismInjector": {
+        "pack": "realism_injector",
+        "url": null
+      }
+    },
+    "models": {
+      "krea2_turbo_fp8_scaled.safetensors": {
+        "folder": "diffusion_models",
+        "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors"
+      },
+      "qwen3vl_4b_bf16.safetensors": {
+        "folder": "text_encoders",
+        "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_bf16.safetensors"
+      },
+      "qwen_image_vae.safetensors": {
+        "folder": "vae",
+        "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors"
+      },
+      "krea2_identity_edit_v1_2_r128.safetensors": {
+        "folder": "loras",
+        "url": "https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v1_2_r128.safetensors"
+      },
+      "minimax_h3_ref2va_pruned_int8_convrot.safetensors": {
+        "folder": "diffusion_models",
+        "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+      },
+      "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": {
+        "folder": "text_encoders",
+        "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+      },
+      "minimax_h3_video_vae_fp16.safetensors": {
+        "folder": "vae",
+        "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors"
+      },
+      "minimax_h3_audio_vae_fp32.safetensors": {
+        "folder": "vae",
+        "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors"
+      },
+      "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors": {
+        "folder": "loras",
+        "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"
+      },
+      "MiniMax-H3-Ref2VA-Acc-8Step.safetensors": {
+        "folder": "pdd_acc",
+        "url": "https://huggingface.co/alibaba-pai/MiniMax-H3-Acc-LoRAs/resolve/main/MiniMax-H3-Ref2VA-Acc-8Step.safetensors"
+      },
+      "minimax_h3_vfx_edit_v1.0_r128.safetensors": {
+        "folder": "loras",
+        "url": "https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/resolve/main/loras/minimax_h3_vfx_edit_v1.0_r128.safetensors"
+      },
+      "minimax_h3_vfx_edit_v1.0_r128_ffp.safetensors": {
+        "folder": "loras",
+        "url": "https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/resolve/main/loras/minimax_h3_vfx_edit_v1.0_r128_ffp.safetensors"
+      },
+      "minimax_h3_style_transfer_v1.0_r64.safetensors": {
+        "folder": "loras",
+        "url": "https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/resolve/main/loras/minimax_h3_style_transfer_v1.0_r64.safetensors"
+      },
+      "flux-2-klein-9b.safetensors": {
+        "folder": "diffusion_models",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-9B"
+      },
+      "qwen_3_8b_fp8mixed.safetensors": {
+        "folder": "text_encoders",
+        "url": "https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors"
+      },
+      "flux2-vae.safetensors": {
+        "folder": "vae",
+        "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors"
+      },
+      "f2k_9B_lcs_consist_20260415 (1).safetensors": {
+        "folder": "loras",
+        "url": null
+      },
+      "HighResolution9B.safetensors": {
+        "folder": "loras",
+        "url": null
+      },
+      "1x-ITF-SkinDiffDetail-Lite-v1.pth": {
+        "folder": "upscale_models",
+        "url": "https://huggingface.co/uwg/upscaler/resolve/main/ESRGAN/1x-ITF-SkinDiffDetail-Lite-v1.pth"
+      }
+    }
+  }
+}

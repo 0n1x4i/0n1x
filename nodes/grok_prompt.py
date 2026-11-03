@@ -25,6 +25,7 @@ import random
 import re
 
 from .onyx_remote_exec import load_remote
+from ..utils import onyx_registry as _reg
 
 
 # Tirage aleatoire {a|b|c} dans le prompt, resolu ICI avant l'envoi a Grok.
@@ -60,17 +61,11 @@ def _resolve_choices(text, seed):
 
 # Vision-capable models (support image input) first, text-only models after.
 # Same list as _GROK_MODELS in gemini_prompt.py for consistency across the pack.
-_GROK_MODELS = [
-    "grok-4.20-0309-reasoning",
-    "grok-4.20-0309-non-reasoning",
-    "grok-4-1-fast-reasoning",
-    "grok-4-1-fast-non-reasoning",
-    "grok-2-vision-1212",
-    "grok-3",
-    "grok-3-fast",
-    "grok-3-mini",
-    "grok-3-mini-fast",
-]
+_GROK_MODELS = _reg.model_ids("grok", always=(
+    "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning",
+    "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning",
+    "grok-2-vision-1212", "grok-3", "grok-3-fast", "grok-3-mini", "grok-3-mini-fast",
+))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Presets — meme mecanique que OnyxNanoBananaAIO : un JSON a cote du node, deux
@@ -283,6 +278,8 @@ class OnyxGrokPromptNode:
         prompt, _picks = _resolve_choices(prompt or "", seed)
         if _picks:
             print(f"🎲 [Onyx Grok] Random picks (seed {seed}): " + " · ".join(p[:60] for p in _picks))
+        if provider != "OpenRouter":
+            _reg.warn_if_deprecated(model, node="Grok Prompt")
         ns = load_remote("grok_prompt_core")
         extra = {}
         if provider == "OpenRouter":

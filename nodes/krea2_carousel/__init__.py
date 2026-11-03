@@ -11,6 +11,7 @@ from .director import OnyxVisualPromptDirector
 from .krea2_carousel import OnyxKrea2CarouselDirector
 from .pose_prep import OnyxKrea2PoseListPrep
 from .simple_carousel import OnyxTextCarouselDirector
+from .story_director import OnyxKrea2StoryDirector
 from . import routes as _routes  # noqa: F401 - registers the /onyx/nf/* endpoints
 
 NODE_CLASS_MAPPINGS = {
@@ -19,6 +20,7 @@ NODE_CLASS_MAPPINGS = {
     "OnyxTextCarouselDirector": OnyxTextCarouselDirector,
     "OnyxKrea2CarouselDirector": OnyxKrea2CarouselDirector,
     "OnyxKrea2PoseListPrep": OnyxKrea2PoseListPrep,
+    "OnyxKrea2StoryDirector": OnyxKrea2StoryDirector,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -27,6 +29,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "OnyxTextCarouselDirector": "Onyx Text Carousel Director",
     "OnyxKrea2CarouselDirector": "Onyx Krea2 Edit Carousel Director",
     "OnyxKrea2PoseListPrep": "Onyx Krea2 Pose List Prep",
+    "OnyxKrea2StoryDirector": "Onyx Krea2 Story Director (Carousel)",
 }
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

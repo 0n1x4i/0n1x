@@ -67,6 +67,8 @@ except ImportError:
 from ..utils.image_utils import tensor_to_pil
 from .onyx_render_profile import ensure_profile_ready
 from .onyx_remote_exec import load_remote
+from ..utils import onyx_api_cache as _api_cache
+from ..utils import onyx_cost as _api_cost
 
 
 # ── Values other pack files import directly (kept local, zero network) ──
@@ -224,7 +226,15 @@ def _load_vertex_json_folder(folder_path: str) -> list:
     return json_files
 
 _YUNET_MIN_BYTES = 200_000        # le modele reel fait ~232 Ko
+# Empreinte du fichier officiel (opencv_zoo, face_detection_yunet_2023mar.onnx,
+# 232 589 octets), verifiee le 2026-11-03 contre GitHub LFS. Un fichier qui ne
+# correspond pas (miroir corrompu, page d'erreur, fichier tronque ou remplace)
+# est refuse au lieu d'etre charge par OpenCV.
+_YUNET_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 _YUNET_SOURCES = [
+    # media.githubusercontent.com sert le vrai contenu des fichiers git-LFS.
+    "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/"
+    "face_detection_yunet/face_detection_yunet_2023mar.onnx",
     # Le miroir jsDelivr sert le contenu reel meme quand le fichier est suivi
     # par git-LFS, la ou l'URL /raw/ de GitHub peut renvoyer un pointeur texte.
     "https://cdn.jsdelivr.net/gh/opencv/opencv_zoo@main/models/"
@@ -255,6 +265,11 @@ def _yunet_problem(path: str):
     # Un ONNX est un protobuf : le premier champ est ir_version (0x08).
     if magic not in (b"\x08", b"\x0a", b"\x12"):
         return f"ce n'est pas un fichier ONNX (premier octet {magic!r})"
+    import hashlib
+    with open(path, "rb") as fh:
+        digest = hashlib.sha256(fh.read()).hexdigest()
+    if digest != _YUNET_SHA256:
+        return f"empreinte SHA-256 inattendue ({digest[:12]}…) — fichier modifie ou corrompu"
     return None
 
 
@@ -658,9 +673,21 @@ class OnyxNanoBananaAIO:
                     "default": "", "multiline": False,
                     "tooltip": "[ATLASCLOUD] Atlas Cloud API key (Nano Banana Pro / 2 / 2.1 only).",
                 }),
+                # Ajoute APRES atlascloud_api_key (regle des widgets positionnels
+                # ci-dessus) : c'est desormais le DERNIER widget.
+                "cache_mode": (_api_cache.CACHE_MODES, {
+                    "default": _api_cache.CACHE_OFF,
+                    "tooltip": _api_cache.CACHE_TOOLTIP,
+                }),
             },
+            # Id du node, pour afficher l'estimation de cout sur CE node (badge JS).
+            "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
+    DESCRIPTION   = ("Image and video generation / editing in one node: Nano Banana Pro / 2 / 2.1, "
+                     "Seedream, GPT Image, Veo 3.1, Kling, Wan, Seedance and Omni, through Google, "
+                     "Vertex, WaveSpeed, Kie.ai, fal.ai or Atlas Cloud. The badge above the node "
+                     "shows the estimated API cost of the next run.")
     RETURN_TYPES  = ("IMAGE", "STRING", "STRING")
     RETURN_NAMES  = ("images", "video", "grounding_sources")
     OUTPUT_NODE   = False
@@ -673,7 +700,41 @@ class OnyxNanoBananaAIO:
         return float("nan")
 
     def generate_unified(self, **kwargs):
-        return self._impl.generate_unified(**kwargs)
+        # Local-only plumbing around the protected implementation: cost
+        # estimate + optional result cache. The generation itself is untouched
+        # and still runs server-side code. Our extra keys are popped first so
+        # the remote signature never sees them (Dataset Creator / Content
+        # Remaker / Re-pose call this method too, without them).
+        unique_id = kwargs.pop("unique_id", None)
+        cache_mode = kwargs.pop("cache_mode", _api_cache.CACHE_OFF)
+
+        est = _api_cost.estimate_aio(kwargs)
+        _api_cost.notify_node(unique_id, est)
+
+        key = None
+        if cache_mode == _api_cache.CACHE_REUSE:
+            key = _api_cache.make_key("OnyxNanoBananaAIO", kwargs)
+            hit = _api_cache.load(key)
+            if hit is not None and not isinstance(hit["images"], list):
+                ensure_profile_ready()   # a cache hit is not a way around the licence
+                texts = list(hit["texts"]) + ["", ""]
+                print("♻️  [Nano Banana AIO] identical request already generated — "
+                      "reused from cache, not billed.")
+                _api_cost.record("Nano Banana AIO", est, cache_hit=True)
+                _api_cost.notify_node(unique_id, est, final=True, cache_hit=True)
+                return (hit["images"], hit["video"] or texts[0], texts[1])
+
+        result = self._impl.generate_unified(**kwargs)
+
+        _api_cost.record("Nano Banana AIO", est)
+        _api_cost.notify_node(unique_id, est, final=True)
+        if key and isinstance(result, (tuple, list)) and len(result) >= 3:
+            images, video, grounding = result[0], result[1], result[2]
+            video_file = video if isinstance(video, str) and os.path.isfile(video) else ""
+            _api_cache.store(key, images=images, video_path=video_file,
+                             texts=["" if video_file else (video or ""), grounding or ""],
+                             info={"provider": kwargs.get("provider"), "model": kwargs.get("model")})
+        return result
 
 
     # ─────────────────────────────────────────────────────────────
