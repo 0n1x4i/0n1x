@@ -230,12 +230,12 @@
     "_comment": "Used by Onyx Setup Check. node_packs: node class -> the pack that provides it. models: file name -> ComfyUI models/ sub-folder and download link. url null = not known yet: fill it in (here or in the Worker's /registry).",
     "node_packs": {
       "Krea2EditGroundedEncode": {
-        "pack": "comfyui-krea2edit (tested 1.2.5)",
-        "url": null
+        "pack": "comfyui-krea2edit (lbouaraba)",
+        "url": "https://github.com/lbouaraba/comfyui-krea2edit"
       },
       "Krea2EditModelPatch": {
-        "pack": "comfyui-krea2edit (tested 1.2.5)",
-        "url": null
+        "pack": "comfyui-krea2edit (lbouaraba)",
+        "url": "https://github.com/lbouaraba/comfyui-krea2edit"
       },
       "PathchSageAttentionKJ": {
         "pack": "ComfyUI-KJNodes",
@@ -273,11 +273,12 @@
     "models": {
       "krea2_turbo_fp8_scaled.safetensors": {
         "folder": "diffusion_models",
-        "url": null
+        "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors"
       },
       "qwen3vl_4b_bf16.safetensors": {
         "folder": "text_encoders",
-        "url": null
+        "url": "https://huggingface.co/Comfy-Org/Krea-2/tree/main/text_encoders",
+        "note": "page link: pick the Qwen3-VL 4B file there (fp8_scaled / int8 also work with Krea 2)"
       },
       "qwen_image_vae.safetensors": {
         "folder": "vae",
@@ -285,7 +286,8 @@
       },
       "krea2_identity_edit_v1_2_r128.safetensors": {
         "folder": "loras",
-        "url": null
+        "url": "https://huggingface.co/conradlocke/krea2-identity-edit",
+        "note": "page link: the author now recommends krea2_identity_edit_v2"
       },
       "minimax_h3_ref2va_pruned_int8_convrot.safetensors": {
         "folder": "diffusion_models",
@@ -322,6 +324,10 @@
       "minimax_h3_style_transfer_v1.0_r64.safetensors": {
         "folder": "loras",
         "url": "https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/resolve/main/loras/minimax_h3_style_transfer_v1.0_r64.safetensors"
+      },
+      "krea2_identity_edit_v2.safetensors": {
+        "folder": "loras",
+        "url": "https://huggingface.co/conradlocke/krea2-identity-edit/resolve/main/krea2_identity_edit_v2.safetensors"
       }
     }
   }
