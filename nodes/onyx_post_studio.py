@@ -82,7 +82,7 @@ STAGE_KEYS = [s["key"] for s in STAGES]
 # New stages start switched off: the Crispy chain is unchanged until you turn them on.
 _DEFAULT_OFF = {"skintone", "dehaze", "clarity", "lut", "lens", "smudge", "clip", "hdr", "chroma"}
 # Extra node inputs a stage receives from the Post Studio's own optional inputs.
-_STAGE_INPUTS = {"skin": {"depth_map": "depth_map"}, "lens": {"depth_map": "depth_map"},
+_STAGE_INPUTS = {"skin": {"depth_map": "depth_map"}
                  "motion": {"motion_override": "preset_override"}}
 _NEEDS: dict = {}                       # stage -> input it cannot run without (skipped with a note)
 _HIDDEN_PARAMS = {"enabled"}            # Camera Look's own on/off = the stage switch
@@ -430,7 +430,7 @@ class OnyxPostStudio:
             },
             "optional": {
                 **_onyx_post.POST_INPUT,
-                "depth_map": ("IMAGE", {"tooltip": "Optional depth map for Skin & eyes and Lens character (bright = near)."}),
+                "depth_map": ("IMAGE", {"tooltip": "Optional depth map for Skin & eyes (bright = near)."}),
                 "motion_override": ("STRING", {"forceInput": True,
                     "tooltip": "A Camera Shake preset name (e.g. Onyx Studio's post_preset). 'none' = no "
                                "shake, empty = the Motion tab's preset."}),

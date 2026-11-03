@@ -6,7 +6,7 @@ Onyx Lens Character — the optical signature of a real lens, on GPU.
 Same controls as a classic "lens / bokeh" post node, written from scratch for
 Onyx in torch (runs on the GPU, whole batch at once):
 
-  * focus map: radial, gradient (top / bottom), flat (no focus blur) or a depth map;
+  * focus map: radial, gradient_top or flat (no focus blur);
   * out-of-focus blur with a polygon aperture (number of blades), highlight bloom,
     longitudinal CA (red / blue blur slightly larger / smaller), field curvature
     (edge_softness) and cat-eye smearing toward the corners;
@@ -24,7 +24,7 @@ import torch.nn.functional as F
 
 from .onyx_render_profile import ensure_profile_ready
 
-_FOCUS_MODES = ["radial", "gradient_top", "gradient_bottom", "depth_input", "flat"]
+_FOCUS_MODES = ["radial", "gradient_top", "flat"]
 
 
 def _luma(x):  # x: [B,3,H,W]
@@ -97,7 +97,7 @@ class OnyxLensCharacter:
                     "tooltip": "Out-of-focus blur radius in pixels. 0 = no blur."}),
                 "focus_center_x": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "focus_center_y": ("FLOAT", {"default": 0.42, "min": 0.0, "max": 1.0, "step": 0.01,
-                    "tooltip": "Radial: focus centre. Gradients: sharp line. Depth: focus plane (0 near … 1 far)."}),
+                    "tooltip": "Radial: focus centre. gradient_top: the sharp line."}),
                 "focus_size": ("FLOAT", {"default": 0.38, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "focus_feather": ("FLOAT", {"default": 0.55, "min": 0.01, "max": 2.0, "step": 0.01}),
                 "aperture_blades": ("INT", {"default": 7, "min": 0, "max": 16,
@@ -114,7 +114,6 @@ class OnyxLensCharacter:
                     "tooltip": "Bloom of bright highlights inside the bokeh."}),
                 "invert": ("BOOLEAN", {"default": False, "tooltip": "Swap sharp and blurred areas."}),
             },
-            "optional": {"depth_map": ("IMAGE", {"tooltip": "For focus_mode = depth_input."})},
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -125,28 +124,13 @@ class OnyxLensCharacter:
 
     # ── focus map: 0 = sharp, 1 = max blur ─────────────────────────────────
     @staticmethod
-    def _focus(b, h, w, mode, cx, cy, size, feather, invert, depth, device, dtype):
+    def _focus(b, h, w, mode, cx, cy, size, feather, invert, device, dtype):
         if mode == "flat":
             amt = torch.zeros(b, 1, h, w, device=device, dtype=dtype)
-        elif mode == "depth_input" and depth is not None:
-            d = depth.to(device=device, dtype=dtype).movedim(-1, 1)
-            d = _luma(d) if d.shape[1] >= 3 else d[:, :1]
-            if d.shape[-2:] != (h, w):
-                d = F.interpolate(d, size=(h, w), mode="bilinear", align_corners=False)
-            if d.shape[0] != b:
-                d = d[:1].expand(b, -1, -1, -1)
-            lo = d.amin(dim=(2, 3), keepdim=True)
-            hi = d.amax(dim=(2, 3), keepdim=True)
-            d = (d - lo) / (hi - lo + 1e-6)
-            if invert:
-                d = 1.0 - d
-            amt = (d - cy).abs()
-            amt = amt / (amt.amax(dim=(2, 3), keepdim=True) + 1e-6)
-            return amt.clamp(0, 1)
         else:
             y = torch.linspace(0, 1, h, device=device, dtype=dtype).view(1, 1, h, 1).expand(b, 1, h, w)
             x = torch.linspace(0, 1, w, device=device, dtype=dtype).view(1, 1, 1, w).expand(b, 1, h, w)
-            if mode in ("gradient_top", "gradient_bottom"):
+            if mode == "gradient_top":
                 amt = (y - cy).abs()
             else:  # radial
                 amt = ((torch.sqrt((x - cx) ** 2 + (y - cy) ** 2) - size) / max(feather, 1e-3))
@@ -157,7 +141,7 @@ class OnyxLensCharacter:
 
     def run(self, image, focus_mode, blur_strength, focus_center_x, focus_center_y, focus_size,
             focus_feather, aperture_blades, cat_eye, long_ca, transverse_ca, optical_vignette,
-            edge_softness, bokeh_highlight, invert, depth_map=None):
+            edge_softness, bokeh_highlight, invert):
         ensure_profile_ready()
         import comfy.model_management as mm
         device = mm.get_torch_device()
@@ -167,10 +151,8 @@ class OnyxLensCharacter:
             alpha = src[..., 3:] if src.shape[-1] > 3 else None
             x = src[..., :3].movedim(-1, 1)        # [1,3,H,W]
             _, _, h, w = x.shape
-            dep = depth_map[min(i, depth_map.shape[0] - 1):min(i, depth_map.shape[0] - 1) + 1] \
-                if depth_map is not None else None
             fmap = self._focus(1, h, w, focus_mode, focus_center_x, focus_center_y, focus_size,
-                               focus_feather, invert, dep, device, x.dtype)
+                               focus_feather, invert, device, x.dtype)
             redge = _radius_grid(1, h, w, device)
 
             if edge_softness > 0:
