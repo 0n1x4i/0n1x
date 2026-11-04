@@ -18,14 +18,14 @@ from ..utils import onyx_post as _post
 class OnyxPostStyle:
     """Pick a post-processing look (+ motion) that overrides every Onyx post node it is wired to."""
 
-    DESCRIPTION = ("One choice for the whole post-processing chain: crispy, clean, amateur, night, flash, "
-                   "golden (+ camera motion). Wire `post` to the onyx_post input of the post nodes.")
+    DESCRIPTION = ("One choice for the whole post-processing chain: crispy, clean, amateur, night, flash "
+                   "(+ camera motion). Wire `post` to the onyx_post input of the post nodes.")
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "look": (list(_post.looks()), {"default": "none",
+                "look": (_post.look_names(), {"default": "none",
                          "tooltip": "\n".join(f"{k}: {v}" for k, v in _post.LOOK_INFO.items())}),
                 "motion": (_post.MOTIONS, {"default": "none",
                            "tooltip": "Camera Shake preset. none = no shake; manual = the Camera Shake node "

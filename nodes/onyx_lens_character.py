@@ -24,65 +24,45 @@ import torch.nn.functional as F
 
 from .onyx_render_profile import ensure_profile_ready
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('postfx_bundle', 'onyx_lens_character', __package__)
+    return ns
+
+
 _FOCUS_MODES = ["radial", "gradient_top", "gradient_bottom", "depth_input", "flat"]
 
 
-def _luma(x):  # x: [B,3,H,W]
-    return 0.2126 * x[:, 0:1] + 0.7152 * x[:, 1:2] + 0.0722 * x[:, 2:3]
+def _luma(*args, **kwargs):
+    return _onyx_core()['_luma'](*args, **kwargs)
 
 
-def _radius_grid(b, h, w, device):
-    """Normalised distance to the frame centre: 0 at the centre, 1 at the corners."""
-    y = torch.linspace(-0.5, 0.5, h, device=device).view(1, 1, h, 1)
-    x = torch.linspace(-0.5, 0.5, w, device=device).view(1, 1, 1, w)
-    return (torch.sqrt(x * x + y * y) / math.sqrt(0.5)).expand(b, 1, h, w)
+
+def _radius_grid(*args, **kwargs):
+    return _onyx_core()['_radius_grid'](*args, **kwargs)
 
 
-def _gauss(x, sigma):
-    if sigma <= 0.05:
-        return x
-    r = max(1, int(math.ceil(sigma * 3)))
-    t = torch.arange(-r, r + 1, device=x.device, dtype=x.dtype)
-    k = torch.exp(-(t * t) / (2 * sigma * sigma))
-    k = k / k.sum()
-    c = x.shape[1]
-    x = F.pad(x, (r, r, 0, 0), mode="reflect")
-    x = F.conv2d(x, k.view(1, 1, 1, -1).repeat(c, 1, 1, 1), groups=c)
-    x = F.pad(x, (0, 0, r, r), mode="reflect")
-    return F.conv2d(x, k.view(1, 1, -1, 1).repeat(c, 1, 1, 1), groups=c)
+
+def _gauss(*args, **kwargs):
+    return _onyx_core()['_gauss'](*args, **kwargs)
 
 
-def _aperture(radius, blades, device, dtype):
-    """Normalised aperture kernel: a disc, or a regular polygon with `blades` sides."""
-    r = max(1, int(round(radius)))
-    t = torch.arange(-r, r + 1, device=device, dtype=dtype)
-    yy, xx = torch.meshgrid(t, t, indexing="ij")
-    dist = torch.sqrt(xx * xx + yy * yy) / r
-    if blades >= 3:
-        half = math.pi / blades
-        ang = torch.remainder(torch.atan2(yy, xx), 2 * half) - half
-        edge = math.cos(half) / torch.clamp(torch.cos(ang), min=1e-3)
-        k = (dist <= edge).to(dtype)
-    else:
-        k = (dist <= 1.0).to(dtype)
-    return k / k.sum().clamp(min=1e-6)
+
+def _aperture(*args, **kwargs):
+    return _onyx_core()['_aperture'](*args, **kwargs)
 
 
-def _conv_kernel(x, k):
-    c = x.shape[1]
-    p = k.shape[-1] // 2
-    x = F.pad(x, (p, p, p, p), mode="reflect")
-    return F.conv2d(x, k.view(1, 1, *k.shape).repeat(c, 1, 1, 1), groups=c)
+
+def _conv_kernel(*args, **kwargs):
+    return _onyx_core()['_conv_kernel'](*args, **kwargs)
 
 
-def _scale_from_centre(ch, s):
-    """Resample one channel [B,1,H,W] magnified by s around the centre (lateral CA)."""
-    b, _, h, w = ch.shape
-    y = torch.linspace(-1, 1, h, device=ch.device, dtype=ch.dtype) / s
-    x = torch.linspace(-1, 1, w, device=ch.device, dtype=ch.dtype) / s
-    gy, gx = torch.meshgrid(y, x, indexing="ij")
-    grid = torch.stack((gx, gy), -1).unsqueeze(0).expand(b, h, w, 2)
-    return F.grid_sample(ch, grid, mode="bilinear", padding_mode="reflection", align_corners=True)
+
+def _scale_from_centre(*args, **kwargs):
+    return _onyx_core()['_scale_from_centre'](*args, **kwargs)
+
 
 
 class OnyxLensCharacter:
@@ -123,99 +103,14 @@ class OnyxLensCharacter:
     DESCRIPTION = ("Real-lens character on GPU: focus blur with polygon bokeh, longitudinal and lateral "
                    "chromatic aberration, field curvature, cat-eye and optical vignette.")
 
-    # ── focus map: 0 = sharp, 1 = max blur ─────────────────────────────────
     @staticmethod
-    def _focus(b, h, w, mode, cx, cy, size, feather, invert, depth, device, dtype):
-        if mode == "flat":
-            amt = torch.zeros(b, 1, h, w, device=device, dtype=dtype)
-        elif mode == "depth_input" and depth is not None:
-            d = depth.to(device=device, dtype=dtype).movedim(-1, 1)
-            d = _luma(d) if d.shape[1] >= 3 else d[:, :1]
-            if d.shape[-2:] != (h, w):
-                d = F.interpolate(d, size=(h, w), mode="bilinear", align_corners=False)
-            if d.shape[0] != b:
-                d = d[:1].expand(b, -1, -1, -1)
-            lo = d.amin(dim=(2, 3), keepdim=True)
-            hi = d.amax(dim=(2, 3), keepdim=True)
-            d = (d - lo) / (hi - lo + 1e-6)
-            if invert:
-                d = 1.0 - d
-            amt = (d - cy).abs()
-            amt = amt / (amt.amax(dim=(2, 3), keepdim=True) + 1e-6)
-            return amt.clamp(0, 1)
-        else:
-            y = torch.linspace(0, 1, h, device=device, dtype=dtype).view(1, 1, h, 1).expand(b, 1, h, w)
-            x = torch.linspace(0, 1, w, device=device, dtype=dtype).view(1, 1, 1, w).expand(b, 1, h, w)
-            if mode in ("gradient_top", "gradient_bottom"):
-                amt = (y - cy).abs()
-            else:  # radial
-                amt = ((torch.sqrt((x - cx) ** 2 + (y - cy) ** 2) - size) / max(feather, 1e-3))
-            amt = amt.clamp(0, 1)
-        if invert:
-            amt = 1.0 - amt
-        return _gauss(amt, max(1.0, min(h, w) * 0.01)).clamp(0, 1)
+    def _focus(*args, **kwargs):
+        return _onyx_core()['OnyxLensCharacter']._focus(*args, **kwargs)
 
-    def run(self, image, focus_mode, blur_strength, focus_center_x, focus_center_y, focus_size,
-            focus_feather, aperture_blades, cat_eye, long_ca, transverse_ca, optical_vignette,
-            edge_softness, bokeh_highlight, invert, depth_map=None):
-        ensure_profile_ready()
-        import comfy.model_management as mm
-        device = mm.get_torch_device()
-        out = []
-        for i in range(image.shape[0]):           # one frame at a time: big kernels stay in VRAM
-            src = image[i:i + 1].to(device=device, dtype=torch.float32)
-            alpha = src[..., 3:] if src.shape[-1] > 3 else None
-            x = src[..., :3].movedim(-1, 1)        # [1,3,H,W]
-            _, _, h, w = x.shape
-            dep = depth_map[min(i, depth_map.shape[0] - 1):min(i, depth_map.shape[0] - 1) + 1] \
-                if depth_map is not None else None
-            fmap = self._focus(1, h, w, focus_mode, focus_center_x, focus_center_y, focus_size,
-                               focus_feather, invert, dep, device, x.dtype)
-            redge = _radius_grid(1, h, w, device)
 
-            if edge_softness > 0:
-                fmap = (fmap + edge_softness * 0.5 * redge ** 2 * (1 - fmap)).clamp(0, 1)
+    def run(self, *args, **kwargs):
+        return _onyx_core()['OnyxLensCharacter'].run(self, *args, **kwargs)
 
-            res = x
-            if blur_strength > 0.1:
-                srcb = x
-                if bokeh_highlight > 0:
-                    hl = ((_luma(x) - 0.72) / 0.28).clamp(0, 1)
-                    srcb = x + hl * bokeh_highlight
-                radius = min(40.0, max(2.0, float(blur_strength)))
-                blades = int(aperture_blades)
-                disk = _conv_kernel(srcb, _aperture(radius, blades, device, x.dtype))
-                if long_ca > 0:
-                    kr = _aperture(radius * (1 + 0.12 * long_ca), blades, device, x.dtype)
-                    kb = _aperture(max(1.0, radius * (1 - 0.12 * long_ca)), blades, device, x.dtype)
-                    disk = torch.cat([_conv_kernel(srcb[:, 0:1], kr), disk[:, 1:2],
-                                      _conv_kernel(srcb[:, 2:3], kb)], 1)
-                mid = _gauss(srcb, max(0.5, radius * 0.4))
-                # 0 → sharp, 0.5 → soft gaussian, 1 → full aperture bokeh
-                t = fmap * 2.0
-                lo = (t.clamp(0, 1))
-                hi = ((t - 1.0).clamp(0, 1))
-                res = x * (1 - lo) + mid * lo
-                res = res * (1 - hi) + disk * hi
-                res = res.clamp(0, 1)
-                if cat_eye > 0:
-                    smear = _gauss(res, max(0.5, radius * 0.5))
-                    wgt = cat_eye * 0.4 * redge ** 2 * fmap
-                    res = res * (1 - wgt) + smear * wgt
-
-            if transverse_ca > 0:
-                s = transverse_ca * 0.004
-                res = torch.cat([_scale_from_centre(res[:, 0:1], 1.0 + s), res[:, 1:2],
-                                 _scale_from_centre(res[:, 2:3], 1.0 - s)], 1)
-
-            if optical_vignette > 0:
-                res = res * (1.0 - optical_vignette * redge ** 2)
-
-            res = res.clamp(0, 1).movedim(1, -1)
-            if alpha is not None:
-                res = torch.cat([res, alpha], -1)
-            out.append(res.to(device=image.device, dtype=image.dtype))
-        return (torch.cat(out, 0),)
 
 
 NODE_CLASS_MAPPINGS = {"OnyxLensCharacter": OnyxLensCharacter}

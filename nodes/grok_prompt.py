@@ -88,7 +88,17 @@ _PRESET_KEYS = [
 ]
 
 
-def _load_presets() -> dict:
+def _factory_presets(wait: float = 0.0) -> dict:
+    """Factory presets: protected data from the Worker (onyx_data_core GROK_PRESETS)."""
+    try:
+        from ..utils import onyx_remote_data as _rd
+        return {int(k): v for k, v in (_rd.get("GROK_PRESETS", {}, wait=wait) or {}).items()}
+    except Exception:
+        return {}
+
+
+def _local_presets() -> dict:
+    """The user's own presets (JSON next to the node). They win over the factory ones."""
     if not os.path.isfile(_PRESETS_FILE):
         return {}
     try:
@@ -99,16 +109,26 @@ def _load_presets() -> dict:
         return {}
 
 
+def _load_presets() -> dict:
+    presets = _factory_presets(wait=5.0)
+    presets.update(_local_presets())
+    return presets
+
+
 def _save_presets(presets: dict) -> bool:
+    """Writes only what differs from the factory presets: the factory data never lands in
+    the local file (so it is never committed or shipped with the pack)."""
+    factory = _factory_presets()
+    own = {k: v for k, v in presets.items() if factory.get(k) != v}
     try:
         with open(_PRESETS_FILE, "w", encoding="utf-8") as f:
-            json.dump({str(k): v for k, v in presets.items()}, f,
-                      indent=2, ensure_ascii=False)
+            json.dump({str(k): v for k, v in own.items()}, f, indent=2, ensure_ascii=False)
         print(f"✅ [Grok Presets] Saved → {_PRESETS_FILE}")
         return True
     except Exception as e:
         print(f"❌ [Grok Presets] Write failed: {e}")
         return False
+
 
 
 try:

@@ -15,61 +15,73 @@ _FIXED_PROMPTS = {
 }
 
 
-def _get_prompt_files():
-    """List .txt files in the prompts directory, with Pose and Style Transfer Prompts first."""
-    files = ["Pose and Style Transfer Prompts"]
+def _prompt_sources(wait: float = 0.0) -> dict:
+    """{file name: text}. The factory library is protected data from the Worker
+    (onyx_data_core PROMPTS); .txt files you add to prompts/ are merged on top."""
+    sources = {}
+    try:
+        from .utils import onyx_remote_data as _rd
+        sources.update({k: v for k, v in (_rd.get("PROMPTS", {}, wait=wait) or {}).items()
+                        if isinstance(v, str)})
+    except Exception:
+        pass
     if os.path.isdir(_PROMPTS_DIR):
-        txt_files = [f for f in os.listdir(_PROMPTS_DIR) if f.endswith(".txt")]
-        files.extend(sorted(txt_files))
-    return files if len(files) > 1 else ["Pose and Style Transfer Prompts"]
+        for f in os.listdir(_PROMPTS_DIR):
+            if f.endswith(".txt"):
+                try:
+                    with open(os.path.join(_PROMPTS_DIR, f), "r", encoding="utf-8") as fh:
+                        sources[f] = fh.read()
+                except Exception as e:
+                    logging.warning("PromptSelector: failed to read %s: %s", f, e)
+    return sources
 
 
-def _load_all_prompts():
-    """Load prompts from all files.
+def _get_prompt_files(sources=None):
+    """Prompt files, with Pose and Style Transfer Prompts first."""
+    sources = _prompt_sources() if sources is None else sources
+    return ["Pose and Style Transfer Prompts"] + sorted(sources)
 
-    Returns:
-        prompt_map: {label: full_text} for all prompts
-        all_labels: flat list of all labels
-        by_file: {file_stem: [label, ...]} grouped by source file
-    """
-    prompt_map = {}
-    all_labels = []
-    by_file = {}
+
+_built = {"key": None, "maps": ({}, ["(no prompts found)"], {})}
+
+
+def _load_all_prompts(wait: float = 0.0):
+    """prompt_map {label: text}, all_labels, by_file {file_stem: [label, ...]}."""
+    sources = _prompt_sources(wait)
+    key = tuple(sorted((k, len(v)) for k, v in sources.items()))
+    if key == _built["key"]:
+        return _built["maps"]
+    prompt_map, all_labels, by_file = {}, [], {}
     counter = 1
-    for fname in _get_prompt_files():
-        if fname.startswith("("):
-            continue
-        fpath = os.path.join(_PROMPTS_DIR, fname)
+    for fname in sorted(sources):
         file_stem = os.path.splitext(fname)[0]
         file_labels = []
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                raw = f.read()
-            for block in raw.split("---"):
-                text = block.strip()
-                if text:
-                    preview = text[:60].replace("\n", " ")
-                    if len(text) > 60:
-                        preview += "..."
-                    label = f"[{file_stem}] {counter}. {preview}"
-                    prompt_map[label] = text
-                    all_labels.append(label)
-                    file_labels.append(label)
-                    counter += 1
-        except Exception as e:
-            logging.warning("PromptSelector: failed to read %s: %s", fname, e)
+        for block in sources[fname].split("---"):
+            text = block.strip()
+            if text:
+                preview = text[:60].replace("\n", " ")
+                if len(text) > 60:
+                    preview += "..."
+                label = f"[{file_stem}] {counter}. {preview}"
+                prompt_map[label] = text
+                all_labels.append(label)
+                file_labels.append(label)
+                counter += 1
         if file_labels:
             by_file[file_stem] = file_labels
     if not all_labels:
         all_labels = ["(no prompts found)"]
-    return prompt_map, all_labels, by_file
+    _built.update(key=key, maps=(prompt_map, all_labels, by_file))
+    return _built["maps"]
 
-
-_PROMPT_MAP, _PROMPT_LABELS, _PROMPTS_BY_FILE = _load_all_prompts()
 
 # Build fixed prompt labels
 _FIXED_LABELS = list(_FIXED_PROMPTS.keys())
-_ALL_LABELS = _FIXED_LABELS + _PROMPT_LABELS
+
+
+def _all_labels(wait: float = 0.0):
+    return _FIXED_LABELS + _load_all_prompts(wait)[1]
+
 
 # Serve prompt data to frontend (unique routes for Monthly pack)
 try:
@@ -79,13 +91,13 @@ try:
     @PromptServer.instance.routes.get("/prompt_selector_monthly/get_prompts")
     async def _get_prompts_monthly_api(request):
         combined = dict(_FIXED_PROMPTS)
-        combined.update(_PROMPT_MAP)
+        combined.update(_load_all_prompts(wait=5.0)[0])
         return web.json_response(combined)
 
     @PromptServer.instance.routes.get("/prompt_selector_monthly/get_prompts_by_file")
     async def _get_prompts_by_file_monthly_api(request):
         result = {"Pose and Style Transfer Prompts": _FIXED_LABELS}
-        result.update(_PROMPTS_BY_FILE)
+        result.update(_load_all_prompts(wait=5.0)[2])
         return web.json_response(result)
 except Exception:
     logging.warning("PromptSelector: could not register API routes (server not available)")
@@ -98,8 +110,8 @@ class PromptSelectorNode:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "prompt_file": (_get_prompt_files(),),
-                "example_prompt": (_ALL_LABELS,),
+                "prompt_file": (_get_prompt_files(_prompt_sources(wait=3.0)),),
+                "example_prompt": (_all_labels(wait=3.0),),
                 "prompt_text": ("STRING", {"default": "", "multiline": True}),
             },
         }
@@ -116,5 +128,5 @@ class PromptSelectorNode:
         # Check fixed prompts first
         if example_prompt in _FIXED_PROMPTS:
             return (_FIXED_PROMPTS[example_prompt],)
-        full_text = _PROMPT_MAP.get(example_prompt, "")
+        full_text = _load_all_prompts(wait=15.0)[0].get(example_prompt, "")
         return (full_text,)

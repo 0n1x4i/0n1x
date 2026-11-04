@@ -29,8 +29,8 @@ IPHONE_CHOICES = [
     "random", "iPhone 12", "iPhone 12 Pro", "iPhone 13", "iPhone 13 Pro",
     "iPhone 14", "iPhone 14 Pro", "iPhone 14 Pro Max", "iPhone 15",
     "iPhone 15 Pro", "iPhone 15 Pro Max", "iPhone 16", "iPhone 16 Pro",
-    "iPhone 16 Pro Max", "iPhone 17", "iPhone 17 Pro", "iPhone 17 Pro Max",
-    "iPhone Air",
+    "iPhone 16 Pro Max", "iPhone 16e", "iPhone 17", "iPhone 17 Pro", "iPhone 17 Pro Max",
+    "iPhone 17e", "iPhone Air", "iPhone 18 Pro", "iPhone 18 Pro Max",
 ]
 
 COUNTRY_CODES = [
@@ -43,7 +43,8 @@ COUNTRY_CODES = [
 
 
 def video_extension(profile):
-    return ".mov" if profile == PROFILE_CAPCUT_IOS else ".mp4"
+    # an iPhone films .MOV (QuickTime), like CapCut iOS
+    return ".mov" if profile in (PROFILE_CAPCUT_IOS, PROFILE_IOS) else ".mp4"
 
 
 def spoof_jpeg(path, iphone_model="random", country="US", seed=None, width=0, height=0):

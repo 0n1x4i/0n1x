@@ -34,6 +34,14 @@ from dataclasses import dataclass
 
 from .onyx_render_profile import ensure_profile_ready
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('h3_tools_bundle', 'onyx_h3_vfx', __package__)
+    return ns
+
+
 VFX_NONE = "none"
 VFX_EDIT = "vfx_edit"
 VFX_EDIT_FRAME = "vfx_edit (edited first frame)"
@@ -78,80 +86,38 @@ _MODES = {
 STRENGTH_MIN, STRENGTH_MAX, STRENGTH_DEFAULT = -2.0, 2.0, 1.0
 
 
-def resolve(mode: str) -> VfxMode | None:
-    return _MODES.get(mode)
+def resolve(*args, **kwargs):
+    return _onyx_core()['resolve'](*args, **kwargs)
 
 
-def check_inputs(vfx: VfxMode, *, has_source_video: bool, image_count: int, node: str) -> None:
-    """Refuse a combination H3 cannot render, before any API call is paid for."""
-    if not has_source_video:
-        raise RuntimeError(f"{node}: vfx_mode '{vfx.mode}' edits a video — connect the source video.")
-    if vfx.reference_rule == "required" and image_count == 0:
-        raise RuntimeError(f"{node}: '{vfx.mode}' needs your retouched first frame as image_1.")
-    if vfx.reference_rule == "none" and image_count:
-        print(f"ℹ️  [{node}] vfx_edit uses no reference image: the {image_count} connected image(s) "
-              f"are ignored (not analysed, not referenced in the prompt).")
+
+def check_inputs(*args, **kwargs):
+    return _onyx_core()['check_inputs'](*args, **kwargs)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Prompt rules
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _name_first_tag(prompt: str, kind: str, phrase: str) -> str:
-    """<Kind 1> -> phrase, <Kind n> -> <Kind n-1> (the source left the reference slots)."""
-    def repl(m):
-        n = int(m.group(1))
-        return phrase if n == 1 else f"<{kind} {n - 1}>"
-    return re.sub(rf"<{kind} (\d+)>", repl, prompt)
+def _name_first_tag(*args, **kwargs):
+    return _onyx_core()['_name_first_tag'](*args, **kwargs)
 
 
-def apply_prompt_rules(prompt: str, vfx: VfxMode, *, source_audio_guided: bool) -> str:
-    out = _name_first_tag(prompt, "Video", "the source video")
-    if source_audio_guided:
-        out = _name_first_tag(out, "Audio", "the source soundtrack")
-    out = out.strip()
-    if not out.lower().startswith(vfx.trigger.lower()):
-        out = f"{vfx.trigger} {out}"
-    return out
+
+def apply_prompt_rules(*args, **kwargs):
+    return _onyx_core()['apply_prompt_rules'](*args, **kwargs)
 
 
-def slot_warnings(prompt: str, *, image_count: int | None, has_audio_input: bool) -> list:
-    """Tags the prompt uses but nothing feeds. Warnings only: the H3 node may be
-    wired differently from this Context-IR node, so nothing is rewritten."""
-    warns = []
-    if image_count is not None:
-        pics = sorted({int(n) for n in re.findall(r"<Picture (\d+)>", prompt)})
-        extra = [n for n in pics if n > image_count]
-        if extra:
-            warns.append(f"prompt references <Picture {extra[0]}> but only {image_count} image(s) "
-                         f"were given — check that slot on the H3 node.")
-    if not has_audio_input and re.search(r"<Audio \d+>", prompt):
-        warns.append("prompt references <Audio n> but no audio was connected here — if the H3 node "
-                     "has no audio reference either, replace the tag with \"the soundtrack\".")
-    return warns
+
+def slot_warnings(*args, **kwargs):
+    return _onyx_core()['slot_warnings'](*args, **kwargs)
 
 
-def postprocess_result(result, vfx: VfxMode | None, *, source_audio_guided: bool,
-                       has_audio_input: bool, node: str):
-    """Apply the VFX prompt rules to output 0 (the H3 prompt) of a node result,
-    whatever its shape (tuple, list, or {"ui": ..., "result": (...)})."""
-    wrapper = None
-    values = result
-    if isinstance(result, dict) and "result" in result:
-        wrapper, values = result, result["result"]
-    if not isinstance(values, (tuple, list)) or not values or not isinstance(values[0], str):
-        return result
-    prompt = values[0]
-    if vfx is not None:
-        prompt = apply_prompt_rules(prompt, vfx, source_audio_guided=source_audio_guided)
-    for w in slot_warnings(prompt, image_count=None, has_audio_input=has_audio_input):
-        print(f"⚠️  [{node}] {w}")
-    values = (prompt, *values[1:])
-    if wrapper is not None:
-        wrapper = dict(wrapper)
-        wrapper["result"] = values
-        return wrapper
-    return values
+
+def postprocess_result(*args, **kwargs):
+    return _onyx_core()['postprocess_result'](*args, **kwargs)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -189,26 +155,9 @@ class OnyxH3VfxLora:
     FUNCTION = "apply"
     CATEGORY = "Onyx/H3"
 
-    def apply(self, model, vfx_mode, strength):
-        ensure_profile_ready()
-        vfx = resolve(vfx_mode)
-        if vfx is None or strength == 0:
-            return (model, "")
-        import folder_paths
-        path = folder_paths.get_full_path("loras", vfx.lora_file)
-        if not path:
-            raise RuntimeError(
-                f"Onyx H3 VFX LoRA: {vfx.lora_file} not found in models/loras/.\n"
-                f"Download: {vfx.url}")
-        import comfy.sd
-        import comfy.utils
-        lora = self._loaded.get(path)
-        if lora is None:
-            lora = comfy.utils.load_torch_file(path, safe_load=True)
-            self._loaded.clear()            # keep one LoRA in RAM, like the core loader
-            self._loaded[path] = lora
-        patched, _ = comfy.sd.load_lora_for_models(model, None, lora, strength, 0)
-        return (patched, vfx.trigger)
+    def apply(self, *args, **kwargs):
+        return _onyx_core()['OnyxH3VfxLora'].apply(self, *args, **kwargs)
+
 
 
 NODE_CLASS_MAPPINGS = {"OnyxH3VfxLora": OnyxH3VfxLora}

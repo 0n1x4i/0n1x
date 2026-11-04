@@ -13,10 +13,7 @@ Order of operations, per pass:
 `passes` repeats the whole chain (generation loss, like re-sharing a photo).
 
 Recipes set the main values in one click ("custom" = the widgets as typed):
-  lite          light re-share: JPEG 82, mild sharpening
-  noise         sensor-like noise + JPEG 90
-  artifact_hell heavy blocking: JPEG 8, 4 passes, posterize 5
-  pro_plus      crisp finish: JPEG 95, sharpness 1.25, contrast 1.04
+lite, noise, artifact_hell, pro_plus.
 """
 
 from __future__ import annotations
@@ -26,51 +23,21 @@ import io
 from ..utils import onyx_post as _onyx_post
 from .onyx_render_profile import ensure_profile_ready
 
-RECIPES = {
-    "custom": {},
-    "lite": {"jpeg_quality": 82, "passes": 1, "noise_scale": 0.0, "sharpness": 1.1, "contrast": 1.0},
-    "noise": {"jpeg_quality": 90, "passes": 1, "noise_scale": 6.0},
-    "artifact_hell": {"jpeg_quality": 8, "passes": 4, "posterize_bits": 5, "noise_scale": 4.0},
-    "pro_plus": {"jpeg_quality": 95, "passes": 1, "sharpness": 1.25, "contrast": 1.04},
-}
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
 
 
-def _process(pil, p, rng):
-    import numpy as np
-    from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-    img = pil
-    for _ in range(max(1, int(p["passes"]))):
-        if p["pixelate_box"] > 1:
-            w, h = img.size
-            b = int(p["pixelate_box"])
-            img = img.resize((max(1, w // b), max(1, h // b)), Image.NEAREST).resize((w, h), Image.NEAREST)
-        if p["blur_radius"] > 0:
-            img = img.filter(ImageFilter.GaussianBlur(p["blur_radius"]))
-        if p["noise_scale"] > 0:
-            arr = np.asarray(img, dtype=np.float32)
-            arr = arr + rng.normal(0.0, p["noise_scale"], arr.shape).astype(np.float32)
-            img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-        if int(p["posterize_bits"]) < 8:
-            img = ImageOps.posterize(img, int(p["posterize_bits"]))
-        if p["contrast"] != 1.0:
-            img = ImageEnhance.Contrast(img).enhance(p["contrast"])
-        if p["sharpness"] != 1.0:
-            img = ImageEnhance.Sharpness(img).enhance(p["sharpness"])
-        if p["grayscale"]:
-            img = ImageOps.grayscale(img).convert("RGB")
-        if p["invert"]:
-            img = ImageOps.invert(img)
-        if p["emboss"]:
-            img = img.filter(ImageFilter.EMBOSS)
-        if p["edge_enhance"]:
-            img = img.filter(ImageFilter.EDGE_ENHANCE)
-        q = int(p["jpeg_quality"])
-        if q < 100:
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=max(1, q))
-            buf.seek(0)
-            img = Image.open(buf).convert("RGB")
-    return img
+def _onyx_core():
+    ns = _onyx_load_bundle_module('postfx_bundle', 'onyx_more_jpeg', __package__)
+    return ns
+
+
+RECIPE_NAMES = ["custom", "lite", "noise", "artifact_hell", "pro_plus"]
+
+
+
+def _process(*args, **kwargs):
+    return _onyx_core()['_process'](*args, **kwargs)
+
 
 
 class OnyxMoreJPEG:
@@ -84,7 +51,7 @@ class OnyxMoreJPEG:
         return {
             "required": {
                 "image": ("IMAGE",),
-                "recipe": (list(RECIPES), {"default": "custom"}),
+                "recipe": (RECIPE_NAMES, {"default": "custom"}),
                 "jpeg_quality": ("INT", {"default": 10, "min": 0, "max": 100, "step": 1,
                                          "tooltip": "100 = no re-encode."}),
                 "passes": ("INT", {"default": 1, "min": 1, "max": 20, "step": 1}),
@@ -111,23 +78,9 @@ class OnyxMoreJPEG:
     FUNCTION = "apply"
     CATEGORY = "Onyx/Post"
 
-    def apply(self, image, onyx_post=None, **params):
-        ensure_profile_ready()
-        params, bypass = _onyx_post.apply("OnyxMoreJPEG", params, onyx_post)
-        if bypass:
-            return (image,)
-        import numpy as np
-        import torch
-        from PIL import Image
-        p = dict(params)
-        p.update(RECIPES.get(p.get("recipe", "custom"), {}))
-        rng = np.random.default_rng(int(p.get("seed", 0)) % (2 ** 32))
-        out = []
-        for i in range(image.shape[0]):
-            arr = (image[i].detach().cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
-            res = _process(Image.fromarray(arr[..., :3]).convert("RGB"), p, rng)
-            out.append(torch.from_numpy(np.asarray(res, dtype=np.float32) / 255.0))
-        return (torch.stack(out, 0),)
+    def apply(self, *args, **kwargs):
+        return _onyx_core()['OnyxMoreJPEG'].apply(self, *args, **kwargs)
+
 
 
 NODE_CLASS_MAPPINGS = {"OnyxMoreJPEG": OnyxMoreJPEG}

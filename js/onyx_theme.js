@@ -130,6 +130,28 @@ const ALL_NODES = new Set([
     "OnyxKrea2PoseListPrep",
     "OnyxKrea2StoryDirector",
     "OnyxLensCharacter",
+    "OnyxH3LockSourceAudio",
+    "OnyxCurvesAdjust",
+    "OnyxLevelsAdjust",
+    "OnyxContrast",
+    "OnyxConditioningCache",
+    "OnyxDatasetScenePrompts",
+    "OnyxDepthColormap",
+    "OnyxH3VfxLora",
+    "OnyxMaskToBox",
+    "OnyxMaskedColorMatch",
+    "OnyxStudio",
+    "OnyxPostStudio",
+    "OnyxPhoneHDR",
+    "OnyxHighlightClip",
+    "OnyxLensSmudge",
+    "OnyxChromaSubsample",
+    "OnyxRealismInjector",
+    "OnyxMoreJPEG",
+    "OnyxCameraShake",
+    "OnyxPostStyle",
+    "OnyxPostProcessSuite",
+    "OnyxFameGridColorFinish",
     "OnyxEndlessSampler",
     "OnyxH3SeamlessSampler",
     "OnyxEndlessSamplerPreview",
@@ -168,6 +190,17 @@ const PROTECTED_NODES = new Set([
     "OnyxKrea2PoseListPrep",
     "OnyxKrea2StoryDirector",
     "OnyxLensCharacter",
+    "OnyxConditioningCache",
+    "OnyxH3VfxLora",
+    "OnyxStudio",
+    "OnyxPostStudio",
+    "OnyxPhoneHDR",
+    "OnyxHighlightClip",
+    "OnyxLensSmudge",
+    "OnyxChromaSubsample",
+    "OnyxRealismInjector",
+    "OnyxMoreJPEG",
+    "OnyxCameraShake",
     "OnyxEndlessSampler",
     "OnyxH3SeamlessSampler",
     "OnyxEndlessSamplerPreview",
@@ -426,12 +459,13 @@ function update() {
         seen.add(node);
         let ov = overlays.get(node);
         if (!ov) { ov = new Overlay(PROTECTED_NODES.has(node.comfyClass)); overlays.set(node, ov); }
-        const w = node.size[0], h = node.size[1] + titleH;
+        const th = node.__onyxCompact ? 0 : titleH;         // compact nodes have no title band
+        const w = node.size[0], h = node.size[1] + th;
         const x = rect.left + (off[0] + node.pos[0]) * scale;
-        const y = rect.top + (off[1] + node.pos[1] - titleH) * scale;
+        const y = rect.top + (off[1] + node.pos[1] - th) * scale;
         const visible = x + w * scale > rect.left && x < rect.right && y + h * scale > rect.top && y < rect.bottom;
         ov.update({
-            x, y, w, h, titleH, scale, visible,
+            x, y, w, h, titleH: th, scale, visible,
             selected: !!selected[node.id],
             running: runningId === Number(node.id),
             error: nodeErrors.get(node.id) || null,

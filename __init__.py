@@ -68,6 +68,10 @@ from .nodes.onyx_post_style import OnyxPostStyle
 from .nodes.onyx_post_studio import OnyxPostStudio
 from .nodes.onyx_phone_fx import NODE_CLASS_MAPPINGS as _PHONE_FX, NODE_DISPLAY_NAME_MAPPINGS as _PHONE_FX_NAMES
 from .nodes.onyx_lens_character import OnyxLensCharacter
+from .nodes.onyx_h3_audio_lock import OnyxH3LockSourceAudio
+from .nodes.onyx_light_tools import (NODE_CLASS_MAPPINGS as _LIGHT_NODES,
+                                     NODE_DISPLAY_NAME_MAPPINGS as _LIGHT_NAMES,
+                                     OnyxCurvesAdjust, OnyxLevelsAdjust, OnyxContrast)
 from .nodes.onyx_masked_color_match import OnyxMaskedColorMatch
 from .nodes.onyx_dataset_scene_prompts import OnyxDatasetScenePrompts
 from .nodes import onyx_post_studio as _onyx_post_studio_mod
@@ -228,6 +232,8 @@ NODE_CLASS_MAPPINGS["OnyxPostStyle"] = OnyxPostStyle
 NODE_CLASS_MAPPINGS["OnyxPostStudio"] = OnyxPostStudio
 NODE_CLASS_MAPPINGS.update(_PHONE_FX)
 NODE_CLASS_MAPPINGS["OnyxLensCharacter"] = OnyxLensCharacter
+NODE_CLASS_MAPPINGS["OnyxH3LockSourceAudio"] = OnyxH3LockSourceAudio
+NODE_CLASS_MAPPINGS.update(_LIGHT_NODES)
 NODE_CLASS_MAPPINGS["OnyxMaskedColorMatch"] = OnyxMaskedColorMatch
 NODE_CLASS_MAPPINGS["OnyxDatasetScenePrompts"] = OnyxDatasetScenePrompts
 NODE_CLASS_MAPPINGS["OnyxFameGridColorFinish"] = OnyxFameGridColorFinish
@@ -238,8 +244,13 @@ if OnyxPostProcessSuite:
 # Onyx Post looks: every post-processing node gets the optional `onyx_post` input
 # (Onyx Studio / Onyx Post Style), applied around its own code.
 from .utils import onyx_post as _onyx_post_mod
+# Factory data (presets, prompt library, post looks) comes from the Worker: start
+# fetching it in the background now so the first dropdowns are complete.
+from .utils import onyx_remote_data as _onyx_remote_data
+_onyx_remote_data.refresh()
 for _pp_cls in (Onyx_Renoise, Onyx_Camera_Look, Onyx_Apply_LUT, Onyx_Clarity, Onyx_Dehaze,
-                Onyx_Match_Levels, Onyx_Skin_Tone, OnyxLensCharacter):
+                Onyx_Match_Levels, Onyx_Skin_Tone, OnyxLensCharacter,
+                OnyxCurvesAdjust, OnyxLevelsAdjust, OnyxContrast):
     if _pp_cls is not None:
         _onyx_post_mod.wire(_pp_cls)
 
@@ -309,12 +320,14 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxPostStyle"] = "Onyx Post Style"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxPostStudio"] = "Onyx Post Studio ✦"
 NODE_DISPLAY_NAME_MAPPINGS.update(_PHONE_FX_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS["OnyxLensCharacter"] = "Onyx Lens Character"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxH3LockSourceAudio"] = "Onyx H3 Lock Source Audio"
+NODE_DISPLAY_NAME_MAPPINGS.update(_LIGHT_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS["OnyxMaskedColorMatch"] = "Onyx Masked Color Match"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxDatasetScenePrompts"] = "Onyx Dataset Scene Prompts"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxFameGridColorFinish"] = "Onyx FameGrid Color Finish"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxMoreJPEG"] = "Onyx More JPEG"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxRealismInjector"] = "Onyx Realism Injector"
-NODE_DISPLAY_NAME_MAPPINGS["OnyxPostProcessSuite"] = "Onyx Post-Process Suite"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxPostProcessSuite"] = "Onyx Post-Process Suite (fork of CRT Nodes)"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Renoise"]     = "Onyx Renoise"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Camera_Look"] = "📷 Onyx Camera Look"
 NODE_DISPLAY_NAME_MAPPINGS["Onyx_Apply_LUT"]   = "🎨 Onyx Apply LUT"

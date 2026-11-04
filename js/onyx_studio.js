@@ -1,28 +1,28 @@
 // Onyx Studio ✦ — the creation hub UI.
 // Modes: manual (optionally improved by a skill) · idea (skill) · recreate (Grok
 // presets, image -> prompt). Tabs: Prompt · Gallery (send any saved prompt to
-// the prompt) · Media (the Batch Loader's panel, embedded) · Character (LoRA +
+// the prompt) · Character (LoRA +
 // trigger) · Skills (import .txt/.md) · Post (look + motion for every Onyx
 // post-processing node) · Settings (keys, Ollama) · History. Everything the run needs is kept in the hidden `studio_state`
 // widget (JSON); API keys are saved on this computer, never in the workflow.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { mountBatchPanel } from "./onyx_image_batch_loader.js";
+import { makeCompact } from "./onyx_compact.js";
 
-const NODE_SIZE = [780, 920];
-const PANEL_MIN_H = 600;
+const NODE_SIZE = [840, 980];
+const PANEL_MIN_H = 940;
 const RATIOS = ["9:16", "3:4", "4:5", "1:1", "2:3", "16:9"];
 const MODE_INFO = {
   manual:   { icon: "✍️", label: "Manual",   hint: "Your prompt. {trigger} = the character's trigger. Optionally improved by a skill." },
   idea:     { icon: "💡", label: "Idea",     hint: "Describe a scene: the skill + LLM writes the prompt." },
-  recreate: { icon: "🎯", label: "Recreate", hint: "Each batch image becomes a prompt for your character, with a Grok preset." },
+  recreate: { icon: "🎯", label: "Recreate", hint: "The image (or video) connected to the node becomes a prompt for your character, with a Grok preset." },
 };
 const LABEL = { manual: "Manual", gallery: "Gallery", idea: "Idea", recreate: "Recreate" };
 const DEFAULT_STATE = {
   mode: "manual", manual: "", idea: "", extra: "", gallery: null,
   skill: "", character_id: "", provider: "ollama", model: "", ollama_url: "http://127.0.0.1:11434",
   temperature: 0.7, max_tokens: 2048, double_check: false, force_trigger: true, ratio: "9:16",
-  extra_loras: [], tab: "prompt", enhance: false, preset: "", post_look: "none", post_motion: "none", cond_cache: true,
+  extra_loras: [], tab: "prompt", enhance: false, preset: "", post_look: "default", post_motion: "none", cond_cache: true,
   res: { mp: 1.0, mult: 32, follow_skill: false, batch: 1 },
 };
 
@@ -81,9 +81,6 @@ function injectStyle() {
 .ost-body{flex:1;min-height:0;position:relative}
 .ost-page{position:absolute;inset:0;overflow:auto;padding:12px;display:none;scrollbar-width:thin;scrollbar-color:var(--ln2) transparent}
 .ost-page.on{display:block}
-.ost-page.media{padding:0;overflow:hidden}
-.ost-page.media.on{display:flex}
-.ost-page.media>*{flex:1;min-width:0}
 .ost-card{background:var(--p1);border:1px solid var(--ln);border-radius:10px;padding:10px;margin-bottom:10px}
 .ost-card h4{margin:0 0 8px;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);font-weight:700}
 .ost-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
@@ -124,6 +121,8 @@ function injectStyle() {
 .ost-split{display:grid;grid-template-columns:220px 1fr;gap:10px;height:100%}
 .ost-lora{display:grid;grid-template-columns:22px 1fr 70px 70px 28px;gap:6px;align-items:center;margin-bottom:6px}
 .ost-pre{white-space:pre-wrap;background:var(--p2);border:1px solid var(--ln);border-radius:8px;padding:8px;max-height:220px;overflow:auto;font:11.5px/1.5 ui-monospace,Consolas,monospace;color:#d6d8e4;user-select:text}
+.ost-seed{width:110px;background:var(--p2,#15151c);color:inherit;border:1px solid var(--ln);border-radius:6px;padding:3px 6px;font:inherit}
+.ost-seed-ctrl{background:var(--p2,#15151c);color:inherit;border:1px solid var(--ln);border-radius:6px;padding:3px 4px;font:inherit}
 .ost-foot{border-top:1px solid var(--ln);background:var(--p1);padding:8px 12px;display:flex;flex-direction:column;gap:6px}
 .ost-out{font:12px/1.5 Inter,system-ui,sans-serif;color:#d9dbe6;max-height:62px;overflow:auto;white-space:pre-wrap;user-select:text;scrollbar-width:thin}
 .ost-out.empty{color:var(--dim);font-style:italic}
@@ -214,8 +213,6 @@ function setupStudio(node) {
   }
   let ollamaModels = [];
   let gallery = [];
-  const mediaPrompts = {};      // filename -> last prompt written for it (preview or run)
-  let runMedia = null;          // the batch item the current run is processing
   let galleryLoaded = false;
   let lastResult = null;
   let busy = false;
@@ -247,11 +244,11 @@ function setupStudio(node) {
   const modeSeg = h("div", { class: "ost-seg" });
   const head = h("div", { class: "ost-head" }, h("div", { class: "ost-logo" }, "ONYX STUDIO ✦"), charPill, modeSeg);
 
-  const TABS = [["prompt", "✍️ Prompt"], ["gallery", "🖼️ Gallery"], ["media", "🎞️ Media"], ["character", "🧑 Character"], ["skills", "📚 Skills"], ["post", "🎛️ Post"], ["settings", "⚙️ Settings"], ["history", "🕘 History"]];
+  const TABS = [["prompt", "✍️ Prompt"], ["gallery", "🖼️ Gallery"], ["character", "🧑 Character"], ["skills", "📚 Skills"], ["post", "🎛️ Post"], ["settings", "⚙️ Settings"], ["history", "🕘 History"]];
   const tabsBar = h("div", { class: "ost-tabs" });
   const body = h("div", { class: "ost-body" });
   const pages = {};
-  for (const [id] of TABS) { pages[id] = h("div", { class: "ost-page" + (id === "media" ? " media" : "") }); body.append(pages[id]); }
+  for (const [id] of TABS) { pages[id] = h("div", { class: "ost-page" }); body.append(pages[id]); }
 
   const outBox = h("div", { class: "ost-out empty" }, "No prompt yet — the last generated or typed prompt shows here.");
   const chips = h("div", { class: "ost-chips" });
@@ -260,21 +257,27 @@ function setupStudio(node) {
     if (!lastResult?.prompt) return; set({ mode: "manual", manual: lastResult.prompt, tab: "prompt" }); toast("Prompt locked in Manual mode.");
   } }, "⤵ Use as manual");
   const copyBtn = h("button", { class: "ost-btn ghost", onclick: () => { if (lastResult?.prompt) navigator.clipboard?.writeText(lastResult.prompt); } }, "⧉ Copy");
-  const saveGalBtn = h("button", { class: "ost-btn ghost", title: "Save to the Onyx Prompt Gallery", onclick: async () => {
-    if (!lastResult?.prompt) return;
-    const r = await postJSON("/onyx/prompt_library/save", { node_id: String(node.id), prompt: lastResult.prompt, name: "", tags: "studio" });
-    toast(r.success ? "Saved to the Prompt Gallery." : "Save failed: " + r.error, r.success ? "success" : "error");
-    gallery = [];
-  } }, "★ Save");
-  const queueBtn = h("button", { class: "ost-btn", title: "Queue one run (Queue All is in the Media tab)", onclick: () => app.queuePrompt(0, 1) }, "▶ Queue");
+  const queueBtn = h("button", { class: "ost-btn", title: "Queue one run", onclick: () => app.queuePrompt(0, 1) }, "▶ Queue");
+  // seed + "control after generate": the native widgets are hidden (compact node), driven from here.
+  const seedIn = h("input", { class: "ost-seed", type: "number", title: "Seed", onchange: () => {
+    const w = W("seed"); if (w) { w.value = Math.max(0, Math.floor(Number(seedIn.value) || 0)); w.callback?.(w.value); markChanged(app); }
+  } });
+  const ctrlSel = h("select", { class: "ost-seed-ctrl", title: "After each run", onchange: () => {
+    const w = W("control_after_generate"); if (w) { w.value = ctrlSel.value; w.callback?.(w.value); markChanged(app); }
+  } }, ...["fixed", "increment", "decrement", "randomize"].map((v) => h("option", { value: v }, v)));
+  const syncSeed = () => {
+    if (document.activeElement !== seedIn) seedIn.value = W("seed")?.value ?? 0;
+    const c = W("control_after_generate")?.value; if (c && document.activeElement !== ctrlSel) ctrlSel.value = c;
+  };
+  const seedBox = h("div", { class: "ost-row", style: "margin:0;gap:6px" }, h("span", { class: "ost-hint" }, "seed"), seedIn, ctrlSel);
   const foot = h("div", { class: "ost-foot" }, outBox,
-    h("div", { class: "ost-row", style: "margin:0;justify-content:space-between" }, chips,
-      h("div", { class: "ost-row", style: "margin:0" }, copyBtn, saveGalBtn, useBtn, genBtn, queueBtn)));
+    h("div", { class: "ost-row", style: "margin:0;justify-content:space-between" }, h("div", { class: "ost-row", style: "margin:0;gap:10px" }, seedBox, chips),
+      h("div", { class: "ost-row", style: "margin:0" }, copyBtn, useBtn, genBtn, queueBtn)));
 
   // ── presets bar (10 slots, every setting of the node) ──────────────────────
   const presetBar = h("div", { class: "ost-presets" });
   let presetSaveMode = false;
-  const SKIP_WIDGETS = new Set(["batch_data", "studio_state", "studio_panel", "seed", "control_after_generate"]);
+  const SKIP_WIDGETS = new Set(["batch_data", "width", "height", "fps", "frame_load_cap", "studio_state", "studio_panel", "seed", "control_after_generate"]);
   function widgetSnapshot() {
     const out = {};
     for (const w of node.widgets || []) {
@@ -322,8 +325,8 @@ function setupStudio(node) {
     }
     fill(presetBar, h("span", { class: "lbl" }, "Presets"), ...chips,
       h("button", { class: "ost-btn" + (presetSaveMode ? " pri" : " ghost"), style: "margin-left:auto;padding:4px 10px",
-        title: "Saves every setting of the node: mode, skill, preset, character, extra LoRAs, LLM, format, post look / motion, media settings (not the media list).",
-        onclick: () => { presetSaveMode = !presetSaveMode; renderPresets(); } }, presetSaveMode ? "Click a slot…" : "💾 Save"));
+        title: "Saves every setting of the node: mode, skill, preset, character, extra LoRAs, LLM, format, post look / motion, format.",
+        onclick: () => { presetSaveMode = !presetSaveMode; renderPresets(); } }, presetSaveMode ? "Click a slot…" : "💾 Save preset"));
   }
 
   root.append(head, tabsBar, presetBar, body, foot);
@@ -347,27 +350,21 @@ function setupStudio(node) {
     try { const r = await getJSON("/onyx/prompt_library/list"); gallery = r.entries || []; } catch { gallery = []; }
     render();
   }
-  const batch = () => { try { return JSON.parse(W("batch_data")?.value || "{}"); } catch { return {}; } };
-  const batchItems = () => { const b = batch(); return (b.order || []).map((id) => (b.images || []).find((m) => m.id === id)).filter(Boolean); };
   const curChar = () => boot.characters.find((c) => c.id === state.character_id) || null;
   const curSkill = () => boot.skills.find((s) => s.id === state.skill) || null;
 
   // ── preview (Generate now) ─────────────────────────────────────────────────
   async function preview() {
     if (busy) return;
-    const items = batchItems();
     if (state.mode === "manual" && !state.enhance) {
       showResult({ prompt: state.manual, notes: "", mode: "manual" });
       return;
     }
-    const media = state.mode === "recreate" ? (items.find((m) => m.filename === state.preview_media) || items[0])?.filename : undefined;
-    if (state.mode === "recreate" && !media) { toast("Recreate: add an image to the batch (Media tab).", "warn"); return; }
     busy = true; genBtn.innerHTML = '<span class="ost-spin"></span>Writing…'; genBtn.disabled = true;
     try {
-      const r = await postJSON("/onyx/studio/preview", { state, media, seed: Math.floor(Math.random() * 1e9) });
+      const r = await postJSON("/onyx/studio/preview", { state, node_id: String(node.id), seed: Math.floor(Math.random() * 1e9) });
       if (!r.ok) throw new Error(r.error);
-      showResult({ ...r, media });
-      if (media) { mediaPrompts[media] = r.prompt; if (state.tab === "prompt" && state.mode === "recreate") renderPrompt(); }
+      showResult(r);
     } catch (e) { toast(String(e.message || e), "error"); }
     finally { busy = false; genBtn.textContent = "✦ Generate now"; genBtn.disabled = false; }
   }
@@ -401,7 +398,7 @@ function setupStudio(node) {
       state.post_look && state.post_look !== "none" ? h("span", { style: "color:#ffc58a;margin-left:6px" }, "· 🎛️ " + state.post_look) : null);
     fill(modeSeg, ...Object.entries(MODE_INFO).map(([k, m]) =>
       h("button", { class: state.mode === k ? "on" : "", title: m.hint, onclick: () => set({ mode: k, tab: "prompt" }) }, `${m.icon} ${m.label}`)));
-    const counts = { media: batchItems().length, skills: boot.skills.length, character: boot.characters.length };
+    const counts = { skills: boot.skills.length, character: boot.characters.length };
     fill(tabsBar, ...TABS.map(([id, label]) =>
       h("div", { class: "ost-tab" + (state.tab === id ? " on" : ""), onclick: () => set({ tab: id }) }, label,
         counts[id] ? h("span", { class: "n" }, counts[id]) : null)));
@@ -497,20 +494,14 @@ function setupStudio(node) {
       return;
     }
     // recreate
-    const items = batchItems();
-    const pick = h("select", { onchange: (e) => set({ preview_media: e.target.value }, false) },
-      items.map((it) => h("option", { value: it.filename, selected: state.preview_media === it.filename ? "selected" : null }, (it.is_video ? "🎬 " : "🖼️ ") + (it.name || it.filename))));
     const presetSel = h("select", { onchange: (e) => set({ preset: e.target.value }) },
       h("option", { value: "" }, "— choose a Grok preset —"),
       boot.presets.map((pr) => h("option", { value: pr.slot, selected: String(state.preset) === pr.slot ? "selected" : null },
         `${pr.slot} · ${pr.name}${pr.skill ? "  ✦ " + pr.skill : ""}`)));
     const pr = boot.presets.find((x) => x.slot === String(state.preset));
     fill(p, info,
-      h("div", { class: "ost-card" }, h("h4", {}, "Source images"),
-        items.length
-          ? h("div", { class: "ost-row" }, h("span", { class: "ost-hint" }, `${items.length} item(s) in the batch — each run rewrites the next one. Queue All in the Media tab runs them all.`))
-          : h("div", { class: "ost-row" }, h("span", { class: "ost-hint" }, "The batch is empty."), h("button", { class: "ost-btn", onclick: () => set({ tab: "media" }) }, "Add media →")),
-        items.length ? sideBySide(items, pick) : null),
+      h("div", { class: "ost-card" }, h("h4", {}, "Source image"),
+        h("div", { class: "ost-hint" }, "Connect the image to recreate to the node's image input (or a video to the video input: its first frame is used), e.g. from an Onyx Batch Loader — each run writes the prompt for the image it receives. ✦ Generate now works on the last image the node received.")),
       h("div", { class: "ost-card" }, h("h4", {}, "Grok preset (image → prompt)"),
         h("div", { class: "ost-row" }, presetSel),
         pr ? h("div", { class: "ost-row" },
@@ -530,7 +521,7 @@ function setupStudio(node) {
     const preview = h("span", { class: "ost-hint" }, "…");
     const refresh = async () => {
       const ar = state.ratio;
-      if (ar === "from image (input)") { preview.textContent = "from the batch image — computed at run time"; return; }
+      if (ar === "from image (input)") { preview.textContent = "from the input image — computed at run time"; return; }
       try {
         const r = await getJSON(`/onyx/resolution_mp/preview?mp=${encodeURIComponent(res.mp)}&ar=${encodeURIComponent(ar)}&mult=${encodeURIComponent(res.mult)}`);
         preview.textContent = r.success ? "📐 " + r.text : (r.error || "?");
@@ -568,25 +559,6 @@ function setupStudio(node) {
       h("div", { class: "ost-hint" }, "Pick a motion yourself, or auto to use the one the skill writes in its NOTES. Sent through the post and post_preset outputs."));
   }
 
-  // Recreate: the source image and the prompt written for it, side by side.
-  function sideBySide(items, pick) {
-    const idx = Math.max(0, items.findIndex((it) => it.filename === state.preview_media));
-    const it = items[idx] || items[0];
-    if (!state.preview_media && it) { state.preview_media = it.filename; saveState(); }
-    const step = (d) => { const n = items[(idx + d + items.length) % items.length]; set({ preview_media: n.filename }); };
-    const text = mediaPrompts[it.filename];
-    return h("div", {},
-      h("div", { class: "ost-row" },
-        h("button", { class: "ost-btn ghost", onclick: () => step(-1), title: "Previous item" }, "◀"),
-        h("div", { class: "ost-col", style: "flex:1" }, pick),
-        h("button", { class: "ost-btn ghost", onclick: () => step(1), title: "Next item" }, "▶"),
-        h("span", { class: "ost-hint" }, `${idx + 1} / ${items.length}`)),
-      h("div", { class: "ost-sbs" },
-        h("div", { class: "img" }, h("img", { src: api.apiURL("/onyx/view/" + encodeURIComponent(it.thumbnail || it.filename)), alt: it.name || it.filename })),
-        text ? h("div", { class: "txt" }, text)
-             : h("div", { class: "txt empty" }, "No prompt written for this image yet.\n✦ Generate now writes it here, and every queued run fills it in live.")));
-  }
-
   // ── Gallery tab ────────────────────────────────────────────────────────────
   function renderGallery() {
     const p = pages.gallery;
@@ -616,7 +588,7 @@ function setupStudio(node) {
           ondblclick: () => { state.gallery_sel = e.id; send("replace"); } },
           e.thumb ? h("img", { src: api.apiURL("/onyx/prompt_library/thumb?id=" + e.id), loading: "lazy" }) : h("div", { class: "ph" }, "✦"),
           h("div", { class: "t" }, e.name))))
-        : h("div", { class: "ost-empty" }, gallery.length ? "No match." : "The gallery is empty — save prompts with ★ Save or the Onyx Prompt Saver node."),
+        : h("div", { class: "ost-empty" }, gallery.length ? "No match." : "The gallery is empty — save prompts with the Onyx Prompt Saver node."),
       h("div", { class: "ost-hint", style: "margin-top:8px" }, "Click to preview, double-click to use it directly."));
   }
 
@@ -803,30 +775,13 @@ function setupStudio(node) {
   }
 
   // ── mount ──────────────────────────────────────────────────────────────────
-  const batchPanel = mountBatchPanel(node, pages.media);   // the Batch Loader's own panel, inside the Media tab
-
-  // Drop anywhere on the Studio: .txt / .md -> skills, images / videos / links ->
-  // the media batch (the Media tab and the Skills drop zone handle their own
-  // drops first and stop them there). Without this, a drop outside the Media
-  // tab fell through to ComfyUI, which made a Load Image node of it.
+  // Skill files (.txt / .md) dropped anywhere on the panel are imported.
   const isSkillFile = (f) => /\.(txt|md)$/i.test(f.name);
-  root.addEventListener("dragover", (e) => {
-    if (!batchPanel?.isExternalDrag?.(e)) return;
-    e.preventDefault(); e.stopPropagation();
-    root.style.outline = "2px dashed #9fb4ff"; root.style.outlineOffset = "-4px";
-    try { e.dataTransfer.dropEffect = "copy"; } catch (_) {}
-  });
-  root.addEventListener("dragleave", (e) => { if (!root.contains(e.relatedTarget)) root.style.outline = ""; });
+  root.addEventListener("dragover", (e) => { if ([...(e.dataTransfer?.items || [])].some((it) => it.kind === "file")) e.preventDefault(); });
   root.addEventListener("drop", (e) => {
-    root.style.outline = "";
-    if (e.defaultPrevented || !batchPanel?.isExternalDrag?.(e)) return;
-    e.preventDefault(); e.stopPropagation();
-    const files = [...(e.dataTransfer.files || [])];
-    if (files.length && files.every(isSkillFile)) { importFiles(files); set({ tab: "skills" }); return; }
-    if (batchPanel.acceptDrop(e.dataTransfer)) {
-      toast("Added to the media batch.", "success");
-      if (state.mode !== "recreate" || state.tab !== "prompt") set({ tab: "media" });
-    }
+    if (e.defaultPrevented) return;
+    const files = [...(e.dataTransfer?.files || [])];
+    if (files.length && files.every(isSkillFile)) { e.preventDefault(); e.stopPropagation(); importFiles(files); set({ tab: "skills" }); }
   });
   hideWidget(W("studio_state"));
   setTimeout(() => hideWidget(W("studio_state")), 300);
@@ -834,44 +789,36 @@ function setupStudio(node) {
     serialize: false, getValue: () => undefined, setValue: () => {}, getMinHeight: () => PANEL_MIN_H,
   });
   node.size = [...NODE_SIZE];
+  hideWidget(W("seed")); hideWidget(W("control_after_generate"));
+  setTimeout(() => { hideWidget(W("seed")); hideWidget(W("control_after_generate")); syncSeed(); }, 300);
+  makeCompact(node, head);
+  setInterval(() => { if (node.graph) syncSeed(); }, 700);
 
   const origConfigure = node.onConfigure?.bind(node);
-  node.onConfigure = function (info) { origConfigure?.(info); readState(); render(); };
+  // Workflows saved before the Media tab was removed have extra widget values in front
+  // (batch_data...): find the real ones by their shape.
+  const recoverLegacy = (info) => {
+    const vals = info?.widgets_values || [];
+    const isState = (v) => { try { const o = JSON.parse(v); return !!o && typeof o === "object" && ("mode" in o || "tab" in o); } catch { return false; } };
+    const sw = W("studio_state");
+    if (sw && !isState(sw.value)) { const v = vals.find((x) => typeof x === "string" && isState(x)); if (v) sw.value = v; }
+    const seed = W("seed"), ctrl = W("control_after_generate");
+    const at = vals.findIndex((x) => typeof x === "string" && isState(x));
+    if (at >= 0 && seed && typeof vals[at + 1] === "number") seed.value = vals[at + 1];
+    if (at >= 0 && ctrl && ["fixed", "increment", "decrement", "randomize"].includes(vals[at + 2])) ctrl.value = vals[at + 2];
+  };
+  node.onConfigure = function (info) { origConfigure?.(info); recoverLegacy(info); readState(); render(); };
 
   const onResult = ({ detail }) => {
     if (String(detail?.node) !== String(node.id)) return;
-    const media = runMedia;
-    if (media) mediaPrompts[media] = detail.prompt;
-    showResult({ ...detail, media });
-    if (media && state.mode === "recreate" && state.tab === "prompt") { state.preview_media = media; saveState(); renderPrompt(); }
+    showResult(detail);
   };
   api.addEventListener("onyx.studio.result", onResult);
-  // The batch engine announces which item it loads; remember it for the result that follows.
-  const onBatchItem = ({ detail }) => {
-    if (String(detail?.node_id) !== String(node.id)) return;
-    const b = batch(); const id = (b.order || [])[detail.current_index ?? -1];
-    const meta = (b.images || []).find((m) => m.id === id);
-    runMedia = meta ? meta.filename : null;
-  };
-  api.addEventListener("onyx_batch_loader_update", onBatchItem);
   const origRemoved = node.onRemoved?.bind(node);
   node.onRemoved = function () {
     api.removeEventListener("onyx.studio.result", onResult);
-    api.removeEventListener("onyx_batch_loader_update", onBatchItem);
     origRemoved?.();
   };
-
-  // The media panel changes batch_data on its own: refresh counts now and then.
-  let lastBatch = "";
-  const poll = setInterval(() => {
-    if (!node.graph) return clearInterval(poll);
-    const v = W("batch_data")?.value || "";
-    if (v !== lastBatch) {
-      lastBatch = v;
-      renderHeader();                                   // tab counters only: never steal the focus
-      if (state.tab === "prompt" && state.mode === "recreate") renderPrompt();
-    }
-  }, 1500);
 
   loadBoot();
 }

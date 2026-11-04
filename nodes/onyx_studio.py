@@ -51,6 +51,14 @@ from ..utils import onyx_registry as _reg
 from ..utils.onyx_http import OnyxAPIError
 from ..utils import onyx_post as _onyx_post
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('studio_bundle', 'onyx_studio', __package__)
+    return ns
+
+
 MODES = ["manual", "idea", "recreate"]   # "gallery" kept readable for old workflows
 _lock = threading.RLock()
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -144,50 +152,14 @@ def save_character(c: dict) -> dict:
         return c
 
 
-def lora_trigger(name: str) -> str:
-    """The LoRA's own trigger: `modelspec.trigger_phrase` in its metadata, else the
-    most frequent training tag (kohya `ss_tag_frequency`), else ''."""
-    try:
-        import folder_paths
-        path = folder_paths.get_full_path("loras", name)
-    except Exception:
-        path = None
-    if not path:
-        return ""
-    try:
-        from .onyx_lora_trigger import read_trigger_phrase
-        phrase = read_trigger_phrase(path)
-        if phrase:
-            return phrase.strip()
-    except Exception:
-        pass
-    try:
-        import struct
-        with open(path, "rb") as fh:
-            (size,) = struct.unpack("<Q", fh.read(8))
-            meta = (json.loads(fh.read(size)).get("__metadata__") or {}) if 0 < size < 100 * 2 ** 20 else {}
-        freq = json.loads(meta.get("ss_tag_frequency") or "{}")
-        counts = {}
-        for tags in freq.values():
-            for tag, n in (tags or {}).items():
-                counts[tag.strip()] = counts.get(tag.strip(), 0) + int(n)
-        if counts:
-            return max(counts.items(), key=lambda kv: kv[1])[0]
-    except Exception:
-        pass
-    return ""
+def lora_trigger(*args, **kwargs):
+    return _onyx_core()['lora_trigger'](*args, **kwargs)
 
 
-def character_trigger(char: dict) -> str:
-    """The trigger to use: the one typed in the character, else its first active LoRA's own."""
-    if (char.get("trigger_line") or "").strip():
-        return char["trigger_line"].strip()
-    for r in char.get("loras") or []:
-        if r.get("on", True):
-            t = lora_trigger(r.get("lora", ""))
-            if t:
-                return t
-    return ""
+
+def character_trigger(*args, **kwargs):
+    return _onyx_core()['character_trigger'](*args, **kwargs)
+
 
 
 def delete_character(char_id: str) -> None:
@@ -242,7 +214,6 @@ def add_history(entry: dict) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _HAIR_RE = re.compile(r'HAIR LOCK\s+"([^"]{20,400})"')
-_CONFIG_KEYS = ("TRIGGER_LINE", "BODY", "RATIO", "OUTPUT")
 _remote_cache = {"at": 0.0, "skills": {}}
 
 
@@ -313,7 +284,6 @@ def _grok_presets() -> dict:
         return {}
 
 
-_PRESET_TRIGGER_RE = re.compile(r'start(?:s)?\s+with\s*:?\s*"\s*([^"\n]{2,60}?)\s*"', re.I)
 
 
 def list_presets() -> list:
@@ -329,12 +299,9 @@ def list_presets() -> list:
     return out
 
 
-def preset_trigger(p: dict) -> str:
-    """The trigger a preset hard-codes: its trigger_word field, or 'start with : "xxx"' in its text."""
-    if (p.get("trigger_word") or "").strip():
-        return p["trigger_word"].strip()
-    m = _PRESET_TRIGGER_RE.search(p.get("prompt", ""))
-    return m.group(1).strip() if m else ""
+def preset_trigger(*args, **kwargs):
+    return _onyx_core()['preset_trigger'](*args, **kwargs)
+
 
 
 def _worker_skills() -> dict:
@@ -379,7 +346,7 @@ def resolve_skill(ref: str) -> str:
     if not ref or ref.startswith(("file:", "worker:")):
         return ref
     low = ref.lower()
-    for s in list_skills(include_worker=False):
+    for s in list_skills(include_worker=True):     # imported files first, then the Worker's
         if low in s["id"].lower() or low in s["name"].lower():
             return s["id"]
     return ""
@@ -400,207 +367,55 @@ def skill_text(skill_id: str) -> tuple:
     raise ValueError(f"unknown skill '{skill_id}'")
 
 
-def _loose(sentence: str) -> str:
-    """Regex for `sentence` that also matches it wrapped over several lines."""
-    return r"\s+".join(re.escape(w) for w in sentence.split())
+def _loose(*args, **kwargs):
+    return _onyx_core()['_loose'](*args, **kwargs)
 
 
-def render_skill(text: str, meta: dict, char: dict, ratio: str = "") -> str:
-    """Fill the skill's CONFIG lines and swap its character-specific text for the
-    selected character's: the original trigger line and body (also inside the
-    examples, which otherwise pull the model back to the skill author's
-    character) and the locked sentence (e.g. the hair lock)."""
-    values = {
-        "TRIGGER_LINE": character_trigger(char) if char else "",
-        "BODY": char.get("body", ""),
-        "RATIO": ratio,
-        "OUTPUT": "chat",
-    }
-    for key in ("TRIGGER_LINE", "BODY"):
-        new = (values[key] or "").strip()
-        old = re.search(rf"^{key}\s*=\s*(.+?)\s*$", text, flags=re.M)
-        if new and old and old.group(1).strip() and old.group(1).strip() != new:
-            text = re.sub(_loose(old.group(1).strip()), lambda m, v=new: v, text)
-    for key in _CONFIG_KEYS:
-        val = (values.get(key) or "").strip()
-        if val:
-            text = re.sub(rf"^({key}\s*=)[^\n]*$", lambda m, v=val: f"{m.group(1)} {v}", text, flags=re.M)
-    locked = " ".join((meta or {}).get("locked_sentence", "").split())
-    hair = char.get("hair_lock", "").strip()
-    if locked and hair and locked != hair:
-        text = re.sub(_loose(locked), lambda m: hair, text)
-    if char.get("extra_rules", "").strip():
-        text += "\n\nCHARACTER RULES (override anything above)\n" + char["extra_rules"].strip()
-    return text
+
+def render_skill(*args, **kwargs):
+    return _onyx_core()['render_skill'](*args, **kwargs)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Prompt generation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _gallery_text(entry_id: str, fallback: str) -> str:
-    try:
-        from .onyx_prompt_library import _load_index
-        for e in _load_index():
-            if str(e.get("id")) == str(entry_id):
-                return e.get("prompt") or fallback
-    except Exception:
-        pass
-    return fallback
+def _gallery_text(*args, **kwargs):
+    return _onyx_core()['_gallery_text'](*args, **kwargs)
 
 
-def _apply_trigger(prompt: str, char: dict, force: bool, from_llm: bool = False) -> str:
-    trig = character_trigger(char) if char else ""
-    prompt = prompt.replace("{trigger}", trig).strip()
-    if force and trig and not prompt.lower().startswith(trig.lower()):
-        lines = prompt.splitlines()
-        first = lines[0].strip() if lines else ""
-        # An LLM answer that starts with ANOTHER trigger line (short, no full stop,
-        # alone on its line): replace it instead of stacking two trigger lines.
-        if from_llm and len(lines) > 1 and first and len(first) < 80 and not first.endswith("."):
-            lines[0] = trig
-            prompt = "\n".join(lines)
-        else:
-            prompt = f"{trig}\n{prompt}"
-    return prompt.strip()
+
+def _apply_trigger(*args, **kwargs):
+    return _onyx_core()['_apply_trigger'](*args, **kwargs)
+
 
 
 def _key_for(provider: str, keys: dict) -> str:
     return (keys.get(provider) or "").strip() or saved_key(provider)
 
 
-def _llm_common(state: dict, keys: dict, seed: int) -> dict:
-    provider = state.get("provider", "ollama")
-    return dict(provider=provider, model=state.get("model", ""),
-                api_key=_key_for(provider, keys), temperature=float(state.get("temperature", 0.7)),
-                max_tokens=int(state.get("max_tokens", 2048)), seed=seed or None,
-                ollama_url=state.get("ollama_url") or _llm.DEFAULT_OLLAMA_URL)
+def _llm_common(*args, **kwargs):
+    return _onyx_core()['_llm_common'](*args, **kwargs)
 
 
-def _chat(common: dict, **kw) -> str:
-    c = dict(common)
-    return _llm.chat(c.pop("provider"), c.pop("model"), **kw, **c)
+
+def _chat(*args, **kwargs):
+    return _onyx_core()['_chat'](*args, **kwargs)
 
 
-def generate(state: dict, image=None, keys: dict | None = None, seed: int = 0) -> dict:
-    """The prompt for one run. `image` is a PIL image (recreate mode).
 
-    manual    typed text; with `enhance` on, the chosen skill rewrites it (its FIX /
-              CHECK path) — the skill improves YOUR prompt, it does not replace it.
-    idea      the skill writes a prompt from an idea sentence.
-    recreate  a Grok Prompt Generator preset turns the batch image into a prompt; a
-              preset that names a skill also gets that skill as its rulebook.
-    The trigger is the character's (typed, or read from its LoRA); a trigger hard-coded
-    in a preset is replaced by it."""
-    keys = keys or {}
-    mode = state.get("mode", "manual")
-    char = character(state.get("character_id", ""))
-    trig = character_trigger(char) if char else ""
-    force = bool(state.get("force_trigger", True))
-    result = {"prompt": "", "notes": "", "ratio": "", "post": "", "mode": mode, "skill": "", "preset": ""}
-    common = _llm_common(state, keys, seed)
-    extra = (state.get("extra") or "").strip()
+def generate(*args, **kwargs):
+    return _onyx_core()['generate'](*args, **kwargs)
 
-    def skill_system(skill_id):
-        text, _kind, meta = skill_text(skill_id)
-        r = state.get("ratio", "")
-        return render_skill(text, meta, char, r if ":" in r else "")
-
-    if mode in ("manual", "gallery"):
-        base = state.get("manual", "") if mode == "manual" else \
-            _gallery_text((state.get("gallery") or {}).get("id", ""), (state.get("gallery") or {}).get("text", ""))
-        prompt = _apply_trigger(base, char, force)
-        if state.get("enhance") and state.get("skill") and prompt.strip():
-            result["skill"] = state["skill"]
-            answer = _chat(common, system=skill_system(state["skill"]),
-                           user=("fix: improve this prompt so it follows every rule, keep its scene, outfit, "
-                                 "pose and light.\n" + prompt + (f"\n{extra}" if extra else "") +
-                                 "\n\nReturn only the fixed prompt in one code block, then the NOTES line."))
-            parsed = _llm.parse_answer(answer)
-            if parsed["prompt"]:
-                result.update(parsed)
-                prompt = _apply_trigger(parsed["prompt"], char, force, from_llm=True)
-        result["prompt"] = prompt
-        return result
-
-    if mode == "idea":
-        if not state.get("skill"):
-            raise RuntimeError("Onyx Studio: idea mode needs a skill (Prompt tab).")
-        idea = (state.get("idea") or "").strip()
-        if not idea:
-            raise RuntimeError("Onyx Studio: idea mode — write the idea in the Prompt tab.")
-        system = skill_system(state["skill"])
-        result["skill"] = state["skill"]
-        answer = _chat(common, system=system,
-                       user=f"{idea}{chr(10) + extra if extra else ''}\n\n(Answer the request directly. Do not reply "
-                            f"READY. One prompt, in one code block, then the NOTES line.)")
-        parsed = _llm.parse_answer(answer)
-    elif mode == "recreate":
-        if image is None:
-            raise RuntimeError("Onyx Studio: recreate mode needs an image — add media to the batch "
-                               "(Media tab) or connect the `image` input.")
-        slot = str(state.get("preset") or "")
-        p = _grok_presets().get(slot)
-        if not p:
-            raise RuntimeError("Onyx Studio: recreate mode — pick a Grok preset (Prompt tab).")
-        result["preset"] = slot
-        instruction = p.get("prompt", "")
-        try:
-            from .grok_prompt import _resolve_choices
-            instruction, _ = _resolve_choices(instruction, seed)
-        except Exception:
-            pass
-        old = preset_trigger(p)
-        if old and trig:
-            instruction = instruction.replace(old, trig)
-        system = ""
-        if p.get("skill"):
-            sid = resolve_skill(p["skill"])
-            try:
-                system = skill_system(sid) if sid else ""
-                result["skill"] = sid
-            except Exception:
-                system = ""
-            if not system:
-                print(f"ℹ️  [Onyx Studio] preset {slot}: skill '{p['skill']}' not imported — the preset runs on its own "
-                      f"(import it in the Skills tab to add the full rulebook).")
-        user = instruction.strip()
-        if extra:
-            user += f"\n{extra}"
-        if trig:
-            user += f"\n\nTRIGGER LINE (line 1 of the prompt, alone): {trig}"
-        if system:
-            user += "\n\n(Do not reply READY. One prompt, in one code block, then the NOTES line.)"
-        answer = _chat(common, system=system, user=user, images=[image])
-        parsed = _llm.parse_answer(answer)
-        if old and trig:
-            parsed["prompt"] = parsed["prompt"].replace(old, trig)
-    else:
-        raise RuntimeError(f"Onyx Studio: unknown mode '{mode}'.")
-
-    if state.get("double_check") and result.get("skill") and parsed["prompt"]:
-        fixed = _llm.parse_answer(_chat(common, system=skill_system(result["skill"]),
-                                        user=("check this\n" + parsed["prompt"] +
-                                              "\n\nList nothing: return only the fixed prompt in one code "
-                                              "block, then the NOTES line.")))
-        if fixed["prompt"]:
-            for k in ("notes", "ratio", "post"):
-                fixed[k] = fixed[k] or parsed[k]
-            parsed = fixed
-    parsed["prompt"] = _apply_trigger(parsed["prompt"], char, force, from_llm=True)
-    result.update(parsed)
-    if not result["prompt"]:
-        raise RuntimeError("Onyx Studio: the model returned no prompt.")
-    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The node
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _batch_spec() -> dict:
-    from .onyx_image_batch_loader import OnyxImageBatchLoader
-    return OnyxImageBatchLoader.INPUT_TYPES()
+# Last reference image seen by each Studio node (node id -> PIL): the Generate button uses it in Recreate.
+_LAST_REF: dict = {}
 
 
 def _tensor_to_pil(t):
@@ -616,60 +431,71 @@ def _placeholder():
 
 
 class OnyxStudio:
-    """Media batch + character LoRAs + prompt writing (manual, gallery, idea, recreate) in one node."""
+    """Character LoRAs + prompt writing (manual, gallery, idea, recreate) + resolution + post look in one node."""
 
     DESCRIPTION = (
-        "The creation hub: image + video batch, character LoRA + trigger (applied to MODEL / CLIP), and "
-        "the prompt — typed (optionally improved by a skill), sent from the Prompt Gallery, written from an "
-        "idea by a skill, or recreated from each batch image with your Grok presets. LLM: Ollama, local "
-        "Qwen3-VL, Grok, OpenRouter or Gemini. Outputs MODEL / CLIP, positive + zeroed negative, the "
-        "prompt, the media, the skill's notes, and `post` (ONYX_POST) for every Onyx post-processing node."
+        "The creation hub: character LoRA + trigger (applied to MODEL / CLIP), the prompt — typed "
+        "(optionally improved by a skill), sent from the Prompt Gallery, written from an idea by a skill, or "
+        "recreated from the `image` / `video` input with your Grok presets — the resolution and the latent, "
+        "and `post` (ONYX_POST), the look every Onyx post-processing node follows. LLM: Ollama, local "
+        "Qwen3-VL, Grok, OpenRouter or Gemini (keys saved in Settings, on this computer)."
     )
 
     @classmethod
     def INPUT_TYPES(cls):
-        spec = _batch_spec()
-        required = dict(spec["required"])          # batch_data FIRST: the media panel relies on it
-        required["studio_state"] = ("STRING", {"default": "{}", "socketless": True})
-        optional = dict(spec.get("optional", {}))
-        optional.update({
-            "model": ("MODEL", {"tooltip": "Diffusion model: the character's LoRAs are applied to it."}),
-            "clip": ("CLIP", {"lazy": True,
-                              "tooltip": "Text encoder: LoRAs applied, then the prompt is encoded here. With "
-                                         "the encode cache on (Settings) and a fixed prompt, it is not even "
-                                         "loaded once the prompt has been encoded (unless the clip output "
-                                         "is used)."}),
-            "image": ("IMAGE", {"tooltip": "Optional reference image. Overrides the batch item for "
-                                           "recreate mode."}),
-            "grok_api_key": ("STRING", {"forceInput": True}),
-            "gemini_api_key": ("STRING", {"forceInput": True}),
-            "openrouter_api_key": ("STRING", {"forceInput": True}),
-            "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff,
-                             "control_after_generate": True,
-                             "tooltip": "Varies the LLM answer between runs (sent to the provider). "
-                                        "Also resolves {a|b} choices in Grok presets."}),
-        })
-        return {"required": required, "optional": optional,
-                "hidden": {"unique_id": "UNIQUE_ID", "onyx_graph": "PROMPT"}}
+        return {
+            "required": {"studio_state": ("STRING", {"default": "{}", "socketless": True})},
+            "optional": {
+                "model": ("MODEL", {"tooltip": "Diffusion model: the character's LoRAs are applied to it."}),
+                "clip": ("CLIP", {"lazy": True,
+                                  "tooltip": "Text encoder: LoRAs applied, then the prompt is encoded here. With "
+                                             "the encode cache on (Settings) and a fixed prompt, it is not even "
+                                             "loaded once the prompt has been encoded (unless the clip output "
+                                             "is used)."}),
+                "image": ("IMAGE", {"tooltip": "Reference image (e.g. from an Onyx Batch Loader): Recreate "
+                                               "writes a prompt from it; 'from image' resolution follows it."}),
+                "video": ("IMAGE", {"tooltip": "Reference video frames: used like `image` (its first frame) "
+                                               "when no image is connected."}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff,
+                                 "control_after_generate": True,
+                                 "tooltip": "Varies the LLM answer between runs (sent to the provider). "
+                                            "Also resolves {a|b} choices in Grok presets."}),
+            },
+            "hidden": {"unique_id": "UNIQUE_ID", "onyx_graph": "PROMPT"},
+        }
 
-    # `post` is LAST: outputs are linked by index, appending keeps saved links valid.
+    # Outputs are linked by index: the media outputs (image, video, audio, video_fps) are gone
+    # with the Media tab — media now comes from a separate loader node.
     RETURN_TYPES = ("MODEL", "CLIP", "CONDITIONING", "CONDITIONING", "STRING",
-                    "IMAGE", "IMAGE", "AUDIO", "FLOAT", "STRING", "STRING", "STRING", _onyx_post.POST_TYPE,
-                    "INT", "INT", "LATENT")
+                    "STRING", "STRING", "STRING", _onyx_post.POST_TYPE, "INT", "INT", "LATENT")
     RETURN_NAMES = ("model", "clip", "positive", "negative", "prompt",
-                    "image", "video", "audio", "video_fps", "notes", "post_preset", "ratio", "post",
-                    "width", "height", "latent")
+                    "notes", "post_preset", "ratio", "post", "width", "height", "latent")
+    # Shown on hover over each output dot (the compact panel has no output labels).
+    OUTPUT_TOOLTIPS = (
+        "model — the diffusion model with the character's LoRAs applied → KSampler / guider model.",
+        "clip — the text encoder with the LoRAs applied (only if another node needs to encode text).",
+        "positive — the encoded prompt → sampler / guider positive.",
+        "negative — empty (zeroed) negative → sampler / guider negative.",
+        "prompt — the final prompt text (e.g. → Prompt Saver, Show Text).",
+        "notes — the skill's NOTES line (motion, ratio…), as text.",
+        "post_preset — the camera motion preset name → Onyx Camera Shake preset_override "
+        "(empty when motion is manual).",
+        "ratio — the aspect ratio used, as text (e.g. 9:16).",
+        "post — the post look + motion (ONYX_POST) → onyx_post of Onyx Post Studio and every Onyx post node.",
+        "width — image width in pixels.",
+        "height — image height in pixels.",
+        "latent — empty latent at width × height (batch size from Format) → sampler latent_image.",
+    )
     FUNCTION = "run"
     CATEGORY = "Onyx"
 
     @classmethod
-    def IS_CHANGED(cls, studio_state="{}", batch_data="{}", seed=0, **kwargs):
+    def IS_CHANGED(cls, studio_state="{}", seed=0, **kwargs):
         try:
             state = json.loads(studio_state or "{}")
-            batch = json.loads(batch_data or "{}")
         except ValueError:
             return float("nan")
-        if state.get("mode") in ("idea", "recreate") or (batch.get("order") or []):
+        if state.get("mode") in ("idea", "recreate"):
             return float("nan")                     # new LLM answer / next batch item every run
         # Characters and skills live in their own files: editing them must re-run the node.
         char = json.dumps(character(state.get("character_id", "")), sort_keys=True)
@@ -698,37 +524,24 @@ class OnyxStudio:
             return ["clip"]
         return []
 
-    def run(self, studio_state="{}", unique_id=None, model=None, clip=None, image=None,
-            grok_api_key=None, gemini_api_key=None, openrouter_api_key=None, seed=0, onyx_graph=None,
-            **batch_kwargs):
+    def run(self, studio_state="{}", unique_id=None, model=None, clip=None, image=None, video=None,
+            seed=0, onyx_graph=None, **_legacy):
         ensure_profile_ready()
         try:
             state = json.loads(studio_state or "{}")
         except ValueError:
             state = {}
 
-        # 1. Media: the next batch item (same engine as the Batch Loader node).
-        out_image, out_video, audio, fps = None, None, None, 0.0
-        try:
-            has_media = bool(json.loads(batch_kwargs.get("batch_data") or "{}").get("order"))
-        except ValueError:
-            has_media = False
-        if has_media:
-            from .onyx_image_batch_loader import OnyxImageBatchLoader
-            res = OnyxImageBatchLoader().load_next(unique_id=unique_id, **batch_kwargs)
-            if isinstance(res, dict):
-                res = res.get("result", ())
-            out_image, out_video, fps = res[0], res[1], float(res[2] or 0.0)
-            audio = res[5] if len(res) > 5 else None
-        ref = image if image is not None else out_image
-        if ref is not None and ref.shape[1] <= 64 and out_video is not None and out_video.shape[0] > 1:
-            ref = out_video[:1]                       # a video item: its first frame is the reference
+        # 1. Reference: the image input, else the first frame of the video input.
+        ref = image if image is not None else (video[:1] if video is not None else None)
+        if ref is not None:
+            _LAST_REF[str(unique_id)] = _tensor_to_pil(ref[0])     # the Generate button reuses it
 
         # 2. Prompt.
-        keys = {"xai": grok_api_key or "", "gemini": gemini_api_key or "", "openrouter": openrouter_api_key or ""}
         pil = _tensor_to_pil(ref[0]) if ref is not None else None
         try:
-            res = generate(state, image=pil, keys=keys, seed=int(seed or 0))
+            # API keys: the ones saved in Settings (on this computer, outside the pack).
+            res = generate(state, image=pil, keys={}, seed=int(seed or 0))
         except OnyxAPIError as e:
             raise RuntimeError(str(e)) from None
         prompt = res["prompt"]
@@ -762,11 +575,11 @@ class OnyxStudio:
         if positive is not None:
             negative = _zero_out(positive)
 
-        post = _onyx_post.make(state.get("post_look", "none"), state.get("post_motion", "none"),
+        post = _onyx_post.make(state.get("post_look", "default"), state.get("post_motion", "none"),
                                auto_motion=res.get("post") or "")
         res["post_look"], res["post_motion"] = post["look"], post["motion"]
         try:
-            width, height, ratio_label = resolution(state, res.get("ratio", ""), ref if ref is not None else out_image)
+            width, height, ratio_label = resolution(state, res.get("ratio", ""), ref)
         except Exception as e:
             print(f"⚠️  [Onyx Studio] resolution: {e} — 1024x1024 used.")
             width, height, ratio_label = 1024, 1024, state.get("ratio", "1:1")
@@ -775,11 +588,8 @@ class OnyxStudio:
         latent = empty_latent(width, height, batch)
         print(f"📐 [Onyx Studio] {width} x {height} ({ratio_label})")
         _notify(unique_id, res)
-        return (model, clip, positive, negative, prompt,
-                out_image if out_image is not None else (image if image is not None else _placeholder()),
-                out_video if out_video is not None else _placeholder(),
-                audio, fps, res["notes"], "" if post["motion"] == "manual" else post["motion"],
-                ratio_label, post, width, height, latent)
+        return (model, clip, positive, negative, prompt, res["notes"],
+                "" if post["motion"] == "manual" else post["motion"], ratio_label, post, width, height, latent)
 
 
 RES_ASPECTS = ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "21:9", "5:4", "4:5", "from image (input)"]
@@ -932,7 +742,7 @@ def register_routes() -> None:
         loop = asyncio.get_running_loop()
         skills = await loop.run_in_executor(None, list_skills)
         return ok(skills=skills, presets=list_presets(), characters=characters(), keys=keys_status(),
-                  post_looks=[{"id": k, "info": _onyx_post.LOOK_INFO.get(k, "")} for k in _onyx_post.looks()],
+                  post_looks=[{"id": k, "info": _onyx_post.LOOK_INFO.get(k, "")} for k in _onyx_post.look_names()],
                   post_motions=_onyx_post.MOTIONS,
                   history=_read("history.json", [])[:30], loras=_lora_files(),
                   providers=[{"id": p, "label": _llm.PROVIDER_LABELS[p]} for p in _llm.PROVIDERS],
@@ -1055,7 +865,10 @@ def register_routes() -> None:
             state = body.get("state") or {}
 
             def work():
-                pil = _pool_image(body["media"]) if body.get("media") else None
+                pil = _LAST_REF.get(str(body.get("node_id") or ""))
+                if state.get("mode") == "recreate" and pil is None:
+                    raise RuntimeError("Recreate: run the workflow once with an image connected to the "
+                                       "`image` (or `video`) input, then Generate works on that image.")
                 return generate(state, image=pil, seed=int(body.get("seed") or 0))
             res = await asyncio.get_running_loop().run_in_executor(None, work)
             add_history({"prompt": res["prompt"], "notes": res["notes"], "mode": res["mode"],

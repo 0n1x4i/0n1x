@@ -39,6 +39,14 @@ from collections import OrderedDict
 
 from .onyx_render_profile import ensure_profile_ready
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('h3_tools_bundle', 'onyx_conditioning_cache', __package__)
+    return ns
+
+
 _PACK_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = os.path.join(_PACK_ROOT, "_cache", "conditioning")
 
@@ -47,151 +55,59 @@ _MEM_MAX = 8                # conditionings kept in RAM (a few MB each)
 _memory: "OrderedDict[str, object]" = OrderedDict()     # path -> conditioning, LRU
 
 
-def _safe_name(name: str) -> str:
-    name = re.sub(r"[^A-Za-z0-9._-]+", "_", (name or "").strip()) or "prompt"
-    return name[:60]
+def _safe_name(*args, **kwargs):
+    return _onyx_core()['_safe_name'](*args, **kwargs)
 
 
-def _path(text: str, cache_name: str, fingerprint: str = "") -> str:
-    key = text if not fingerprint else f"{text}\0{fingerprint}"
-    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-    return os.path.join(CACHE_DIR, f"{_safe_name(cache_name)}_{digest}.pt")
+
+def _path(*args, **kwargs):
+    return _onyx_core()['_path'](*args, **kwargs)
 
 
-def encoder_fingerprint(graph, node_id, input_name: str = "clip") -> str:
-    """Identify the text encoder WITHOUT loading it: hash every node upstream of
-    `input_name` (class + widget values) from the workflow ComfyUI is running.
-    Empty when the graph is unknown or the input is not connected."""
-    if not isinstance(graph, dict) or node_id is None:
-        return ""
-    link = ((graph.get(str(node_id)) or {}).get("inputs") or {}).get(input_name)
-    if not (isinstance(link, list) and len(link) == 2):
-        return ""
-    parts, seen, todo = [], set(), [str(link[0])]
-    while todo and len(seen) < 64:
-        nid = todo.pop()
-        if nid in seen:
-            continue
-        seen.add(nid)
-        node = graph.get(nid) or {}
-        values = {}
-        for k, v in sorted((node.get("inputs") or {}).items()):
-            if isinstance(v, list) and len(v) == 2 and isinstance(v[1], int):
-                todo.append(str(v[0]))
-                values[k] = f"<link:{v[1]}>"
-            else:
-                values[k] = v
-        parts.append(json.dumps([node.get("class_type"), values], sort_keys=True, default=str))
-    return hashlib.sha256("|".join(sorted(parts)).encode("utf-8")).hexdigest()[:16]
+
+def encoder_fingerprint(*args, **kwargs):
+    return _onyx_core()['encoder_fingerprint'](*args, **kwargs)
 
 
-def _to_cpu(obj):
-    import torch
-    if isinstance(obj, torch.Tensor):
-        return obj.detach().cpu()
-    if isinstance(obj, dict):
-        return {k: _to_cpu(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return type(obj)(_to_cpu(v) for v in obj)
-    return obj
+
+def _to_cpu(*args, **kwargs):
+    return _onyx_core()['_to_cpu'](*args, **kwargs)
 
 
-def _remember(path: str, cond):
-    _memory[path] = cond
-    _memory.move_to_end(path)
-    while len(_memory) > _MEM_MAX:
-        _memory.popitem(last=False)
+
+def _remember(*args, **kwargs):
+    return _onyx_core()['_remember'](*args, **kwargs)
 
 
-def _load(path: str):
-    if path in _memory:
-        if os.path.isfile(path):
-            _memory.move_to_end(path)
-            return _memory[path]
-        del _memory[path]                       # cleared from disk: forget it too
-    if not os.path.isfile(path):
-        return None
-    import torch
-    try:
-        data = torch.load(path, map_location="cpu", weights_only=True)
-        cond = data["conditioning"]
-    except Exception as e:
-        print(f"⚠️  [Onyx Conditioning Cache] unreadable cache file, re-encoding: {e}")
-        return None
-    try:
-        os.utime(path)                          # "recently used" for the size cap
-    except OSError:
-        pass
-    _remember(path, cond)
-    return cond
+
+def _load(*args, **kwargs):
+    return _onyx_core()['_load'](*args, **kwargs)
 
 
-def lookup(text: str, cache_name: str, fingerprint: str = ""):
-    """The cached conditioning for this text, or None."""
-    return _load(_path(text, cache_name, fingerprint))
+
+def lookup(*args, **kwargs):
+    return _onyx_core()['lookup'](*args, **kwargs)
 
 
-def store(text: str, cache_name: str, cond, fingerprint: str = "") -> bool:
-    """Save a conditioning (atomic; refuses what cannot be reloaded safely), then
-    keep the folder under the size cap. False when it could not be saved."""
-    path = _path(text, cache_name, fingerprint)
-    try:
-        import torch
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        tmp = path + ".tmp"
-        cpu = _to_cpu(cond)
-        torch.save({"text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                    "text_preview": text[:200], "conditioning": cpu}, tmp)
-        torch.load(tmp, map_location="cpu", weights_only=True)
-        os.replace(tmp, path)
-        _remember(path, cpu)
-    except Exception as e:
-        try:
-            os.remove(path + ".tmp")
-        except OSError:
-            pass
-        print(f"⚠️  [Onyx Conditioning Cache] could not cache this encoder's output ({e}); "
-              f"it works, but the encoder will load every run.")
-        return False
-    prune()
-    return True
+
+def store(*args, **kwargs):
+    return _onyx_core()['store'](*args, **kwargs)
 
 
-def stats() -> dict:
-    files = [os.path.join(CACHE_DIR, f) for f in os.listdir(CACHE_DIR)] if os.path.isdir(CACHE_DIR) else []
-    files = [f for f in files if f.endswith(".pt") and os.path.isfile(f)]
-    return {"files": len(files), "bytes": sum(os.path.getsize(f) for f in files),
-            "cap_bytes": int(MAX_DISK_MB * 1024 * 1024), "dir": CACHE_DIR}
+
+def stats(*args, **kwargs):
+    return _onyx_core()['stats'](*args, **kwargs)
 
 
-def prune(max_bytes: int | None = None) -> int:
-    """Delete the least recently used files until the folder fits the cap. -> files deleted."""
-    cap = int(MAX_DISK_MB * 1024 * 1024) if max_bytes is None else int(max_bytes)
-    if not os.path.isdir(CACHE_DIR):
-        return 0
-    files = []
-    for f in os.listdir(CACHE_DIR):
-        p = os.path.join(CACHE_DIR, f)
-        if f.endswith(".pt") and os.path.isfile(p):
-            st = os.stat(p)
-            files.append((st.st_mtime, st.st_size, p))
-    total, removed = sum(s for _, s, _ in files), 0
-    for _, size, p in sorted(files):
-        if total <= cap:
-            break
-        try:
-            os.remove(p)
-            _memory.pop(p, None)
-            total -= size
-            removed += 1
-        except OSError:
-            pass
-    return removed
+
+def prune(*args, **kwargs):
+    return _onyx_core()['prune'](*args, **kwargs)
 
 
-def clear() -> int:
-    _memory.clear()
-    return prune(0)
+
+def clear(*args, **kwargs):
+    return _onyx_core()['clear'](*args, **kwargs)
+
 
 
 class OnyxConditioningCache:
@@ -239,22 +155,9 @@ class OnyxConditioningCache:
             return []                       # hit: the encoder branch is never executed
         return ["clip"]
 
-    def encode(self, text, cache_name, clip=None, unique_id=None, onyx_graph=None, **_):
-        ensure_profile_ready()
-        fp = encoder_fingerprint(onyx_graph, unique_id)
-        cond = lookup(text, cache_name, fp)
-        if cond is not None:
-            print(f"♻️  [Onyx Conditioning Cache] '{cache_name}': prompt read from cache, "
-                  f"text encoder not loaded.")
-            return (cond,)
-        if clip is None:
-            raise RuntimeError("Onyx Conditioning Cache: this prompt is not cached yet — connect the "
-                               "text encoder (CLIPLoader) to `clip` for this first run.")
-        cond = clip.encode_from_tokens_scheduled(clip.tokenize(text))
-        if store(text, cache_name, cond, fp):
-            print(f"💾 [Onyx Conditioning Cache] '{cache_name}': prompt encoded and saved — "
-                  f"next runs will not load the text encoder.")
-        return (cond,)
+    def encode(self, *args, **kwargs):
+        return _onyx_core()['OnyxConditioningCache'].encode(self, *args, **kwargs)
+
 
 
 NODE_CLASS_MAPPINGS = {"OnyxConditioningCache": OnyxConditioningCache}

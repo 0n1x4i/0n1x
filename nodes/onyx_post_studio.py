@@ -11,7 +11,7 @@ shake at the very end (motion blur goes last: it smears everything before it):
   4 Camera sensor  Onyx_Camera_Look          demosaic softness, sensor noise, lens blur, JPEG
   5 Grain & noise  Onyx_Renoise              ISO grain, chroma blotches, NR smear
   6 JPEG & contrast OnyxMoreJPEG             final contrast / JPEG pass
-  7 Motion         OnyxCameraShake           shake.py presets (none by default)
+  7 Motion         OnyxCameraShake           shake values (0 = off by default)
 
 Every stage RUNS THE EXISTING NODE (same code, protected code still comes from
 the Worker); this node only stores the settings and calls them in order. The
@@ -39,9 +39,27 @@ from collections import OrderedDict
 from ..utils import onyx_post as _onyx_post
 from .onyx_render_profile import ensure_profile_ready
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('studio_bundle', 'onyx_post_studio', __package__)
+    return ns
+
+
 STAGES = [
+    # ── the light: tone curve, levels, contrast (first: they set the brightness) ──
+    {"key": "curves", "group": "light", "short": "Curves", "cls": "OnyxCurvesAdjust", "title": "Curves", "icon": "📈",
+     "fork": "fork of Curves Adjust Pro · MachinePainting (MIT)",
+     "info": "Tone curve per channel (RGB, R, G, B): click to add a point, drag to move, shift+click to remove."},
+    {"key": "levels", "group": "light", "short": "Levels", "cls": "OnyxLevelsAdjust", "title": "Levels", "icon": "📊",
+     "fork": "fork of Levels Adjust · MachinePainting (MIT)",
+     "info": "Black / white point, gamma, output levels."},
+    {"key": "contrast", "group": "light", "short": "Contrast", "cls": "OnyxContrast", "title": "Contrast", "icon": "◐",
+     "info": "Global contrast, exactly like the MoreJPEG (realism-enhancor) contrast of the Crispy workflow."},
     # ── the scene: colour, skin, grade (the "photo" before the camera) ──────────
     {"key": "color", "group": "scene", "short": "Color", "cls": "OnyxFameGridColorFinish", "title": "Color finish", "icon": "🎨",
+     "fork": "fork of FameGrid Color Finish (MIT)",
      "info": "Colour pop + light sharpen. First, on the clean render."},
     {"key": "skin", "group": "scene", "short": "Skin", "cls": "OnyxRealismInjector", "title": "Skin & eyes", "icon": "💧",
      "info": "Skin oil and T-zone shine, micro shadows, eye moisture (face-aware)."},
@@ -52,6 +70,7 @@ STAGES = [
     {"key": "clarity", "group": "scene", "short": "Clarity", "cls": "Onyx_Clarity", "title": "Clarity", "icon": "🔍",
      "info": "Midtone local contrast, edge-aware."},
     {"key": "grade", "group": "scene", "short": "Grade", "cls": "OnyxPostProcessSuite", "title": "Grade & optics", "icon": "🎚️",
+     "fork": "fork of CRT Post-Process Suite · CRT Nodes (MIT)",
      "info": "Levels, colour wheels, temperature, glow, glare, chromatic aberration, vignette, lens."},
     {"key": "lut", "group": "scene", "short": "LUT", "cls": "Onyx_Apply_LUT", "title": "LUT", "icon": "🎞️",
      "info": "A .cube LUT from the pack's luts/ folder — the final colour grade."},
@@ -62,32 +81,35 @@ STAGES = [
      "info": "Lamps and windows burn out like on a sensor: per-channel clip, colour drift, fringe, bloom."},
     {"key": "camera", "group": "phone", "short": "Camera", "cls": "Onyx_Camera_Look", "title": "Camera sensor", "icon": "📷",
      "info": "Phone sensor: demosaic softness, sensor noise, lens blur, JPEG."},
+    {"key": "lens", "group": "phone", "short": "Lens", "cls": "OnyxLensCharacter", "title": "Lens character", "icon": "🔭",
+     "info": "Real-lens signature: lateral / longitudinal chromatic aberration, optical vignette, optional "
+             "focus blur with polygon bokeh (focus_mode flat + blur 0 = CA + vignette only)."},
     {"key": "hdr", "group": "phone", "short": "HDR", "cls": "OnyxPhoneHDR", "title": "Phone HDR", "icon": "📱",
      "info": "The phone's smart HDR: lifted shadows, held highlights, local contrast, sharpening halos."},
     {"key": "grain", "group": "phone", "short": "Grain", "cls": "Onyx_Renoise", "title": "Grain & noise", "icon": "🌫️",
      "info": "ISO grain, chroma blotches, purple/green noise, noise-reduction smear."},
-    {"key": "jpeg", "group": "phone", "short": "JPEG", "cls": "OnyxMoreJPEG", "title": "JPEG & contrast", "icon": "🗜️",
-     "info": "Final contrast and JPEG pass."},
-    {"key": "lens", "group": "phone", "short": "Lens", "cls": "OnyxLensCharacter", "title": "Lens character", "icon": "🔭",
-     "info": "Real-lens signature: lateral / longitudinal chromatic aberration, optical vignette, optional "
-             "focus blur with polygon bokeh (focus_mode flat + blur 0 = CA + vignette only)."},
+    {"key": "jpeg", "group": "phone", "short": "JPEG", "cls": "OnyxMoreJPEG", "title": "JPEG", "icon": "🗜️",
+     "info": "Final JPEG pass (sharpness, noise, re-encode). The contrast is in Light › Contrast."},
     {"key": "motion", "group": "phone", "short": "Motion", "cls": "OnyxCameraShake", "title": "Motion", "icon": "🌀",
-     "info": "Camera shake (shake.py): it smears everything before it. "
-             "Studio's motion (post input) picks the preset per image."},
+     "info": "Camera shake: motion blur, double image, defocus, tilt. Your values are used as set; "
+             "a motion preset sent by Onyx Studio (other than manual) replaces them for that image."},
     # ── after the photo exists: the upload ────────────────────────────────────
     {"key": "chroma", "group": "upload", "short": "Chroma", "cls": "OnyxChromaSubsample", "title": "Chroma subsample", "icon": "📤",
      "info": "Colour resolution of a JPEG / Instagram upload (4:2:0). After everything: it happens to the finished file."},
 ]
 STAGE_KEYS = [s["key"] for s in STAGES]
 # New stages start switched off: the Crispy chain is unchanged until you turn them on.
-_DEFAULT_OFF = {"skintone", "dehaze", "clarity", "lut", "lens", "smudge", "clip", "hdr", "chroma"}
+_DEFAULT_OFF = {"curves", "levels", "skintone", "dehaze", "clarity", "lut", "smudge", "clip", "hdr", "jpeg", "motion", "chroma"}
 # Extra node inputs a stage receives from the Post Studio's own optional inputs.
 _STAGE_INPUTS = {"skin": {"depth_map": "depth_map"},
                  "motion": {"motion_override": "preset_override"}}
 _NEEDS: dict = {}                       # stage -> input it cannot run without (skipped with a note)
 _HIDDEN_PARAMS = {"enabled"}            # Camera Look's own on/off = the stage switch
 _MAIN_PARAMS = {"global_mix"}           # never part of an enable_* group
-_DEFAULT_OVERRIDES = {"motion": {"preset": "none"}}
+_DEFAULT_OVERRIDES = {}
+# Settings a stage pins (not shown, not overridden by a look): the JPEG stage leaves the contrast
+# to the Light › Contrast stage.
+_STAGE_FIXED = {"jpeg": {"contrast": 1.0}}
 _WIDGET_TYPES = {"INT", "FLOAT", "BOOLEAN", "STRING"}
 
 
@@ -158,15 +180,16 @@ def _params(cls) -> list:
 
 
 def defaults(key: str, cls=None) -> dict:
-    """Each node's own defaults, with the Crispy workflow values on top."""
+    """Each node's own defaults, with the 'default' look (Jean's Krea 4K Crispy chain) on top."""
     cls = cls or stage_class(key)
     if cls is None:
         return {}
     vals = {p["name"]: p["default"] for p in _params(cls)}
     stage = next(s for s in STAGES if s["key"] == key)
-    crispy = _onyx_post.looks().get("crispy", {}).get(stage["cls"], {})
+    crispy = _onyx_post.looks(wait=5.0).get("default", {}).get(stage["cls"], {})
     vals.update({k: v for k, v in crispy.items() if k in vals})
     vals.update({k: v for k, v in _DEFAULT_OVERRIDES.get(key, {}).items() if k in vals})
+    vals.update({k: v for k, v in _STAGE_FIXED.get(key, {}).items() if k in vals})
     if key == "lut":                    # preselect the pack's natural LUT when it is there
         for p in _params(cls):
             if p["name"] == "lut_file":
@@ -181,7 +204,7 @@ def spec() -> dict:
     stages = []
     for s in STAGES:
         cls = stage_class(s["key"])
-        params = _params(cls) if cls is not None else []
+        params = [p for p in (_params(cls) if cls is not None else []) if p["name"] not in _STAGE_FIXED.get(s["key"], {})]
         dflt = defaults(s["key"], cls) if cls is not None else {}
         for p in params:
             p["default"] = dflt.get(p["name"], p["default"])
@@ -219,6 +242,7 @@ def stage_values(key: str, saved: dict, cls=None) -> dict:
     for name, v in (saved or {}).items():
         if name in params:
             vals[name] = _coerce(params[name], v)
+    vals.update({k: v for k, v in _STAGE_FIXED.get(key, {}).items() if k in vals})
     return vals
 
 
@@ -226,62 +250,14 @@ def stage_values(key: str, saved: dict, cls=None) -> dict:
 # The chain
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _unwrap(res):
-    if isinstance(res, dict):
-        res = res.get("result", ())
-    return res[0]
+def _unwrap(*args, **kwargs):
+    return _onyx_core()['_unwrap'](*args, **kwargs)
 
 
-def run_chain(images, state: dict, onyx_post=None, depth_map=None, motion_override=None,
-              preview: bool = False, progress=None) -> tuple:
-    """-> (images, [(stage key, seconds or error text)]). Stages switched off are
-    skipped. In a preview a failing stage is skipped and reported; in a real run
-    it raises, like the separate node would."""
-    stages_state = (state or {}).get("stages") or {}
-    timings = []
-    for s in STAGES:
-        st = stages_state.get(s["key"]) or {}
-        on = st.get("on", s["key"] not in _DEFAULT_OFF)
-        if progress:
-            progress(s["key"])
-        if not on:
-            continue
-        cls = stage_class(s["key"])
-        if cls is None:
-            print(f"⚠️  [Onyx Post Studio] {s['title']}: node not available — stage skipped.")
-            continue
-        vals = stage_values(s["key"], st.get("v") or {}, cls)
-        if preview and s["key"] == "grade":
-            vals["enable_upscale"] = False                 # previews stay fast
-        try:
-            spec_ = cls.INPUT_TYPES()
-        except Exception:
-            spec_ = {}
-        kwargs = {_image_param(spec_): images, **vals}
-        if "enabled" in ((spec_.get("required") or {}) | (spec_.get("optional") or {})):
-            kwargs["enabled"] = True
-        if onyx_post is not None:
-            kwargs["onyx_post"] = onyx_post
-        extras = {"depth_map": depth_map, "motion_override": motion_override}
-        need = _NEEDS.get(s["key"])
-        if need and extras.get(need) is None:
-            msg = f"needs the `{need}` input"
-            print(f"⚠️  [Onyx Post Studio] {s['title']}: {msg} — stage skipped.")
-            timings.append((s["key"], msg))
-            continue
-        for src, dst in _STAGE_INPUTS.get(s["key"], {}).items():
-            if extras.get(src) is not None:
-                kwargs[dst] = extras[src]
-        t0 = time.time()
-        try:
-            images = _unwrap(getattr(cls(), cls.FUNCTION)(**kwargs))
-        except Exception as e:
-            if not preview:
-                raise RuntimeError(f"Onyx Post Studio — {s['title']}: {e}") from e
-            timings.append((s["key"], str(e)[:300]))
-            continue
-        timings.append((s["key"], round(time.time() - t0, 3)))
-    return images, timings
+
+def run_chain(*args, **kwargs):
+    return _onyx_core()['run_chain'](*args, **kwargs)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -432,14 +408,15 @@ class OnyxPostStudio:
                 **_onyx_post.POST_INPUT,
                 "depth_map": ("IMAGE", {"tooltip": "Optional depth map for Skin & eyes (bright = near)."}),
                 "motion_override": ("STRING", {"forceInput": True,
-                    "tooltip": "A Camera Shake preset name (e.g. Onyx Studio's post_preset). 'none' = no "
-                               "shake, empty = the Motion tab's preset."}),
+                    "tooltip": "A motion preset name (e.g. Onyx Studio's post_preset): replaces the Motion values. 'none' = no "
+                               "shake, empty = the Motion tab's values."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
+    OUTPUT_TOOLTIPS = ("image — the finished images, after every stage switched on.",)
     FUNCTION = "run"
     CATEGORY = "Onyx/Post"
 

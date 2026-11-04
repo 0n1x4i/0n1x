@@ -77,6 +77,7 @@ logger = logging.getLogger(__name__)
 
 
 class OnyxPostProcessSuite:
+    DESCRIPTION = ("Fork of CRT Post-Process Suite from CRT Nodes (github.com/PGCRT/CRT-Nodes, MIT, © 2024 plugcrypt): levels, colour wheels, temperature, sharpen, glow, glare, chromatic aberration, vignette, radial blur, film grain, lens distortion.")
     rescale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]
     precision_options = ["auto", "32", "16", "bfloat16"]
     radial_blur_types = ["spin", "zoom"]

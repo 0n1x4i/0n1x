@@ -6,11 +6,13 @@
 // `post_state` widget (JSON); the Python side runs the existing nodes in order.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { makeCompact } from "./onyx_compact.js";
+import { curveEditor } from "./onyx_curves_editor.js";
 
-const NODE_SIZE = [760, 1000];
-const PANEL_MIN_H = 640;
+const NODE_SIZE = [820, 1040];
+const PANEL_MIN_H = 1000;
 const PREVIEW_SIZE = 1024;
-const GROUPS = { scene: "The scene", phone: "The phone", upload: "The upload" };
+const GROUPS = { light: "The light", scene: "The scene", phone: "The phone", upload: "The upload" };
 
 function h(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -50,6 +52,7 @@ function injectStyle() {
 .ops-logo{font-weight:800;letter-spacing:.14em;font-size:13px;background:linear-gradient(90deg,#ffd7a8,#e4b8ff);-webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}
 .ops-pill{padding:4px 10px;border-radius:999px;background:var(--p3);border:1px solid var(--ln2);font-size:11.5px;white-space:nowrap}
 .ops-pill b{color:var(--ac2)}.ops-pill.link{color:var(--warm);border-color:#5a4630}
+.ops-fork{display:inline-block;margin-top:6px;padding:2px 8px;border-radius:10px;border:1px solid rgba(255,255,255,.14);color:#a9b2d6;font-size:10.5px;letter-spacing:.02em}
 .ops-presets{display:flex;align-items:center;gap:5px;padding:6px 10px;background:var(--p1);border-bottom:1px solid var(--ln);flex-wrap:wrap}
 .ops-presets .lbl{color:var(--dim);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-right:4px}
 .ops-ps{min-width:28px;max-width:118px;padding:4px 8px;border-radius:7px;border:1px solid var(--ln2);background:var(--p2);color:var(--dim);font:600 11px Inter,system-ui,sans-serif;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -367,15 +370,15 @@ function setupPostStudio(node) {
       else if (i) rows.push(h("div", { class: "ops-arrow" }, "↓"));
       rows.push(h("div", { class: "ops-st" + (isOn(s.key) ? "" : " off") },
         h("div", { class: "n" }, i + 1), h("div", { class: "ic" }, s.icon),
-        h("div", {}, h("div", { class: "tt" }, s.title, s.available ? "" : " — not available"), h("div", { class: "sub" }, s.info)),
+        h("div", {}, h("div", { class: "tt" }, s.title, s.available ? "" : " — not available"), h("div", { class: "sub" }, s.info), s.fork ? h("div", { class: "ops-fork", style: "margin-top:4px" }, "⑂ " + s.fork) : null),
         toggle("", isOn(s.key), (v) => { st(s.key).on = v; state.current_preset = null; saveState(); render(); schedulePreview(); }, "Stage on / off"),
         h("button", { class: "ops-btn ghost", onclick: () => setTab(s.key) }, "Edit ›")));
     });
     fill(p,
       h("div", { class: "ops-card" }, h("h4", {}, "The chain, in order"), h("div", { class: "ops-chain" }, rows),
-        h("div", { class: "ops-hint", style: "margin-top:8px" }, "The 4K Crispy workflow's order: first the scene (colour, skin, grade, LUT), then what the phone does to it (lens, sensor clipping, sensor, HDR processing, grain, JPEG, shake), and last what the upload does to the file. New stages start switched off.")),
+        h("div", { class: "ops-hint", style: "margin-top:8px" }, "The 4K Crispy workflow's order: first the light (curves, levels, contrast), then the scene (colour, skin, grade, LUT), then what the phone does to it (lens, sensor clipping, sensor, HDR processing, grain, JPEG, shake), and last what the upload does to the file. Stages outside the default look start switched off.")),
       h("div", { class: "ops-card" }, h("h4", {}, "Start from a look", h("span", { class: "sp" }),
-        h("button", { class: "ops-btn ghost", onclick: () => { if (confirm("Reset every stage to the Crispy workflow settings?")) { state.stages = {}; state.current_preset = null; saveState(); render(); schedulePreview(); } } }, "↺ Reset all (Crispy)")),
+        h("button", { class: "ops-btn ghost", onclick: () => { if (confirm("Reset every stage to the default look?")) { state.stages = {}; state.current_preset = null; saveState(); render(); schedulePreview(); } } }, "↺ Reset all (default)")),
         h("div", { class: "ops-looks" }, Object.keys(spec.looks).map((name) => h("div", { class: "ops-look", onclick: () => loadLook(name) },
           h("b", {}, name), h("span", {}, spec.look_info[name] || "")))),
         h("div", { class: "ops-hint", style: "margin-top:8px" }, "Copies the look's values into the tabs, to tweak from there. To change the look per run instead, wire Onyx Studio's post output to this node's onyx_post input.")));
@@ -411,6 +414,11 @@ function setupPostStudio(node) {
       const sel = h("select", { onchange: (e) => commit(e.target.value) }, p.options.map((o) => h("option", { value: o, selected: o === String(v) ? "selected" : null }, o)));
       rs.onclick = () => { sel.value = p.default; commit(p.default); };
       return h("div", { class: "ops-p" }, lb, h("div", { class: "wide" }, sel), rs);
+    }
+    if (p.type === "STRING" && p.name === "curve_data") {        // Curves: the editor, not a text field
+      const ed = curveEditor(v ?? p.default, (nv) => commit(nv));
+      rs.onclick = () => { ed.set(p.default); commit(p.default); };
+      return h("div", { class: "ops-p", style: "grid-template-columns:1fr auto" }, h("div", { style: "grid-column:1 / 3" }, ed), rs);
     }
     if (p.type === "STRING") {
       const inp = h("input", { type: "text", value: v ?? "", onchange: (e) => commit(e.target.value) });
@@ -458,8 +466,9 @@ function setupPostStudio(node) {
       h("div", { class: "ops-card", style: "background:linear-gradient(120deg,#16161f,#1a1622)" },
         h("h4", { style: "font-size:12px;color:var(--tx)" }, `${s.icon} ${s.title}`, h("span", { class: "sp" }),
           toggle(isOn(key) ? "Stage on" : "Stage off", isOn(key), (v) => { st(key).on = v; state.current_preset = null; saveState(); render(); schedulePreview(); }),
-          h("button", { class: "ops-btn ghost", title: "Every setting of this stage back to the Crispy workflow values", onclick: () => { st(key).v = {}; state.current_preset = null; saveState(); renderStage(key); schedulePreview(); } }, "↺ Reset")),
-        h("div", { class: "ops-hint" }, s.info, s.available ? "" : " ⚠️ This node is not available in this install — the stage is skipped.")),
+          h("button", { class: "ops-btn ghost", title: "Every setting of this stage back to the default look", onclick: () => { st(key).v = {}; state.current_preset = null; saveState(); renderStage(key); schedulePreview(); } }, "↺ Reset")),
+        h("div", { class: "ops-hint" }, s.info, s.available ? "" : " ⚠️ This node is not available in this install — the stage is skipped."),
+        s.fork ? h("div", { class: "ops-fork", title: "Open-source code this stage is built on (credited, licence kept)" }, "⑂ " + s.fork) : null),
       h("div", { style: isOn(key) ? "" : "opacity:.45" }, cards));
   }
 
@@ -477,6 +486,7 @@ function setupPostStudio(node) {
     serialize: false, getValue: () => undefined, setValue: () => {}, getMinHeight: () => PANEL_MIN_H,
   });
   node.size = [...NODE_SIZE];
+  makeCompact(node, head);
   const origConfigure = node.onConfigure?.bind(node);
   node.onConfigure = function (info) { origConfigure?.(info); readState(); render(); };
   const origConn = node.onConnectionsChange?.bind(node);

@@ -241,7 +241,45 @@ def _load_pack_module(name):
         import io
         with contextlib.redirect_stderr(io.StringIO()):
             gen["load_pack"]()
+        _offline_worker(pkg)
     return sys.modules[f"{pkg}.{name}"]
+
+
+def _offline_worker(pkg):
+    """Serve the protected cores/bundles from license-worker/protected_nodes (dev checkout
+    only) instead of the Worker, so the moved logic is tested too."""
+    import hashlib
+    protected = os.path.join(ROOT, "license-worker", "protected_nodes")
+    rex = sys.modules.get(f"{pkg}.nodes.onyx_remote_exec")
+    if rex is None or not os.path.isdir(protected):
+        return
+
+    class _Resp:
+        def __init__(self, data):
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    class _Requests:
+        @staticmethod
+        def post(url, json=None, **kw):
+            path = os.path.join(protected, (json or {}).get("name", "") + ".py")
+            if not os.path.isfile(path):
+                return _Resp({"valid": False, "reason": "not found"})
+            src = open(path, encoding="utf-8").read().replace("{{RID}}", "test")
+            return _Resp({"valid": True, "source": src, "hash": hashlib.sha256(src.encode()).hexdigest()[:16]})
+
+    rex.requests = _Requests
+    rex._read_cache = lambda: {"token": "test"}
+    rex._ensure_synced = lambda token: None
+    rex._get_node_id = lambda: "test"
+    rd = sys.modules.get(f"{pkg}.utils.onyx_remote_data")
+    if rd is not None:
+        rd._state.update(data={}, at=0.0, failed_at=0.0)
+        th = rd.refresh(force=True)
+        if th is not None:
+            th.join(30)
 
 
 class H3VfxTests(unittest.TestCase):
@@ -338,8 +376,7 @@ class StudioTests(unittest.TestCase):
 
 class PostLookTests(unittest.TestCase):
     def setUp(self):
-        from utils import onyx_post
-        self.p = onyx_post
+        self.p = _load_pack_module("utils.onyx_post")
 
     def test_none_changes_nothing(self):
         post = self.p.make("none", "none")
@@ -394,9 +431,10 @@ class PostLookTests(unittest.TestCase):
 class CameraShakeTableTests(unittest.TestCase):
     def test_presets_match_shake_py(self):
         mod = _load_pack_module("nodes.onyx_camera_shake")
-        self.assertEqual(mod.PRESETS["shake_med_rot"], (0.012, 60, 0.008, 0.20, 0.0008, 8))
-        self.assertEqual(mod.PRESETS["soft"], (0.000, 0, 0.000, 0.00, 0.0012, 0))
-        self.assertEqual(mod.PRESET_NAMES[0], "none")
+        presets = mod._onyx_core()["PRESETS"]          # protected: lives in postfx_bundle
+        self.assertEqual(presets["shake_med_rot"], (0.012, 60, 0.008, 0.20, 0.0008, 8))
+        self.assertEqual(presets["soft"], (0.000, 0, 0.000, 0.00, 0.0012, 0))
+        self.assertEqual(mod.PRESET_NAMES, ["none", *presets])   # local dropdown in sync
 
 
 class StudioPresetResolutionTests(unittest.TestCase):
@@ -447,10 +485,10 @@ class StudioCacheKeyTests(unittest.TestCase):
             with mock.patch.object(st, "studio_dir", lambda: tmp):
                 c = st.save_character({"name": "Mia", "trigger_line": "mia"})
                 state = json.dumps({"mode": "manual", "manual": "x", "character_id": c["id"]})
-                k1 = st.OnyxStudio.IS_CHANGED(state, "{}", 1)
-                self.assertEqual(k1, st.OnyxStudio.IS_CHANGED(state, "{}", 1))
+                k1 = st.OnyxStudio.IS_CHANGED(state, 1)
+                self.assertEqual(k1, st.OnyxStudio.IS_CHANGED(state, 1))
                 st.save_character({**c, "trigger_line": "mia_v2"})
-                self.assertNotEqual(k1, st.OnyxStudio.IS_CHANGED(state, "{}", 1))
+                self.assertNotEqual(k1, st.OnyxStudio.IS_CHANGED(state, 1))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -461,9 +499,14 @@ class ConditioningCacheTests(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self._dir = mock.patch.object(self.cc, "CACHE_DIR", self.tmp)
         self._dir.start()
+        # the logic runs in the protected core (its own namespace): patch it too
+        self._core = mock.patch.dict(self.cc._onyx_core(), {"CACHE_DIR": self.tmp})
+        self._core.start()
         self.cc._memory.clear()
+        self.cc._onyx_core()["_memory"].clear()
 
     def tearDown(self):
+        self._core.stop()
         self._dir.stop()
         self.cc._memory.clear()
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -528,7 +571,8 @@ class PostStudioTests(unittest.TestCase):
     def test_chain_order_is_the_crispy_workflow_with_motion_last(self):
         keys = self.ps.STAGE_KEYS
         crispy = [k for k in keys if k not in self.ps._DEFAULT_OFF]
-        self.assertEqual(crispy, ["color", "skin", "grade", "camera", "grain", "jpeg", "motion"])
+        self.assertEqual(crispy, ["contrast", "color", "skin", "grade", "camera", "lens", "grain"])   # the default look
+        self.assertEqual(keys[:3], ["curves", "levels", "contrast"])               # the light comes first
         self.assertEqual(keys[-1], "chroma")                        # the upload, after the photo exists
         self.assertLess(keys.index("lut"), keys.index("camera"))
         self.assertLess(keys.index("clip"), keys.index("camera"))
@@ -553,11 +597,13 @@ class PostStudioTests(unittest.TestCase):
         ps, calls = self.ps, []
         classes = {k: self._fake(calls, k) for k in ps.STAGE_KEYS}
         with mock.patch.object(ps, "stage_class", lambda k: classes.get(k)), \
-             mock.patch.object(ps, "defaults", lambda k, cls=None: {"amount": 1.0}):
+             mock.patch.object(ps, "defaults", lambda k, cls=None: {"amount": 1.0}), \
+             mock.patch.dict(ps._onyx_core(), {"stage_class": lambda k: classes.get(k),
+                                               "defaults": lambda k, cls=None: {"amount": 1.0}}):
             out, timings = ps.run_chain([], {"stages": {"grain": {"on": False}, "hdr": {"on": True},
                                                        "skin": {"v": {"amount": "0.5", "bogus": 3}}}})
-        self.assertEqual(out, ["color", "skin", "grade", "camera", "hdr", "jpeg", "motion"])
-        self.assertEqual(calls[1], ("skin", 0.5, {}))               # coerced, unknown key dropped
+        self.assertEqual(out, ["contrast", "color", "skin", "grade", "camera", "lens", "hdr"])
+        self.assertEqual(calls[2], ("skin", 0.5, {}))               # coerced, unknown key dropped
 
 
     def test_preview_skips_a_failing_stage_but_a_run_raises(self):
@@ -575,8 +621,10 @@ class PostStudioTests(unittest.TestCase):
         calls = []
         classes = {k: (Boom if k == "grain" else self._fake(calls, k)) for k in ps.STAGE_KEYS}
         classes = {k: v for k, v in classes.items() if k not in ps._DEFAULT_OFF}
+        dflt = lambda k, cls=None: {"amount": 1.0} if k != "grain" else {}  # noqa: E731
         with mock.patch.object(ps, "stage_class", lambda k: classes.get(k)), \
-             mock.patch.object(ps, "defaults", lambda k, cls=None: {"amount": 1.0} if k != "grain" else {}):
+             mock.patch.object(ps, "defaults", dflt), \
+             mock.patch.dict(ps._onyx_core(), {"stage_class": lambda k: classes.get(k), "defaults": dflt}):
             out, timings = ps.run_chain([], {}, preview=True)
             self.assertNotIn("grain", out)
             self.assertIn(("grain", "no licence"), timings)

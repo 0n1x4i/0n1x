@@ -72,3 +72,7 @@ def _fft_expand_np(*args, **kwargs):
 
 def validate_scales(*args, **kwargs):
     return _onyx_core()['validate_scales'](*args, **kwargs)
+
+
+def fit_power_spectrum(*args, **kwargs):
+    return _onyx_core()['fit_power_spectrum'](*args, **kwargs)

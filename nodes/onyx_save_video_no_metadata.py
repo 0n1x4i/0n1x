@@ -173,9 +173,11 @@ class OnyxSaveVideoNoMetadata:
                 "metadata_profile": (_spoof.VIDEO_PROFILES, {
                     "default": _spoof.PROFILE_NONE,
                     "tooltip": "None = strip every tag (as before, uses `method`).\n"
-                               "iOS (iPhone) = fresh iPhone identity per file: Apple QuickTime "
-                               "tags, iOS version, creation date, ISO6709 GPS, Core Media "
-                               "handlers, mp42 (.mp4).\n"
+                               "iOS (iPhone) = fresh iPhone identity per file, same as the Onyx "
+                               "Spoofer: model (iPhone 12 to 18 Pro Max), iOS for the capture "
+                               "date, local creation date, ISO6709 GPS, lens keys, QuickTime "
+                               "(.mov). H.264 at 24/25/30/60 fps gets the camera's own "
+                               "container; the sound is re-encoded to AAC 48 kHz stereo.\n"
                                "CapCut iOS = a CapCut iOS 19.6.0 export: DreaminaMetaInfo + "
                                "artwork JSON with a new videoId, encoder H.264, QuickTime (.mov).\n"
                                "CapCut Android = a CapCut Android export: MediaMuxer MP4, "

@@ -33,10 +33,32 @@ from .speed_hd_core import (
     _parse_sigmas,
     sample_speed_core,
 )
+from .speed_hd_spectral_utils import fit_power_spectrum
 from .onyx_render_profile import ensure_profile_ready
 from .onyx_remote_exec import load_remote
 
+import json
+import os
+import time
+
 import comfy.k_diffusion.sampling as kds
+
+_HARVEST_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "_cache",
+                             "speed_hd_harvest.json")
+
+
+def _store_harvest(res: dict) -> None:
+    os.makedirs(os.path.dirname(_HARVEST_FILE), exist_ok=True)
+    with open(_HARVEST_FILE, "w", encoding="utf-8") as fh:
+        json.dump({**res, "at": time.strftime("%Y-%m-%d %H:%M")}, fh, indent=1)
+
+
+def _last_harvest():
+    try:
+        with open(_HARVEST_FILE, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
 
 
 def _list_samplers() -> List[str]:
@@ -69,17 +91,21 @@ class OnyxSpeedHDSampler:
                                "scales to differ by exactly 2x (needs PyWavelets); FFT "
                                "accepts any ratio.",
                 }),
-                "mode": (["delta_optimal", "manual"], {
+                "mode": (["delta_optimal", "manual", "harvest (calibration run)"], {
                     "default": "delta_optimal",
                     "tooltip": "'delta_optimal' computes transitions from 'scales', "
                                "'delta', and the selected power-spectrum preset. "
-                               "'manual' uses user-specified sigma thresholds.",
+                               "'manual' uses user-specified sigma thresholds. "
+                               "'harvest' = one normal full-resolution render that measures your model's "
+                               "spectrum (A, beta) and saves it: then switch back to delta_optimal with "
+                               "model_preset = 'last harvest'.",
                 }),
-                "model_preset": (list(_PRESETS.keys()), {
+                "model_preset": (list(_PRESETS.keys()) + ["last harvest"], {
                     "default": "flux",
                     "tooltip": "Power-spectrum preset for delta-optimal mode. 'flux' "
                                "and 'wan21' use measured (A, beta). 'custom' uses the "
-                               "manual spectrum_A / spectrum_beta inputs below.",
+                               "manual spectrum_A / spectrum_beta inputs below. 'last harvest' uses "
+                               "the values measured by mode = harvest.",
                 }),
                 "scales": ("STRING", {
                     "default": "0.5,1.0",
@@ -109,6 +135,25 @@ class OnyxSpeedHDSampler:
                     "default": 0, "min": 0, "max": 2**31 - 1, "step": 1,
                     "tooltip": "Seed for the spectral-noise padding at each transition.",
                 }),
+                # Added after the first release: kept LAST so saved workflows load unchanged.
+                "stages": (["use scales", "2", "3", "4"], {
+                    "default": "use scales",
+                    "tooltip": "Shortcut for `scales`: 2 = 0.5,1 · 3 = 0.33,0.66,1 · 4 = 0.25,0.5,0.75,1. "
+                               "'use scales' = the scales field as typed.",
+                }),
+                "noise_policy": (["independent", "coupled"], {
+                    "default": "independent",
+                    "tooltip": "Where the new fine detail comes from at each resolution change. independent: "
+                               "fresh seeded noise (fastest results, composition differs from a plain run). "
+                               "coupled: the run's own full-resolution starting noise, so the same seed keeps "
+                               "the composition of a plain full-resolution run (DCT only, text-to-image).",
+                }),
+                "min_stage_steps": ("INT", {
+                    "default": 2, "min": 1, "max": 10,
+                    "tooltip": "A resolution stage shorter than this is merged into the previous one "
+                               "(1-step stages break multistep / 2-evaluation solvers). Coarse stages the "
+                               "schedule has already passed (img2img, low denoise) are skipped.",
+                }),
             },
         }
 
@@ -127,9 +172,12 @@ class OnyxSpeedHDSampler:
         self,
         base_sampler, transform, mode, model_preset, scales, delta,
         manual_sigmas, spectrum_A, spectrum_beta, seed,
+        stages="use scales", noise_policy="independent", min_stage_steps=2,
     ):
         ensure_profile_ready()
         ns = load_remote("onyx_speed_hd_sampler_core")
+        if mode.startswith("harvest"):
+            return ns["get_harvest_impl"](base_sampler, fit_power_spectrum=fit_power_spectrum, store=_store_harvest)
         return ns["get_sampler_impl"](
             base_sampler, transform, mode, model_preset, scales, delta,
             manual_sigmas, spectrum_A, spectrum_beta, seed,
@@ -137,6 +185,8 @@ class OnyxSpeedHDSampler:
             parse_scales=_parse_scales,
             parse_sigmas=_parse_sigmas,
             sample_speed_core=sample_speed_core,
+            noise_policy=noise_policy, min_stage_steps=min_stage_steps, stages=stages,
+            harvested=_last_harvest() if model_preset == "last harvest" else None,
         )
 
 
