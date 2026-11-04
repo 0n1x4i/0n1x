@@ -34,6 +34,16 @@ MODES = ("Lifestyle", "Fashion", "UGC")
 CAMERAS = ("auto", "smartphone", "professional", "cinematic", "clean")
 FACES = ("auto", "natural", "custom")
 IMAGE2_KINDS = ("outfit", "product", "person", "body shape")
+TIME_SPANS = ("auto", "one moment (same place)", "one hour", "one day", "a trip (several days)")
+_SPAN_RULES = {
+    "one moment (same place)": ("TIME SPAN: one single moment of about 10 to 20 minutes, ALL shots in the SAME place "
+                                "(same room or same spot), same light and same time of day; only her pose, the "
+                                "framing and the camera angle change, like a burst of photos taken one after another."),
+    "one hour": ("TIME SPAN: about one hour, at most two or three neighbouring places (e.g. a café then the street "
+                 "outside), the same time of day and a consistent light."),
+    "one day": "TIME SPAN: one day, from morning to night, a different place for each shot.",
+    "a trip (several days)": "TIME SPAN: a trip over several days, different places, days and lights.",
+}
 STYLE_T2I = "Text-to-image (character LoRA)"
 STYLE_EDIT = "Krea2 Edit (reference photo)"
 STYLES = (STYLE_T2I, STYLE_EDIT)
@@ -81,6 +91,33 @@ _MODE_BRIEF = {
     ),
 }
 
+_CANDID_RULES = """
+
+CANDID SNAP (smartphone look): every shot is a real phone snapshot from a camera roll, casual, unposed or
+lightly posed, with specific small camera flaws, never polished. For EVERY shot also fill:
+- "framing": one of Close-up · Medium close-up · Waist-up · Medium · Three-quarter · Full-body ·
+  Mirror selfie · Selfie, plus the camera height when it is not eye level (e.g. "Low-angle waist-up").
+- "action": what she is doing, as an -ing phrase ("sipping an iced latte", "tying her shoe").
+- "time": time of day / weather ("late afternoon", "on a rainy evening").
+- "hands": BOTH hands placed: which hand, verb, which part of the object, where it sits.
+- "background": EXACTLY three concrete visible things, the third partially visible, as
+  {"a": "...", "b": "...", "c": "..."}.
+- "light": ONE key light from the scene: its source, its direction, and where it lands on her face.
+- "flaws": 2 to 4 mild phone flaws, at least one framing flaw, max one per group (texture max two),
+  never on her face. FRAMING: slightly tilted framing, a slightly crooked horizon, top of her head partly
+  cropped, her elbow cut off at the frame edge, off-center with empty space at the top. EXPOSURE: the
+  window slightly overexposed, the [light] slightly clipped, slightly lifted grey shadows, slight HDR
+  flattening (daylight only). COLOR: slightly yellow cast, slightly orange cast, slightly cool blue cast,
+  uneven auto white balance, mixed warm and cool light, slightly muted colors. TEXTURE: mild digital noise in
+  the shadows (never in bright daylight), a little motion blur in [moving part], faint lens flare at the
+  frame edge, soft bloom around [bulbs], [background object] softly blurred behind her.
+- "unaware": true only when she is caught unaware (not looking at the lens, not posing, not a selfie).
+Allowed strength words: mild, slight, slightly, a little, faint, small, soft. Never: grainy, heavy grain,
+blurry, out of focus, low-res, distorted, glitch, quality or camera words (8k, cinematic, DSLR, bokeh,
+f-numbers, ISO, mm). Never pair: flash + window or sun as key light; night + sunlight; a yellow cast + a
+cool blue cast (unless two named sources); overcast + hard shadows.
+"""
+
 _SYSTEM = """You are a professional photographer and art director planning an Instagram carousel.
 You get the ORIGINAL photo of one woman{img2}. You plan {n} new photos of THIS SAME woman.
 Her face, hair, skin and body never change: you never describe them (no hair colour, no eye colour,
@@ -105,6 +142,7 @@ Return ONLY JSON, no markdown:
 "image_2_name": "precise name of image 2 (brand, colour, shape) or empty",
 "outfit": "see OUTFIT DESCRIPTION below; empty only if the user gave the outfit",
 "image_2_description": "precise visual description of image 2 in words (shape, colours, materials, label / text) or empty",
+"photo_place": "see PLACE OF THE PHOTO below",
 "shots": [{{"place": "...", "pose": "...", "framing": "...", "light": "...", "expression": "...",
 "action": "what she does with image 2 in this shot, or empty"}}]}}
 The shots array has exactly {n} items.
@@ -128,7 +166,18 @@ Shoes: type, colour, heel height, material. Socks or tights. Accessories: jewell
 where), bag, belt, glasses, hat, phone case colour if she holds a phone.
 Write it as one flowing description in plain English, 70 to 140 words, no lists. Never guess what is not
 visible: if the photo does not show her legs, say nothing about them (the bottoms field covers it).
-Never describe her body, skin, hair or face here."""
+Never describe her body, skin, hair or face here.
+
+PLACE OF THE PHOTO (the "photo_place" field). Describe the place visible in the ORIGINAL photo so precisely
+that a set designer could rebuild it: the kind of room or spot; the walls (colour with its shade, material,
+texture, panelling, tiles, wallpaper pattern); the floor (material, colour, rug); every visible piece of
+furniture with its colour, material and position (left / right / behind her); decor and objects (frames,
+plants, lamps, mirror, curtains, shelves, bedding with its colour and pattern); the windows or doors and
+where the light comes from; the overall colour palette and the light's colour temperature. 80 to 150 words,
+one flowing description, only what is visible. When the set stays in this place (see TIME SPAN), every
+shot's "place" names only WHICH PART of this same place she is in ("by the window", "sitting on the bed",
+"in front of the mirror"), never a new room.
+"""
 
 
 def _clean(value, limit=4000):
@@ -212,7 +261,8 @@ class OnyxKrea2StoryDirector:
                                                            "edit instructions for Krea2EditModelPatch + "
                                                            "grounded encode, rendered from the photo."}),
                 "shots": ("INT", {"default": 4, "min": 1, "max": MAX_SHOTS}),
-                "camera": (list(CAMERAS), {"tooltip": "auto = smartphone for Lifestyle, professional for "
+                "camera": (list(CAMERAS), {"tooltip": "smartphone = Candid Snap phone photos (the Candid skill's prompt "
+                                                      "structure, text-to-image). auto = smartphone for Lifestyle, professional for "
                                                       "Fashion and UGC. clean = keeps your photo's own look."}),
                 "face": (list(FACES), {"tooltip": "auto: a different subtle expression per shot · natural: "
                                                   "relaxed and real · custom: write them in custom_faces."}),
@@ -248,17 +298,23 @@ class OnyxKrea2StoryDirector:
                                                                 "photo does not show it. Empty = picked once."}),
                 "body_shape": ("STRING", {"default": "", "tooltip": "Her figure in words, e.g. 'slim athletic "
                                                                    "figure'. Empty = her own."}),
-                "creativity": ("FLOAT", {"default": 0.9, "min": 0.3, "max": 1.5, "step": 0.05}),
+                "creativity": ("FLOAT", {"default": 0.9, "min": 0.3, "max": 1.5, "step": 0.05,
+                                         "tooltip": "How bold the places and angles are (0.6 calm, 0.9 varied, 1.2 bold). "
+                                                    "Higher = MORE variety, not more continuity: use time_span for that."}),
                 "character_trigger": ("STRING", {"default": "", "tooltip": "Trigger word of a character LoRA, "
                                                                           "put at the start of every prompt."}),
                 "extra_prompt": ("STRING", {"default": "", "multiline": True,
                                             "tooltip": "Appended verbatim to the end of every edit prompt."}),
+                "time_span": (list(TIME_SPANS), {"default": "auto",
+                    "tooltip": "How much time the set covers. one moment = same place, same light, a burst of "
+                               "photos · one hour · one day (morning to night) · a trip. auto = the mode's own "
+                               "(Lifestyle: one day). The `story` text still adds details."}),
             },
         }
 
     # ── plan ────────────────────────────────────────────────────────────────
     def _plan(self, photo, image_2, kind, mode, n, face, custom, scene, story, outfit, body_shape,
-              creativity, image_2_name, seed, backend, model_id, json_folder):
+              creativity, image_2_name, seed, backend, model_id, json_folder, candid=False, time_span="auto"):
         scene_lines = _lines(scene)
         if len(scene_lines) > 1:
             scene_txt = "Use exactly these places, in order: " + " | ".join(scene_lines[:n]) + "."
@@ -266,9 +322,17 @@ class OnyxKrea2StoryDirector:
             scene_txt = "Overall setting / vibe for the whole set: " + scene_lines[0] + "."
         else:
             scene_txt = "Choose the places from what fits her photo and style."
-        brief = _MODE_BRIEF[mode].format(n=n, story=_clean(story, 500) or "a natural flow, e.g. morning to night",
+        default_story = {"one moment (same place)": "one moment in one place", "one hour": "about one hour",
+                         "a trip (several days)": "a trip over several days"}.get(time_span, "a natural flow, e.g. morning to night")
+        brief = _MODE_BRIEF[mode].format(n=n, story=_clean(story, 500) or default_story,
                                          product=_clean(image_2_name, 300) or "read it from image 2")
         brief += "\n" + scene_txt
+        if time_span in _SPAN_RULES:
+            brief += "\n" + _SPAN_RULES[time_span]
+            if time_span == "one moment (same place)":
+                brief = brief.replace("Each shot is a DIFFERENT real place", "Each shot is a different moment of the SAME place")
+                brief += ("\nThe place is the place of HER PHOTO (photo_place), unless the scene field names "
+                          "another one: rebuild it, do not invent a new room.")
         if body_shape:
             brief += f"\nHer body shape in words: {body_shape} (never more than that about her body)."
         face_rule = {
@@ -296,6 +360,8 @@ class OnyxKrea2StoryDirector:
                 person_rule = " (plus the person of image 2, interacting naturally with her)"
         system = _SYSTEM.format(img2=img2, n=n, brief=brief, person_rule=person_rule, face_rule=face_rule,
                                 creativity=creativity, outfit_rule=outfit_rule)
+        if candid:
+            system += _CANDID_RULES
         user = f"Plan the {n} shots now. Seed {seed}."
         if face == "custom" and custom:
             user += "\nExpressions given by the user, in order: " + " | ".join(custom)
@@ -378,8 +444,59 @@ class OnyxKrea2StoryDirector:
         return " ".join(p for p in parts if p)
 
     @staticmethod
+    def _candid_prompt(shot, kind, has_img2, img2_name, img2_desc, outfit, bottoms, body_shape, face, custom,
+                       index, trigger, room=""):
+        """Candid Snap order: frame + action, expression, outfit, hands, background (3 things), one light,
+        phone flaws, skin. Line 1 = the trigger alone. Identity (face, hair, skin tone) is the LoRA's."""
+        framing = _clean(shot.get("framing"), 80).strip().rstrip(".") or "Waist-up"
+        framing = framing[:1].upper() + framing[1:]
+        if not re.search(r"\b(shot|selfie)\b", framing, re.I):
+            framing += " shot"
+        place = _lower_first(shot.get("place"))
+        if place and not place.startswith(("in ", "at ", "on ", "inside ", "outside ", "by ", "near ")):
+            place = "in " + place
+        action = _lower_first(shot.get("action") or shot.get("pose"))
+        body = _lower_first(body_shape).removeprefix("a ") if body_shape else ""
+        who = f"a {body}" if body else "a young woman"
+        time_ = _lower_first(shot.get("time"))
+        s1 = f"{framing}, A candid phone snapshot of {who}, {action} {place}" + (f", {time_}" if time_ else "")
+        parts = [s1.replace(" ,", ",").rstrip(",") + "."]
+        expr = (custom[0] if len(custom) == 1 else custom[index % len(custom)]) if (face == "custom" and custom) \
+            else (shot.get("expression") or "")
+        if expr:
+            parts.append(_sentence("Her expression: " + _lower_first(expr)))
+        if outfit:
+            o = re.sub(r"^(?:she\s+(?:is\s+)?wear(?:s|ing)\s+)", "", outfit.strip().rstrip("."), flags=re.I)
+            parts.append(f"She wears exactly this outfit, identical in every detail: {o[:1].lower() + o[1:]}.")
+        if room:      # the same set in every shot: written word for word the same
+            r = room.strip().rstrip(".")
+            parts.append(f"The place, identical in every detail: {r[:1].lower() + r[1:]}.")
+        if bottoms and (not outfit or "below" not in outfit):
+            parts.append(_sentence("Below the waist she wears " + _lower_first(bottoms)))
+        if shot.get("hands"):
+            parts.append(_sentence(shot["hands"]))
+        if has_img2 and kind == "product":
+            what = img2_desc or img2_name or "the product"
+            parts.append(_sentence(f"She holds {what}, big and sharp in the frame, label facing the camera"))
+        elif has_img2 and kind == "person":
+            parts.append(_sentence(f"With her in the photo: {img2_desc or 'a friend'}"))
+        bg = shot.get("background") or {}
+        if isinstance(bg, dict) and bg.get("a"):
+            parts.append(f"The background shows {_lower_first(bg.get('a'))}, {_lower_first(bg.get('b'))} "
+                         f"and a partially visible {_lower_first(bg.get('c')).removeprefix('a ').removeprefix('the ')}.")
+        if shot.get("light"):
+            parts.append(_sentence(shot["light"]))
+        flaws = [_lower_first(f) for f in (shot.get("flaws") or []) if str(f).strip()][:4]
+        if flaws:
+            lead = "Shot quickly on a phone without posing" if shot.get("unaware") else "Shot quickly on a phone"
+            parts.append(f"{lead}: " + ", ".join(flaws) + ".")
+        parts.append("Realistic skin with natural texture and visible pores.")
+        para = " ".join(p for p in parts if p)
+        return f"{trigger}\n{para}" if trigger else para
+
+    @staticmethod
     def _t2i_prompt(shot, camera, kind, has_img2, img2_name, img2_desc, outfit, bottoms, body_shape, face,
-                    custom, index, trigger):
+                    custom, index, trigger, room=""):
         """A full text-to-image prompt: identity from the character LoRA, everything else in words."""
         place = _lower_first(shot.get("place"))
         if place and not place.startswith(("in ", "at ", "on ", "inside ", "outside ")):
@@ -391,6 +508,9 @@ class OnyxKrea2StoryDirector:
         if outfit:
             o = re.sub(r"^(?:she\s+(?:is\s+)?wear(?:s|ing)\s+)", "", outfit.strip().rstrip("."), flags=re.I)
             parts.append(f"She wears exactly this outfit, identical in every detail: {o[:1].lower() + o[1:]}.")
+        if room:      # the same set in every shot: written word for word the same
+            r = room.strip().rstrip(".")
+            parts.append(f"The place, identical in every detail: {r[:1].lower() + r[1:]}.")
         if bottoms and (not outfit or "below" not in outfit):
             parts.append(_sentence("Below the waist she wears " + _lower_first(bottoms)))
         if shot.get("framing"):
@@ -417,7 +537,7 @@ class OnyxKrea2StoryDirector:
 
     def execute(self, photo, mode, prompt_style, shots, camera, face, seed, backend, model_id, vertex_json_folder,
                 image_2=None, image_2_is="outfit", image_2_name="", scene="", story="", custom_faces="",
-                outfit="", bottoms="", body_shape="", creativity=0.9, character_trigger="", extra_prompt=""):
+                outfit="", bottoms="", body_shape="", creativity=0.9, character_trigger="", extra_prompt="", time_span="auto"):
         n = max(1, min(MAX_SHOTS, int(shots)))
         mode = mode if mode in MODES else "Lifestyle"
         cam = camera if camera in CAMERA_LINES else ("smartphone" if mode == "Lifestyle" else "professional")
@@ -425,6 +545,8 @@ class OnyxKrea2StoryDirector:
         custom = _lines(custom_faces)
         outfit, bottoms, body_shape = _clean(outfit, 1500), _clean(bottoms, 300), _clean(body_shape, 300)
         has_img2 = image_2 is not None and kind != "body shape"
+        # Smartphone look in text-to-image = the Candid Snap prompt structure (the Candid skill).
+        candid = cam == "smartphone" and prompt_style != STYLE_EDIT
 
         arr = photo[0].detach().cpu().numpy()
         key_src = {
@@ -433,7 +555,7 @@ class OnyxKrea2StoryDirector:
                                     .tobytes()).hexdigest() if image_2 is not None else ""),
             "mode": mode, "n": n, "face": face, "custom": custom, "scene": scene, "story": story,
             "outfit": outfit, "body": body_shape, "creativity": creativity, "kind": kind,
-            "name": image_2_name, "seed": seed, "backend": backend, "model": model_id, "v": 3,
+            "name": image_2_name, "seed": seed, "backend": backend, "model": model_id, "candid": candid, "span": time_span, "v": 5,
         }
         key = hashlib.sha256(json.dumps(key_src, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:20]
         path = os.path.join(_CACHE_DIR, f"{key}.json")
@@ -448,7 +570,8 @@ class OnyxKrea2StoryDirector:
         if plan is None:
             print(f"[Onyx Story Director] planning {n} {mode} shots with {backend}…")
             plan = self._plan(photo, image_2, kind, mode, n, face, custom, scene, story, outfit, body_shape,
-                              creativity, image_2_name, seed, backend, model_id, vertex_json_folder)
+                              creativity, image_2_name, seed, backend, model_id, vertex_json_folder,
+                              candid=candid, time_span=time_span)
             os.makedirs(_CACHE_DIR, exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(plan, fh, ensure_ascii=False, indent=1)
@@ -458,12 +581,19 @@ class OnyxKrea2StoryDirector:
         trigger = _clean(character_trigger, 200)
         extra = _clean(extra_prompt, 2000)
         t2i = prompt_style != STYLE_EDIT
+        # One moment in the photo's own place: the same, precise room text in every prompt.
+        room = (_clean(plan.get("photo_place"), 1500)
+                if time_span == "one moment (same place)" and not _lines(scene) else "")
         prompts = []
         for i, shot in enumerate(plan["shots"]):
-            if t2i:
+            if candid:
+                p = self._candid_prompt(shot, kind, has_img2, name, _clean(plan.get("image_2_description"), 600),
+                                        outfit or _clean(plan.get("outfit"), 1500), bottoms, body_shape, face,
+                                        custom, i, trigger, room=room)
+            elif t2i:
                 p = self._t2i_prompt(shot, cam, kind, has_img2, name, _clean(plan.get("image_2_description"), 600),
                                      outfit or _clean(plan.get("outfit"), 1500), bottoms, body_shape, face,
-                                     custom, i, trigger)
+                                     custom, i, trigger, room=room)
             else:
                 p = self._instruction(shot, mode, cam, kind, has_img2, name, outfit, bottoms, body_shape, face,
                                       custom, i)
@@ -474,7 +604,8 @@ class OnyxKrea2StoryDirector:
             prompts.append(p)
 
         readable = [f"STORY: {plan.get('story', '')}",
-                    f"mode {mode} · {'text-to-image' if t2i else 'krea2 edit'} · {n} shots · camera {cam} · face {face}",
+                    f"mode {mode} · {'text-to-image' if t2i else 'krea2 edit'} · {n} shots · camera {cam}"
+                    f"{' (Candid Snap)' if candid else ''} · face {face}",
                     ""]
         for i, p in enumerate(prompts, 1):
             readable.append(f"[{i}] {p}")

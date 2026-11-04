@@ -164,6 +164,8 @@ const ALL_NODES = new Set([
     "OnyxSaveVideoNoMetadata",
     "OnyxEyeBBoxDetectorProvider",
     "OnyxDetailer",
+    "OnyxSpeechTranscribe",
+    "OnyxH3WindowDialogue",
 ]);
 
 // Preview-oriented nodes: dark base only, no overlay, no motif, no rail.

@@ -7,15 +7,15 @@
 // widget (JSON); API keys are saved on this computer, never in the workflow.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { makeCompact } from "./onyx_compact.js";
+import { makeCompact, PANEL_NODE_SIZE } from "./onyx_compact.js";
 
-const NODE_SIZE = [840, 980];
-const PANEL_MIN_H = 940;
+const NODE_SIZE = PANEL_NODE_SIZE;
+const PANEL_MIN_H = PANEL_NODE_SIZE[1] - 40;
 const RATIOS = ["9:16", "3:4", "4:5", "1:1", "2:3", "16:9"];
 const MODE_INFO = {
   manual:   { icon: "✍️", label: "Manual",   hint: "Your prompt. {trigger} = the character's trigger. Optionally improved by a skill." },
   idea:     { icon: "💡", label: "Idea",     hint: "Describe a scene: the skill + LLM writes the prompt." },
-  recreate: { icon: "🎯", label: "Recreate", hint: "The image (or video) connected to the node becomes a prompt for your character, with a Grok preset." },
+  recreate: { icon: "🎯", label: "Recreate", hint: "The image (or video) connected to the node becomes a prompt for your character, with a preset." },
 };
 const LABEL = { manual: "Manual", gallery: "Gallery", idea: "Idea", recreate: "Recreate" };
 const DEFAULT_STATE = {
@@ -99,6 +99,15 @@ function injectStyle() {
 .ost-btn.bad{color:#ff9b9b}
 .ost-btn:disabled{opacity:.45;cursor:default}
 .ost-hint{color:var(--dim);font-size:11.5px}
+.ost-src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:6px;max-height:230px;overflow:auto}
+.ost-src{position:relative;aspect-ratio:3/4;border-radius:8px;overflow:hidden;border:2px solid var(--ln2);cursor:pointer;background:#0a0a0e}
+.ost-src.on{border-color:#7f8cff;box-shadow:0 0 0 2px rgba(127,140,255,.25)}
+.ost-src img{width:100%;height:100%;object-fit:cover;display:block}
+.ost-src .ok{position:absolute;left:4px;top:4px;background:#000b;color:var(--ok);border-radius:5px;font-size:10.5px;padding:0 5px}
+.ost-src .x{position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:6px;border:0;background:#000b;color:#ddd;cursor:pointer;font-size:11px;opacity:0;transition:opacity .15s}
+.ost-src:hover .x{opacity:1}
+.ost-src-empty{border:1.5px dashed var(--ln2);border-radius:10px;padding:22px 14px;text-align:center;color:var(--dim);cursor:pointer}
+.ost-drop.hot{outline:2px dashed #7f8cff;outline-offset:-4px}
 .ost-tog{display:flex;align-items:center;gap:7px;cursor:pointer;color:var(--tx);font-size:12px;user-select:none}
 .ost-tog i{width:30px;height:16px;border-radius:8px;background:#2a2a35;position:relative;transition:background .15s;flex:none}
 .ost-tog i:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#9a9aa8;transition:left .15s,background .15s}
@@ -147,6 +156,13 @@ function injectStyle() {
 .ost-ps.cur{box-shadow:0 0 0 2px rgba(159,180,255,.45)}
 .ost-ps.saving{border-style:dashed;border-color:#ffc58a;color:#ffc58a}
 .ost-ps:hover{border-color:var(--ac)}
+.ost{container-type:inline-size}
+.ost-tabs{overflow-x:auto;scrollbar-width:none}
+@container (max-width: 720px){
+  .ost-head{flex-wrap:wrap}
+  .ost-seg{margin-left:0}
+  .ost-tab{padding:6px 9px}
+}
 `;
   document.head.append(h("style", { id: "onyx-studio-style", html: css }));
 }
@@ -362,8 +378,11 @@ function setupStudio(node) {
     }
     busy = true; genBtn.innerHTML = '<span class="ost-spin"></span>Writing…'; genBtn.disabled = true;
     try {
-      const r = await postJSON("/onyx/studio/preview", { state, node_id: String(node.id), seed: Math.floor(Math.random() * 1e9) });
+      const imgs = state.images || [];
+      const media = state.mode === "recreate" && imgs.length ? (imgs.includes(state.preview_media) ? state.preview_media : imgs[0]) : undefined;
+      const r = await postJSON("/onyx/studio/preview", { state, media, node_id: String(node.id), seed: Math.floor(Math.random() * 1e9) });
       if (!r.ok) throw new Error(r.error);
+      if (media) mediaPrompts[media] = r.prompt;
       showResult(r);
     } catch (e) { toast(String(e.message || e), "error"); }
     finally { busy = false; genBtn.textContent = "✦ Generate now"; genBtn.disabled = false; }
@@ -421,10 +440,16 @@ function setupStudio(node) {
         onchange: (e) => set({ model: e.target.value.trim() }, false) });
     }
     const keyNeeded = ["xai", "gemini", "openrouter"].includes(state.provider);
-    const keyInfo = keyNeeded ? h("span", { class: "ost-hint" }, boot.keys[state.provider] ? "🔑 key saved" : "⚠️ no key — Settings tab") : null;
+    const keyInfo = keyNeeded ? h("span", { class: "ost-hint" }, boot.keys[state.provider] ? "🔑 key saved" : "⚠️ no key — Settings tab")
+      : state.provider === "vertex" ? h("span", { class: "ost-hint" }, `🔑 Vertex JSON keys from ${boot.vertex_folder || "C:\\Comfyui\\json"} (rotate, a failing key passes the call on) — Settings tab`) : null;
     const temp = h("input", { type: "number", value: state.temperature, min: 0, max: 2, step: 0.05, onchange: (e) => set({ temperature: Number(e.target.value) }, false) });
     const maxT = h("input", { type: "number", value: state.max_tokens, min: 256, max: 16384, step: 256, onchange: (e) => set({ max_tokens: Number(e.target.value) }, false) });
-    return h("div", { class: "ost-card" }, h("h4", {}, "Writer model"),
+    const role = state.mode === "recreate"
+      ? "Looks at the source image and writes the prompt by following the preset above. Required in Recreate mode: pick a model that sees images (Gemini, Grok, a vision model in Ollama)."
+      : state.mode === "idea" ? "Turns your idea into the prompt by following the skill. Required in Idea mode."
+      : state.enhance ? "Rewrites your prompt with the skill (Improve is on)." : "Not used in Manual mode while Improve is off: your text goes as it is.";
+    return h("div", { class: "ost-card" }, h("h4", {}, state.mode === "recreate" ? "Writer model — reads the image" : "Writer model"),
+      h("div", { class: "ost-hint", style: "margin:-2px 0 8px" }, role),
       h("div", { class: "ost-row" },
         h("div", { class: "ost-col" }, h("label", {}, "Provider"), prov),
         h("div", { class: "ost-col", style: "flex:2" }, h("label", {}, "Model ", state.provider === "ollama" ? h("a", { href: "#", style: "color:var(--ac)", onclick: (e) => { e.preventDefault(); refreshOllama(false); } }, "↻") : null), modelField),
@@ -495,14 +520,13 @@ function setupStudio(node) {
     }
     // recreate
     const presetSel = h("select", { onchange: (e) => set({ preset: e.target.value }) },
-      h("option", { value: "" }, "— choose a Grok preset —"),
+      h("option", { value: "" }, "— choose a preset —"),
       boot.presets.map((pr) => h("option", { value: pr.slot, selected: String(state.preset) === pr.slot ? "selected" : null },
         `${pr.slot} · ${pr.name}${pr.skill ? "  ✦ " + pr.skill : ""}`)));
     const pr = boot.presets.find((x) => x.slot === String(state.preset));
     fill(p, info,
-      h("div", { class: "ost-card" }, h("h4", {}, "Source image"),
-        h("div", { class: "ost-hint" }, "Connect the image to recreate to the node's image input (or a video to the video input: its first frame is used), e.g. from an Onyx Batch Loader — each run writes the prompt for the image it receives. ✦ Generate now works on the last image the node received.")),
-      h("div", { class: "ost-card" }, h("h4", {}, "Grok preset (image → prompt)"),
+      sourceCard(),
+      h("div", { class: "ost-card" }, h("h4", {}, "Preset (image → prompt)"),
         h("div", { class: "ost-row" }, presetSel),
         pr ? h("div", { class: "ost-row" },
           pr.embedded_trigger ? h("span", { class: "ost-hint" }, `preset trigger “${pr.embedded_trigger}” → replaced by the character's`) : null,
@@ -511,6 +535,62 @@ function setupStudio(node) {
         h("div", { class: "ost-row" }, extra),
         h("div", { class: "ost-row" }, toggle("Double-check pass", state.double_check, (v) => set({ double_check: v }, false), "Only for presets linked to a skill."))),
       llmCard(), formatCard(), postQuickCard());
+  }
+
+  // Recreate source: images loaded right here (ComfyUI input folder, onyx_studio/), one per run
+  // or always the selected one. An image connected to the node's input wins over them.
+  const mediaPrompts = {};
+  const viewUrl = (name) => {
+    const i = name.lastIndexOf("/");
+    const q = new URLSearchParams({ filename: i >= 0 ? name.slice(i + 1) : name, subfolder: i >= 0 ? name.slice(0, i) : "", type: "input" });
+    return api.apiURL("/view?" + q.toString());
+  };
+  async function addImages(files) {
+    const imgs = [...files].filter((f) => f.type.startsWith("image/"));
+    if (!imgs.length) return toast("Choose image files.", "warn");
+    const names = [...(state.images || [])];
+    for (const f of imgs) {
+      const fd = new FormData();
+      fd.append("image", f); fd.append("subfolder", "onyx_studio"); fd.append("type", "input");
+      const r = await api.fetchApi("/upload/image", { method: "POST", body: fd });
+      if (!r.ok) { toast(`${f.name}: upload failed (${r.status})`, "error"); continue; }
+      const d = await r.json();
+      names.push(d.subfolder ? `${d.subfolder}/${d.name}` : d.name);
+    }
+    set({ images: names, preview_media: state.preview_media || names[0] });
+    toast(`${imgs.length} image(s) added.`, "success");
+  }
+  function sourceCard() {
+    const imgs = state.images || [];
+    const sel = imgs.includes(state.preview_media) ? state.preview_media : imgs[0];
+    const picker = h("input", { type: "file", accept: "image/*", multiple: true, style: "display:none",
+      onchange: (e) => { addImages(e.target.files); e.target.value = ""; } });
+    const grid = h("div", { class: "ost-src-grid" }, imgs.map((n) => h("div", {
+        class: "ost-src" + (n === sel ? " on" : ""), title: n + (mediaPrompts[n] ? "\n\nLast prompt:\n" + mediaPrompts[n] : ""),
+        onclick: () => { set({ preview_media: n }); if (mediaPrompts[n]) showResult({ prompt: mediaPrompts[n], mode: "recreate" }); } },
+      h("img", { src: viewUrl(n), loading: "lazy" }),
+      mediaPrompts[n] ? h("span", { class: "ok" }, "✓") : null,
+      h("button", { class: "x", title: "Remove from the list", onclick: (e) => { e.stopPropagation(); const rest = imgs.filter((x) => x !== n); set({ images: rest, preview_media: rest.includes(state.preview_media) ? state.preview_media : rest[0] || "" }); } }, "✕"))));
+    const card = h("div", { class: "ost-card ost-drop" }, h("h4", {}, "Source images", imgs.length ? h("span", { class: "n" }, ` · ${imgs.length}`) : null),
+      imgs.length ? grid : h("div", { class: "ost-src-empty", onclick: () => picker.click() }, "Drop images here, or click to choose them. Each run writes the prompt for the next image — no loader node needed."),
+      h("div", { class: "ost-row", style: "margin-top:8px" },
+        h("button", { class: "ost-btn", onclick: () => picker.click() }, "＋ Add images"),
+        imgs.length ? h("div", { class: "ost-seg", style: "margin-left:0" },
+          [["sequential", "One per run, in order"], ["selected", "Always the selected one"]].map(([v, l]) =>
+            h("button", { class: (state.image_pick || "sequential") === v ? "on" : null, onclick: () => set({ image_pick: v }) }, l))) : null,
+        imgs.length > 1 && (state.image_pick || "sequential") === "sequential" ? h("button", { class: "ost-btn pri", title: "Queue one run per image, from the selected one",
+          onclick: () => { set({ run_token: String(Date.now()) }, false); app.queuePrompt(0, imgs.length); toast(`${imgs.length} runs queued.`, "success"); } }, `▶ Queue all (${imgs.length})`) : null,
+        imgs.length ? h("button", { class: "ost-btn ghost", onclick: () => set({ images: [], preview_media: "" }) }, "Clear") : null, picker),
+      h("div", { class: "ost-hint", style: "margin-top:6px" }, "An image (or video) connected to the node's input wins over this list. The `image` output gives the source image of the run → VAE Encode for image-to-image."));
+    card.addEventListener("dragover", (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) { e.preventDefault(); e.stopPropagation(); card.classList.add("hot"); } });
+    card.addEventListener("dragleave", () => card.classList.remove("hot"));
+    card.addEventListener("drop", (e) => {
+      const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith("image/"));
+      card.classList.remove("hot");
+      if (!files.length) return;
+      e.preventDefault(); e.stopPropagation(); addImages(files);
+    });
+    return card;
   }
 
   // Format: ratio (also sent to the skill) + megapixels -> width / height outputs,
@@ -719,7 +799,7 @@ function setupStudio(node) {
         h("div", { class: "ost-pre" }, openText));
     }
     fill(p, input, drop, h("div", { style: "height:10px" }), list.childNodes.length ? list : h("div", { class: "ost-empty" }, "No skill yet."), detail,
-      h("div", { class: "ost-hint", style: "margin-top:10px" }, "Imported skills are stored in ", h("code", {}, (boot.studio_dir || "") + "/skills"), ", on this computer only. Skills improve a manual prompt, write from an idea, or serve as the rulebook of a Grok preset (Recreate)."));
+      h("div", { class: "ost-hint", style: "margin-top:10px" }, "Imported skills are stored in ", h("code", {}, (boot.studio_dir || "") + "/skills"), ", on this computer only. Skills improve a manual prompt, write from an idea, or serve as the rulebook of a preset (Recreate)."));
   }
 
   // ── Settings tab ───────────────────────────────────────────────────────────
@@ -740,9 +820,30 @@ function setupStudio(node) {
         h("div", { class: "ost-row" }, h("div", { class: "ost-col", style: "flex:2" }, h("label", {}, "Server URL"), url),
           h("button", { class: "ost-btn", onclick: () => refreshOllama(false) }, "Test & list models")),
         h("div", { class: "ost-hint" }, ollamaModels.length ? `${ollamaModels.length} model(s): ${ollamaModels.slice(0, 8).join(", ")}${ollamaModels.length > 8 ? "…" : ""}` : "No model listed. For recreate mode use a vision model: qwen3-vl, qwen2.5vl, gemma3, llava.")),
+      vertexCard(),
       encodeCacheCard(),
       h("div", { class: "ost-card" }, h("h4", {}, "Storage"),
         h("div", { class: "ost-hint" }, "Skills, characters, keys and history: ", h("code", {}, boot.studio_dir || "?"))));
+  }
+
+  // Gemini on Vertex: a folder of service-account JSONs (1 JSON = 1 Google project).
+  function vertexCard() {
+    const folder = h("input", { type: "text", value: boot.vertex_folder || "", placeholder: "C:\\Comfyui\\json" });
+    const list = h("div", { class: "ost-hint" }, "…");
+    const show = async (f) => {
+      const r = await getJSON("/onyx/studio/vertex_keys?folder=" + encodeURIComponent(f || ""));
+      if (!r.ok) return fill(list, r.error || "?");
+      fill(list, r.keys.length ? `${r.keys.length} key(s): ${r.keys.map((k) => `${k.file} (${k.project})`).join(" · ")}` : `⚠️ no service-account JSON in ${r.folder}`);
+    };
+    show(boot.vertex_folder);
+    return h("div", { class: "ost-card" }, h("h4", {}, "Gemini on Vertex — writer model"),
+      h("div", { class: "ost-row" }, h("div", { class: "ost-col", style: "flex:2" }, h("label", {}, "Folder of service-account JSON files (or one .json)"), folder),
+        h("button", { class: "ost-btn", onclick: async () => {
+          const r = await postJSON("/onyx/studio/key", { provider: "vertex", key: folder.value.trim() });
+          if (r.ok) { boot.keys = r.keys; boot.vertex_folder = folder.value.trim() || "C:\\Comfyui\\json"; toast("Vertex folder saved.", "success"); show(folder.value.trim()); }
+        } }, "Save")),
+      list,
+      h("div", { class: "ost-hint" }, "Choose \"Gemini on Vertex (JSON keys)\" as the writer provider. Every JSON is one Google project: the calls rotate over them, and a key that fails (quota, permission) passes the call to the next one."));
   }
 
   // Prompt encode cache: a fixed prompt (manual / gallery, no skill rewrite) is
@@ -788,7 +889,7 @@ function setupStudio(node) {
   node.addDOMWidget("studio_panel", "ONYX_STUDIO", root, {
     serialize: false, getValue: () => undefined, setValue: () => {}, getMinHeight: () => PANEL_MIN_H,
   });
-  node.size = [...NODE_SIZE];
+  if (typeof node.setSize === "function") node.setSize([...NODE_SIZE]); else node.size = [...NODE_SIZE];
   hideWidget(W("seed")); hideWidget(W("control_after_generate"));
   setTimeout(() => { hideWidget(W("seed")); hideWidget(W("control_after_generate")); syncSeed(); }, 300);
   makeCompact(node, head);
@@ -811,6 +912,7 @@ function setupStudio(node) {
 
   const onResult = ({ detail }) => {
     if (String(detail?.node) !== String(node.id)) return;
+    if (detail.media) { mediaPrompts[detail.media] = detail.prompt; if (state.tab === "prompt" && state.mode === "recreate") renderPrompt(); }
     showResult(detail);
   };
   api.addEventListener("onyx.studio.result", onResult);

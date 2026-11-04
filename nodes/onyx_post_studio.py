@@ -341,21 +341,27 @@ def set_source_from_bytes(node_id, data: bytes) -> tuple:
     return arr.shape[1], arr.shape[0]
 
 
-def _view(arr, mode: str, cx: float, cy: float, size: int):
-    """fit: whole image, long side <= size. crop: a size x size window at 100%."""
+def _view(arr, mode: str, cx: float, cy: float, size: int, zoom: float = 1.0):
+    """fit: whole image, long side <= size. crop: a size x size window at 100%.
+    zoom: a window of 1/zoom of the image around (cx, cy), at its own pixels when it fits in `size`
+    (the panel then magnifies it), downscaled to `size` otherwise. Returns (view, (x0, y0, cw, ch))."""
     from PIL import Image
+    import numpy as np
     h, w = arr.shape[:2]
+    x0, y0, cw, ch = 0, 0, w, h
     if mode == "crop" and (w > size or h > size):
         cw, ch = min(w, size), min(h, size)
+    elif mode == "zoom" and zoom > 1.0:
+        cw, ch = max(16, int(round(w / zoom))), max(16, int(round(h / zoom)))
+    if (cw, ch) != (w, h):
         x0 = int(round(min(max(cx * w - cw / 2, 0), w - cw)))
         y0 = int(round(min(max(cy * h - ch / 2, 0), h - ch)))
-        return arr[y0:y0 + ch, x0:x0 + cw]
-    scale = min(1.0, size / max(w, h))
+        arr = arr[y0:y0 + ch, x0:x0 + cw]
+    scale = min(1.0, size / max(cw, ch))
     if scale < 1.0:
-        im = Image.fromarray(arr).resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
-        import numpy as np
-        return np.asarray(im)
-    return arr
+        im = Image.fromarray(np.ascontiguousarray(arr)).resize((max(1, int(cw * scale)), max(1, int(ch * scale))), Image.LANCZOS)
+        arr = np.asarray(im)
+    return arr, (x0, y0, cw, ch)
 
 
 def _jpeg_b64(arr) -> str:
@@ -366,20 +372,20 @@ def _jpeg_b64(arr) -> str:
 
 
 def render_preview(node_id, state: dict, mode: str = "fit", cx: float = 0.5, cy: float = 0.5,
-                   size: int = 1024) -> dict:
+                   size: int = 1024, zoom: float = 1.0) -> dict:
     src = _SOURCES.get(str(node_id))
     if not src:
         raise LookupError("No image yet: run the workflow once, or drop an image on the preview.")
     import numpy as np
     import torch
-    view = _view(src["img"], mode, float(cx), float(cy), int(size))
+    view, box = _view(src["img"], mode, float(cx), float(cy), int(size), float(zoom or 1.0))
     t = torch.from_numpy(view.astype(np.float32) / 255.0)[None]
     out, timings = run_chain(t, state, onyx_post=src.get("post"), preview=True,
                              motion_override=src.get("motion"))
     after = (out[0, ..., :3].detach().cpu().float().clamp(0, 1).numpy() * 255).round().astype(np.uint8)
     h, w = src["img"].shape[:2]
     return {"before": _jpeg_b64(np.ascontiguousarray(view)), "after": _jpeg_b64(after),
-            "timings": timings, "source_size": [w, h], "view_size": [view.shape[1], view.shape[0]],
+            "timings": timings, "source_size": [w, h], "view_size": [view.shape[1], view.shape[0]], "view_box": list(box),
             "post_look": (src.get("post") or {}).get("look", "none") if isinstance(src.get("post"), dict) else "none"}
 
 
@@ -480,7 +486,8 @@ def register_routes() -> None:
             b = await request.json()
             res = await asyncio.get_running_loop().run_in_executor(
                 None, lambda: render_preview(b.get("node_id"), b.get("state") or {}, b.get("mode", "fit"),
-                                             b.get("cx", 0.5), b.get("cy", 0.5), int(b.get("size", 1024))))
+                                             b.get("cx", 0.5), b.get("cy", 0.5), int(b.get("size", 1024)),
+                                             float(b.get("zoom", 1.0) or 1.0)))
             return ok(**res)
         except LookupError as e:
             return err(e, 404)

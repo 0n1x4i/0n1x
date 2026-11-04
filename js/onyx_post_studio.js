@@ -6,11 +6,11 @@
 // `post_state` widget (JSON); the Python side runs the existing nodes in order.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { makeCompact } from "./onyx_compact.js";
+import { makeCompact, PANEL_NODE_SIZE } from "./onyx_compact.js";
 import { curveEditor } from "./onyx_curves_editor.js";
 
-const NODE_SIZE = [820, 1040];
-const PANEL_MIN_H = 1000;
+const NODE_SIZE = PANEL_NODE_SIZE;
+const PANEL_MIN_H = PANEL_NODE_SIZE[1] - 40;
 const PREVIEW_SIZE = 1024;
 const GROUPS = { light: "The light", scene: "The scene", phone: "The phone", upload: "The upload" };
 
@@ -72,6 +72,10 @@ function injectStyle() {
 .ops-side{display:flex;flex-direction:column;gap:7px;min-width:0;min-height:0;overflow:hidden}
 .ops-side .t{font-size:11px;color:var(--dim)}
 .ops-tim{font:11px/1.5 ui-monospace,Consolas,monospace;color:#c9cbd8;overflow:auto;flex:1;min-height:0}
+.ops-stage{position:absolute;inset:0;transform-origin:0 0;will-change:transform}
+.ops-zoom{display:flex;flex-direction:column;gap:3px;padding:6px 8px;background:var(--p2);border:1px solid var(--ln2);border-radius:9px}
+.ops-zh{display:flex;justify-content:space-between;align-items:center}
+.ops-zv{font:700 11.5px ui-monospace,Consolas,monospace;color:var(--ac2)}
 .ops-seg{display:flex;background:var(--p2);border:1px solid var(--ln2);border-radius:9px;padding:2px}
 .ops-seg button{flex:1;background:transparent;border:0;color:var(--dim);padding:4px 6px;border-radius:7px;cursor:pointer;font:600 11.5px Inter,system-ui,sans-serif}
 .ops-seg button.on{background:linear-gradient(135deg,#2a3156,#30264a);color:var(--tx)}
@@ -120,6 +124,25 @@ function injectStyle() {
 .ops-look:hover{border-color:var(--ac)}.ops-look b{display:block;margin-bottom:2px}.ops-look span{color:var(--dim);font-size:11px}
 .ops-spin{display:inline-block;width:11px;height:11px;border:2px solid #ffffff44;border-top-color:#fff;border-radius:50%;animation:opsspin .8s linear infinite;vertical-align:-2px;margin-right:5px}
 @keyframes opsspin{to{transform:rotate(360deg)}}
+.ops{container-type:inline-size}
+.ops-st>div:nth-child(3){min-width:0}
+.ops-st .sub{overflow-wrap:anywhere}
+@container (max-width: 720px){
+  .ops-main{grid-template-columns:124px minmax(0,1fr)}
+  .ops-prev{grid-template-columns:1fr 150px}
+  .ops-st{grid-template-columns:24px 1fr auto auto;gap:6px}
+  .ops-st .ic{display:none}
+  .ops-p{grid-template-columns:110px 1fr 62px 14px;gap:6px}
+}
+@container (max-width: 520px){
+  .ops-main{grid-template-columns:1fr}
+  .ops-tabs{display:flex;flex-wrap:wrap;gap:2px;max-height:96px;border-right:0;border-bottom:1px solid var(--ln)}
+  .ops-tabs .grp{display:none}
+  .ops-prev{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto;height:420px}
+  .ops-st{grid-template-columns:24px 1fr auto}
+  .ops-st .ops-btn{grid-column:2 / 4;justify-self:end}
+  .ops-p{grid-template-columns:1fr 62px 14px}.ops-p .lb{grid-column:1 / 4}
+}
 `;
   document.head.append(h("style", { id: "onyx-post-studio-style", html: css }));
 }
@@ -172,11 +195,12 @@ function setupPostStudio(node) {
   injectStyle();
   const W = (n) => node.widgets?.find((w) => w.name === n);
   let spec = { stages: [], looks: {}, look_info: {}, presets: {} };
-  let state = { stages: {}, tab: "chain", view: { mode: "fit", cx: 0.5, cy: 0.5, auto: true, split: 50, open: true } };
+  let state = { stages: {}, tab: "chain", view: { mode: "fit", zoom: 1, cx: 0.5, cy: 0.5, auto: true, split: 50, open: true } };
   const readState = () => {
     try {
       const s = JSON.parse(W("post_state")?.value || "{}") || {};
       state = { stages: s.stages || {}, tab: s.tab || "chain", view: { ...state.view, ...(s.view || {}) }, current_preset: s.current_preset };
+      if (state.view.zoom == null) state.view.zoom = state.view.mode === "crop" ? 4 : 1;      // older "100%" view
     } catch { /* keep */ }
   };
   const saveState = () => { const w = W("post_state"); if (w) w.value = JSON.stringify(state); app.graph?.setDirtyCanvas(true, true); markChanged(app); };
@@ -207,12 +231,32 @@ function setupPostStudio(node) {
   const presetBar = h("div", { class: "ops-presets" });
   // preview
   const imgBefore = h("img", { alt: "" }), imgAfter = h("img", { alt: "" });
+  const stage = h("div", { class: "ops-stage" }, imgAfter, imgBefore);
   const bar = h("div", { class: "bar" });
   const msg = h("div", { class: "msg" }, "Run the workflow once, or drop an image here, to preview the chain.");
-  const cmp = h("div", { class: "ops-cmp empty", title: "Drag: before / after · double-click: 100% view there · drop an image to preview it" },
-    imgAfter, imgBefore, bar, h("div", { class: "tag", style: "left:6px" }, "BEFORE"), h("div", { class: "tag", style: "right:6px" }, "AFTER"), msg);
+  const cmp = h("div", { class: "ops-cmp empty", title: "Drag: before / after · wheel: zoom where the mouse is · hold the wheel button and drag: move · double-click: center there · drop an image to preview it" },
+    stage, bar, h("div", { class: "tag", style: "left:6px" }, "BEFORE"), h("div", { class: "tag", style: "right:6px" }, "AFTER"), msg);
   const timBox = h("div", { class: "ops-tim" });
-  const modeSeg = h("div", { class: "ops-seg" });
+  const ZMAX = 16;
+  const zoomOf = (t) => Math.pow(ZMAX, t / 100);           // slider 0..100 -> x1..x16 (log)
+  const tOf = (z) => Math.round((Math.log(Math.max(1, z)) / Math.log(ZMAX)) * 100);
+  const zoomVal = h("span", { class: "ops-zv" });
+  const zoomRange = h("input", { type: "range", min: "0", max: "100", step: "1", title: "Zoom into the preview (wheel on the image works too)" });
+  const modeSeg = h("div", { class: "ops-zoom" }, h("div", { class: "ops-zh" }, h("span", { class: "t" }, "Zoom"), zoomVal), zoomRange);
+  let lastView = null, zoomTimer = null;
+  const curZoom = () => Math.max(1, Number(state.view.zoom) || 1);
+  const showZoom = () => { zoomRange.value = String(tOf(curZoom())); fill(zoomVal, curZoom() <= 1.001 ? "Fit" : `×${curZoom().toFixed(curZoom() < 10 ? 1 : 0)}`); };
+  const setZoom = (z, now = false) => {
+    state.view.zoom = Math.max(1, Math.min(ZMAX, z));
+    if (state.view.zoom <= 1.001) state.view.zoom = 1;
+    clampCenter();
+    showZoom();
+    live();
+    clearTimeout(zoomTimer);
+    zoomTimer = setTimeout(() => { saveState(); runPreview(); }, now ? 0 : 220);
+  };
+  zoomRange.addEventListener("input", () => setZoom(zoomOf(Number(zoomRange.value))));
+  zoomRange.addEventListener("pointerdown", (e) => e.stopPropagation());
   const refreshBtn = h("button", { class: "ops-btn pri", onclick: () => runPreview() }, "↻ Preview");
   const autoTog = h("span");
   const sizeInfo = h("div", { class: "t" });
@@ -231,21 +275,98 @@ function setupPostStudio(node) {
     imgBefore.style.clipPath = `inset(0 ${100 - state.view.split}% 0 0)`;
     bar.style.left = `calc(${state.view.split}% - 1px)`;
   };
-  let dragging = false;
+  let dragging = false, pan = null;
   const splitFromEvent = (e) => { const r = cmp.getBoundingClientRect(); setSplit(((e.clientX - r.left) / r.width) * 100); };
-  cmp.addEventListener("pointerdown", (e) => { dragging = true; cmp.setPointerCapture?.(e.pointerId); splitFromEvent(e); e.stopPropagation(); });
-  cmp.addEventListener("pointermove", (e) => { if (dragging) { splitFromEvent(e); e.stopPropagation(); } });
-  cmp.addEventListener("pointerup", (e) => { dragging = false; saveState(); e.stopPropagation(); });
-  cmp.addEventListener("dblclick", (e) => {
-    // where in the IMAGE (object-fit: contain) was the click?
-    const r = cmp.getBoundingClientRect(), nw = imgAfter.naturalWidth, nh = imgAfter.naturalHeight;
-    if (!nw || !nh) return;
-    if (state.view.mode === "crop") { state.view.mode = "fit"; saveState(); renderSide(); return runPreview(); }
-    const s = Math.min(r.width / nw, r.height / nh), ox = (r.width - nw * s) / 2, oy = (r.height - nh * s) / 2;
-    state.view.cx = Math.max(0, Math.min(1, (e.clientX - r.left - ox) / (nw * s)));
-    state.view.cy = Math.max(0, Math.min(1, (e.clientY - r.top - oy) / (nh * s)));
-    state.view.mode = "crop"; saveState(); renderSide(); runPreview();
+
+  // ── zoom & pan ─────────────────────────────────────────────────────────────
+  // The server renders a window of the source (same maths as winFor). While the next render is on its
+  // way, the stage holding the current images is moved/scaled at once so zoom and pan feel immediate.
+  const srcSize = () => (lastView ? lastView.size : null);
+  function winFor(z, cx, cy) {
+    const [w, hh] = srcSize();
+    if (z <= 1.001) return [0, 0, w, hh];
+    const cw = Math.max(16, Math.round(w / z)), ch = Math.max(16, Math.round(hh / z));
+    return [Math.round(Math.min(Math.max(cx * w - cw / 2, 0), w - cw)), Math.round(Math.min(Math.max(cy * hh - ch / 2, 0), hh - ch)), cw, ch];
+  }
+  const target = () => winFor(curZoom(), state.view.cx ?? 0.5, state.view.cy ?? 0.5);
+  function display(win) {            // where a window of this shape is drawn in the box (object-fit: contain)
+    const r = cmp.getBoundingClientRect();
+    const sc = Math.min(r.width / win[2], r.height / win[3]);
+    return { r, s: sc, ox: (r.width - win[2] * sc) / 2, oy: (r.height - win[3] * sc) / 2 };
+  }
+  function clampCenter() {
+    if (!srcSize()) return;
+    const [w, hh] = srcSize(), z = curZoom();
+    const hx = z <= 1.001 ? 0.5 : Math.max(16, w / z) / w / 2, hy = z <= 1.001 ? 0.5 : Math.max(16, hh / z) / hh / 2;
+    state.view.cx = Math.min(Math.max(state.view.cx ?? 0.5, hx), 1 - hx);
+    state.view.cy = Math.min(Math.max(state.view.cy ?? 0.5, hy), 1 - hy);
+  }
+  function live() {
+    if (!lastView || !srcSize()) return;
+    const R = lastView.box, T = target(), dR = display(R), dT = display(T);
+    // a source point is drawn at oR + (p - R0)·sR and must land at oT + (p - T0)·sT
+    const k = dT.s / dR.s;
+    const tx = dT.ox + (R[0] - T[0]) * dT.s - k * dR.ox, ty = dT.oy + (R[1] - T[1]) * dT.s - k * dR.oy;
+    stage.style.transform = Math.abs(k - 1) < 1e-4 && Math.abs(tx) < 0.5 && Math.abs(ty) < 0.5 ? "" : `translate(${tx}px,${ty}px) scale(${k})`;
+  }
+  function pointAt(e) {              // source pixel under the mouse, and its place (0..1) in the window
+    if (!lastView) return null;
+    const T = target(), d = display(T);
+    const fx = Math.max(0, Math.min(1, (e.clientX - d.r.left - d.ox) / (T[2] * d.s)));
+    const fy = Math.max(0, Math.min(1, (e.clientY - d.r.top - d.oy) / (T[3] * d.s)));
+    return { x: T[0] + fx * T[2], y: T[1] + fy * T[3], fx, fy };
+  }
+  function zoomAt(e, z) {            // the point under the mouse stays under the mouse
+    z = Math.max(1, Math.min(ZMAX, z));
+    const p = pointAt(e);
+    if (p) {
+      const [w, hh] = srcSize();
+      const cw = z <= 1.001 ? w : Math.max(16, Math.round(w / z)), ch = z <= 1.001 ? hh : Math.max(16, Math.round(hh / z));
+      state.view.cx = (p.x - p.fx * cw + cw / 2) / w;
+      state.view.cy = (p.y - p.fy * ch + ch / 2) / hh;
+    }
+    setZoom(z);
+  }
+  cmp.addEventListener("mousedown", (e) => { if (e.button === 1) e.preventDefault(); });   // no browser autoscroll
+  cmp.addEventListener("pointerdown", (e) => {
+    if (e.button === 1) {
+      e.preventDefault(); e.stopPropagation();
+      if (!lastView) return;
+      pan = { x: e.clientX, y: e.clientY, cx: state.view.cx ?? 0.5, cy: state.view.cy ?? 0.5 };
+      cmp.setPointerCapture?.(e.pointerId); cmp.style.cursor = "grabbing";
+      return;
+    }
+    if (e.button !== 0) return;
+    dragging = true; cmp.setPointerCapture?.(e.pointerId); splitFromEvent(e); e.stopPropagation();
   });
+  cmp.addEventListener("pointermove", (e) => {
+    if (pan) {
+      const [w, hh] = srcSize(), d = display(target());
+      state.view.cx = pan.cx - (e.clientX - pan.x) / d.s / w;
+      state.view.cy = pan.cy - (e.clientY - pan.y) / d.s / hh;
+      clampCenter(); live(); e.stopPropagation();
+      return;
+    }
+    if (dragging) { splitFromEvent(e); e.stopPropagation(); }
+  });
+  cmp.addEventListener("pointerup", (e) => {
+    if (pan) { pan = null; cmp.style.cursor = ""; saveState(); runPreview(); e.stopPropagation(); return; }
+    dragging = false; saveState(); e.stopPropagation();
+  });
+  cmp.addEventListener("dblclick", (e) => {
+    const p = pointAt(e);
+    if (!p) return;
+    const [w, hh] = srcSize();
+    state.view.cx = p.x / w; state.view.cy = p.y / hh;
+    setZoom(curZoom() <= 1.001 ? 4 : curZoom(), true);
+  });
+  cmp.addEventListener("wheel", (e) => {
+    if (cmp.classList.contains("empty")) return;
+    e.preventDefault(); e.stopPropagation();
+    zoomAt(e, curZoom() * (e.deltaY < 0 ? 1.2 : 1 / 1.2));
+  }, { passive: false });
+  let pendingView = null;
+  imgAfter.addEventListener("load", () => { if (pendingView) { lastView = pendingView; pendingView = null; } live(); });
   // drop an image: becomes the preview source (never reaches ComfyUI's canvas)
   const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
   root.addEventListener("dragover", (e) => { if (!isFileDrag(e)) return; e.preventDefault(); e.stopPropagation(); cmp.classList.add("hot"); });
@@ -274,17 +395,26 @@ function setupPostStudio(node) {
     if (busy) { again = true; return; }
     busy = true; refreshBtn.disabled = true; fill(refreshBtn, h("span", { class: "ops-spin" }), "Rendering");
     try {
-      const r = await postJSON("/onyx/post_studio/preview", { node_id: String(node.id), state: { stages: state.stages }, mode: state.view.mode, cx: state.view.cx, cy: state.view.cy, size: PREVIEW_SIZE });
+      const r = await postJSON("/onyx/post_studio/preview", { node_id: String(node.id), state: { stages: state.stages }, mode: curZoom() > 1 ? "zoom" : "fit", zoom: curZoom(), cx: state.view.cx ?? 0.5, cy: state.view.cy ?? 0.5, size: PREVIEW_SIZE });
       if (!r.ok) { showEmpty(r.error || "Preview failed."); fill(timBox); return; }
       msg.style.display = "none"; cmp.classList.remove("empty");
+      pendingView = { box: r.view_box || [0, 0, r.source_size[0], r.source_size[1]], size: r.source_size };
+      if (!lastView) lastView = pendingView;
+      const sameImage = imgAfter.src === r.after;              // no load event for an identical image
       imgBefore.src = r.before; imgAfter.src = r.after; setSplit(state.view.split);
+      if (sameImage) { lastView = pendingView; pendingView = null; live(); }
       const total = r.timings.reduce((a, [, t]) => a + (typeof t === "number" ? t : 0), 0);
       fill(timBox, r.timings.map(([k, t]) => typeof t === "number"
         ? h("div", {}, `${stageDef(k)?.icon || ""} ${stageDef(k)?.short || k}`.padEnd(10, " ") + ` ${(t * 1000).toFixed(0)} ms`)
         : h("div", { style: "color:#ff9b9b;white-space:normal", title: t }, `⚠️ ${stageDef(k)?.short || k} skipped (hover)`)),
         h("div", { style: "color:var(--dim);margin-top:3px" }, `total ${(total * 1000).toFixed(0)} ms`),
         r.post_look && r.post_look !== "none" ? h("div", { style: "color:var(--warm)" }, `look '${r.post_look}' from Studio applied`) : null);
-      fill(sizeInfo, `${r.source_size[0]}×${r.source_size[1]} · ${state.view.mode === "crop" ? "100% crop" : "fit"} ${r.view_size[0]}×${r.view_size[1]}`);
+      const vbox = pendingView ? pendingView.box : lastView.box;
+      const native = r.view_size[0] === vbox[2];
+      const shown = cmp.getBoundingClientRect();
+      const magnified = native && r.view_size[0] < shown.width * 0.6;
+      imgBefore.style.imageRendering = imgAfter.style.imageRendering = magnified ? "pixelated" : "";
+      fill(sizeInfo, `${r.source_size[0]}×${r.source_size[1]} · ${curZoom() <= 1 ? "whole image" : `${vbox[2]}×${vbox[3]} px window`}${native && curZoom() > 1 ? " · real pixels" : ""}`);
     } catch (e) {
       showEmpty(String(e));
     } finally {
@@ -297,9 +427,7 @@ function setupPostStudio(node) {
     imgBefore.removeAttribute("src"); imgAfter.removeAttribute("src");
   }
   function renderSide() {
-    fill(modeSeg, [["fit", "Fit"], ["crop", "100%"]].map(([m, l]) => h("button", {
-      class: state.view.mode === m ? "on" : null, title: m === "crop" ? "Pixel-exact view (grain, sharpness). Double-click the image to choose where." : "Whole image, downscaled",
-      onclick: () => { state.view.mode = m; saveState(); renderSide(); runPreview(); } }, l)));
+    showZoom();
     fill(autoTog, toggle("Auto preview", state.view.auto, (v) => { state.view.auto = v; saveState(); if (v) runPreview(); }, "Re-render after every change"));
   }
   function layoutPreview() {
@@ -485,7 +613,7 @@ function setupPostStudio(node) {
   node.addDOMWidget("post_panel", "ONYX_POST_STUDIO", root, {
     serialize: false, getValue: () => undefined, setValue: () => {}, getMinHeight: () => PANEL_MIN_H,
   });
-  node.size = [...NODE_SIZE];
+  if (typeof node.setSize === "function") node.setSize([...NODE_SIZE]); else node.size = [...NODE_SIZE];
   makeCompact(node, head);
   const origConfigure = node.onConfigure?.bind(node);
   node.onConfigure = function (info) { origConfigure?.(info); readState(); render(); };

@@ -170,7 +170,7 @@ def delete_character(char_id: str) -> None:
 # ── presets (10 slots, every setting of the node) ─────────────────────────────
 
 PRESET_SLOTS = 10
-_VOLATILE = {"tab", "gallery_q", "gallery_sel", "preview_media", "_galleryLoaded"}
+_VOLATILE = {"tab", "gallery_q", "gallery_sel", "preview_media", "_galleryLoaded", "images", "run_token"}
 
 
 def presets() -> dict:
@@ -425,6 +425,84 @@ def _tensor_to_pil(t):
     return Image.fromarray(arr)
 
 
+# ── Recreate images loaded in the panel (no loader node needed) ─────────────────
+# Uploaded to ComfyUI's input folder (onyx_studio/...). The list lives in studio_state:
+#   images: [name, ...] · image_pick: "sequential" | "selected" · preview_media: selected name
+_SEQ: dict = {}          # node id -> {"sig": (...), "next": int}
+
+
+def _input_path(name: str) -> str:
+    import folder_paths
+    return folder_paths.get_annotated_filepath(name)
+
+
+def _load_input_image(name: str):
+    from PIL import Image, ImageOps
+    with Image.open(_input_path(name)) as im:
+        return ImageOps.exif_transpose(im).convert("RGB")
+
+
+def panel_image(state: dict, unique_id, advance: bool = True):
+    """(name, PIL) of the panel image this run uses, or (None, None)."""
+    names = [n for n in (state.get("images") or []) if isinstance(n, str) and n]
+    if not names:
+        return None, None
+    if state.get("image_pick") == "selected" and state.get("preview_media") in names:
+        name = state["preview_media"]
+    else:
+        key = str(unique_id)
+        sig = (tuple(names), str(state.get("run_token") or ""))
+        st = _SEQ.get(key)
+        if st is None or st["sig"] != sig:
+            start = names.index(state["preview_media"]) if state.get("preview_media") in names else 0
+            st = {"sig": sig, "next": start}
+        name = names[st["next"] % len(names)]
+        if advance:
+            st["next"] = (st["next"] + 1) % len(names)
+        _SEQ[key] = st
+    try:
+        return name, _load_input_image(name)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"Onyx Studio: cannot read the image '{name}' ({e}). Remove it from the list.") from None
+
+
+def _interruptible(fn, label: str = "LLM"):
+    """Runs a blocking call (LLM / API request) in a thread so ComfyUI's Cancel (red cross) works:
+    the run stops at once; the abandoned request finishes or times out on its own."""
+    import threading as _th
+    try:
+        import comfy.model_management as _mm
+    except Exception:  # noqa: BLE001
+        return fn()
+    box = {}
+
+    def work():
+        try:
+            box["value"] = fn()
+        except BaseException as e:  # noqa: BLE001
+            box["error"] = e
+    t = _th.Thread(target=work, daemon=True, name=f"onyx-studio-{label}")
+    t.start()
+    started, told = time.time(), False
+    while t.is_alive():
+        t.join(0.25)
+        if _mm.processing_interrupted():
+            print(f"⏹️  [Onyx Studio] cancelled while waiting for the {label}.")
+            _mm.throw_exception_if_processing_interrupted()
+        if not told and time.time() - started > 20:
+            told = True
+            print(f"⏳ [Onyx Studio] still waiting for the {label}… (Cancel works)")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def _pil_to_tensor(pil):
+    import numpy as np
+    import torch
+    return torch.from_numpy(np.asarray(pil.convert("RGB"), dtype=np.float32) / 255.0)[None]
+
+
 def _placeholder():
     import torch
     return torch.zeros((1, 64, 64, 3))
@@ -467,9 +545,9 @@ class OnyxStudio:
     # Outputs are linked by index: the media outputs (image, video, audio, video_fps) are gone
     # with the Media tab — media now comes from a separate loader node.
     RETURN_TYPES = ("MODEL", "CLIP", "CONDITIONING", "CONDITIONING", "STRING",
-                    "STRING", "STRING", "STRING", _onyx_post.POST_TYPE, "INT", "INT", "LATENT")
+                    "STRING", "STRING", "STRING", _onyx_post.POST_TYPE, "INT", "INT", "LATENT", "IMAGE")
     RETURN_NAMES = ("model", "clip", "positive", "negative", "prompt",
-                    "notes", "post_preset", "ratio", "post", "width", "height", "latent")
+                    "notes", "post_preset", "ratio", "post", "width", "height", "latent", "image")
     # Shown on hover over each output dot (the compact panel has no output labels).
     OUTPUT_TOOLTIPS = (
         "model — the diffusion model with the character's LoRAs applied → KSampler / guider model.",
@@ -485,6 +563,8 @@ class OnyxStudio:
         "width — image width in pixels.",
         "height — image height in pixels.",
         "latent — empty latent at width × height (batch size from Format) → sampler latent_image.",
+        "image — the source image of this run (the connected image, else the one loaded in the panel) → "
+        "VAE Encode for image-to-image, or any image input.",
     )
     FUNCTION = "run"
     CATEGORY = "Onyx"
@@ -532,8 +612,15 @@ class OnyxStudio:
         except ValueError:
             state = {}
 
-        # 1. Reference: the image input, else the first frame of the video input.
+        # 1. Reference: the image input, else the first frame of the video input, else the
+        #    images loaded in the panel (Recreate), one per run.
         ref = image if image is not None else (video[:1] if video is not None else None)
+        media = None
+        if ref is None and state.get("mode") == "recreate":
+            media, pil_media = panel_image(state, unique_id)
+            if pil_media is not None:
+                ref = _pil_to_tensor(pil_media)
+                print(f"🖼️  [Onyx Studio] source image: {media}")
         if ref is not None:
             _LAST_REF[str(unique_id)] = _tensor_to_pil(ref[0])     # the Generate button reuses it
 
@@ -541,7 +628,8 @@ class OnyxStudio:
         pil = _tensor_to_pil(ref[0]) if ref is not None else None
         try:
             # API keys: the ones saved in Settings (on this computer, outside the pack).
-            res = generate(state, image=pil, keys={}, seed=int(seed or 0))
+            res = _interruptible(lambda: generate(state, image=pil, keys={}, seed=int(seed or 0)),
+                                 f"writer model ({state.get('provider', 'ollama')})")
         except OnyxAPIError as e:
             raise RuntimeError(str(e)) from None
         prompt = res["prompt"]
@@ -587,9 +675,12 @@ class OnyxStudio:
         batch = max(1, int((state.get("res") or {}).get("batch", 1) or 1))
         latent = empty_latent(width, height, batch)
         print(f"📐 [Onyx Studio] {width} x {height} ({ratio_label})")
+        if media:
+            res["media"] = media
         _notify(unique_id, res)
         return (model, clip, positive, negative, prompt, res["notes"],
-                "" if post["motion"] == "manual" else post["motion"], ratio_label, post, width, height, latent)
+                "" if post["motion"] == "manual" else post["motion"], ratio_label, post, width, height, latent,
+                ref if ref is not None else _placeholder())
 
 
 RES_ASPECTS = ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "21:9", "5:4", "4:5", "from image (input)"]
@@ -747,7 +838,9 @@ def register_routes() -> None:
                   history=_read("history.json", [])[:30], loras=_lora_files(),
                   providers=[{"id": p, "label": _llm.PROVIDER_LABELS[p]} for p in _llm.PROVIDERS],
                   models={"xai": _reg.model_ids("grok", vision=True, include_deprecated=False),
-                          "gemini": _reg.model_ids("gemini_text", include_deprecated=False)},
+                          "gemini": _reg.model_ids("gemini_text", include_deprecated=False),
+                          "vertex": _reg.model_ids("gemini_text", include_deprecated=False)},
+                  vertex_folder=saved_key("vertex") or _llm.DEFAULT_VERTEX_FOLDER,
                   modes=MODES, studio_dir=studio_dir(), presets_saved=presets(), res_aspects=RES_ASPECTS)
 
     @inst.routes.get("/onyx/studio/encode_cache")
@@ -843,6 +936,12 @@ def register_routes() -> None:
         save_key(provider, body.get("key", ""))
         return ok(keys=keys_status())
 
+    @inst.routes.get("/onyx/studio/vertex_keys")
+    async def _vertex_keys(request):
+        folder = request.query.get("folder") or saved_key("vertex") or _llm.DEFAULT_VERTEX_FOLDER
+        keys = await asyncio.get_running_loop().run_in_executor(None, _llm.vertex_keys, folder)
+        return ok(folder=folder, keys=[{"file": os.path.basename(f), "project": p} for f, p in keys])
+
     @inst.routes.get("/onyx/studio/ollama_models")
     async def _ollama(request):
         url = request.query.get("url") or _llm.DEFAULT_OLLAMA_URL
@@ -865,10 +964,14 @@ def register_routes() -> None:
             state = body.get("state") or {}
 
             def work():
-                pil = _LAST_REF.get(str(body.get("node_id") or ""))
+                pil = None
+                if state.get("mode") == "recreate" and body.get("media"):
+                    pil = _load_input_image(str(body["media"]))      # an image loaded in the panel
+                if pil is None:
+                    pil = _LAST_REF.get(str(body.get("node_id") or ""))
                 if state.get("mode") == "recreate" and pil is None:
-                    raise RuntimeError("Recreate: run the workflow once with an image connected to the "
-                                       "`image` (or `video`) input, then Generate works on that image.")
+                    raise RuntimeError("Recreate: load images in the Prompt tab, or connect an image to the "
+                                       "`image` (or `video`) input and run the workflow once.")
                 return generate(state, image=pil, seed=int(body.get("seed") or 0))
             res = await asyncio.get_running_loop().run_in_executor(None, work)
             add_history({"prompt": res["prompt"], "notes": res["notes"], "mode": res["mode"],

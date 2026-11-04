@@ -69,6 +69,8 @@ from .nodes.onyx_post_studio import OnyxPostStudio
 from .nodes.onyx_phone_fx import NODE_CLASS_MAPPINGS as _PHONE_FX, NODE_DISPLAY_NAME_MAPPINGS as _PHONE_FX_NAMES
 from .nodes.onyx_lens_character import OnyxLensCharacter
 from .nodes.onyx_h3_audio_lock import OnyxH3LockSourceAudio
+from .nodes.onyx_speech_dialogue import (NODE_CLASS_MAPPINGS as _SPEECH_NODES,
+                                         NODE_DISPLAY_NAME_MAPPINGS as _SPEECH_NAMES)
 from .nodes.onyx_light_tools import (NODE_CLASS_MAPPINGS as _LIGHT_NODES,
                                      NODE_DISPLAY_NAME_MAPPINGS as _LIGHT_NAMES,
                                      OnyxCurvesAdjust, OnyxLevelsAdjust, OnyxContrast)
@@ -234,6 +236,7 @@ NODE_CLASS_MAPPINGS.update(_PHONE_FX)
 NODE_CLASS_MAPPINGS["OnyxLensCharacter"] = OnyxLensCharacter
 NODE_CLASS_MAPPINGS["OnyxH3LockSourceAudio"] = OnyxH3LockSourceAudio
 NODE_CLASS_MAPPINGS.update(_LIGHT_NODES)
+NODE_CLASS_MAPPINGS.update(_SPEECH_NODES)
 NODE_CLASS_MAPPINGS["OnyxMaskedColorMatch"] = OnyxMaskedColorMatch
 NODE_CLASS_MAPPINGS["OnyxDatasetScenePrompts"] = OnyxDatasetScenePrompts
 NODE_CLASS_MAPPINGS["OnyxFameGridColorFinish"] = OnyxFameGridColorFinish
@@ -322,6 +325,7 @@ NODE_DISPLAY_NAME_MAPPINGS.update(_PHONE_FX_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS["OnyxLensCharacter"] = "Onyx Lens Character"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3LockSourceAudio"] = "Onyx H3 Lock Source Audio"
 NODE_DISPLAY_NAME_MAPPINGS.update(_LIGHT_NAMES)
+NODE_DISPLAY_NAME_MAPPINGS.update(_SPEECH_NAMES)
 NODE_DISPLAY_NAME_MAPPINGS["OnyxMaskedColorMatch"] = "Onyx Masked Color Match"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxDatasetScenePrompts"] = "Onyx Dataset Scene Prompts"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxFameGridColorFinish"] = "Onyx FameGrid Color Finish"

@@ -47,7 +47,36 @@ function _makeCompact(node, dragHandle) {
   setTimeout(place, 400);
 
   if (dragHandle) enableDrag(node, dragHandle);
+  keepPanelWidth(node);
   return place;
+}
+
+export const PANEL_NODE_SIZE = [840, 1040];   // Onyx Studio and Onyx Post Studio: same size
+export const PANEL_MIN_W = 640;
+
+// The panel must always be exactly as wide as the node. Some frontend builds stop resizing a
+// DOM widget after a programmatic resize (the panel stayed at its first width while the node
+// grew or shrank). Checked a few times per second: the node's width wins, and the node never
+// gets narrower than the panel can lay out.
+function keepPanelWidth(node) {
+  const panel = () => (node.widgets || []).find((w) => w.element)?.element;
+  const tick = () => {
+    if (!node.graph) return;
+    if (node.size[0] < PANEL_MIN_W) { node.size[0] = PANEL_MIN_W; node.setDirtyCanvas?.(true, true); }
+    const el = panel();
+    if (!el || !el.isConnected) return;
+    const w = (node.widgets || []).find((x) => x.element === el);
+    const want = Math.max(100, Math.round(node.size[0] - 2 * (w?.margin ?? 10)));
+    for (const box of [el, el.parentElement]) {
+      if (!box || box === document.body) continue;
+      if (Math.abs(box.offsetWidth - want) > 2) { box.style.width = want + "px"; box.style.maxWidth = want + "px"; }
+      if (box.style.overflow !== "hidden" && box !== el) break;
+    }
+  };
+  const id = setInterval(tick, 250);
+  const removed = node.onRemoved;
+  node.onRemoved = function (...a) { clearInterval(id); return removed?.apply(this, a); };
+  setTimeout(tick, 0);
 }
 
 // The panel covers the whole node, so LiteGraph never sees a click to drag it: the
