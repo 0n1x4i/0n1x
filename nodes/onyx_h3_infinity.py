@@ -52,10 +52,6 @@ class OnyxH3InfinityPrepare:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "video": (_input_videos(), {"video_upload": True,
-                                            "tooltip": "The source video (the performance to transfer). "
-                                                       "Any length, any frame rate: it is converted to "
-                                                       "24 fps once, at the start of the session."}),
                 "session_name": ("STRING", {"default": "infinity", "multiline": False,
                                             "tooltip": "One video = one session. Its renders live in "
                                                        "output/onyx_h3_infinity/<session_name>/ and a run "
@@ -73,9 +69,20 @@ class OnyxH3InfinityPrepare:
                                             "seed + 1000 per retry."}),
             },
             "optional": {
+                "video_info": ("VHS_VIDEOINFO", {
+                    "tooltip": "Onyx Image Batch Loader → video_info. It names the video file (and its "
+                               "trim): Prepare reads the source straight from disk, so a long video is "
+                               "never held whole in memory. Tip: switch the loader's `video_first_frame` "
+                               "on and `minimax_15s_limit` off for long videos."}),
+                "video_frames": ("IMAGE", {
+                    "tooltip": "Onyx Image Batch Loader → video. Used only when video_info does not name "
+                               "a file (or with any other video loader)."}),
+                "video_audio": ("AUDIO", {"tooltip": "Loader → audio (only with video_frames)."}),
+                "video_fps": ("FLOAT", {"forceInput": True,
+                                        "tooltip": "Loader → video_fps (only with video_frames)."}),
                 "video_path": ("STRING", {"default": "", "multiline": False,
-                                          "tooltip": "Absolute path of the source video. When set, it "
-                                                     "replaces `video` (handy on RunPod / through the API)."}),
+                                          "tooltip": "Absolute path of the source video. When set, it wins "
+                                                     "over the loader (handy on RunPod / through the API)."}),
                 "redo_blocks": ("STRING", {"default": "", "multiline": False,
                                            "tooltip": "Blocks to render again with a new seed, numbered as in "
                                                       "the log: \"12, 40\". Applied once each time the text "
@@ -101,7 +108,8 @@ class OnyxH3InfinityPrepare:
     )
     FUNCTION = "prepare"
     CATEGORY = "Onyx/Video"
-    DESCRIPTION = ("H3 Infinity: motion control of any length. Each run renders the next job of the "
+    DESCRIPTION = ("H3 Infinity: motion control of any length. Source: Onyx Image Batch Loader (video_info). "
+                   "Each run renders the next job of the "
                    "plan (anchor montage or block). Batch count high, Queue once; queue again to resume.")
 
     @classmethod

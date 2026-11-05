@@ -79,6 +79,38 @@ def masked(key):
     return (key[:9] + "…" + key[-3:]) if len(key) > 14 else ("saved" if key else "")
 
 
+def _on_prompt(json_data):
+    """API runs (Comfy API, the Onyx site): the key comes in the `key` input of the Onyx Session node of
+    the prompt. ComfyUI does not run that node before the others, so on a fresh machine a gated node could
+    find no session yet (SS-204). Here the key is saved and checked as soon as the prompt arrives, before
+    anything runs, then removed from the prompt so it never stays in the queue / history."""
+    try:
+        prompt = (json_data or {}).get("prompt") or {}
+        for node in prompt.values():
+            if not isinstance(node, dict) or node.get("class_type") != "OnyxSessionNode":
+                continue
+            inputs = node.get("inputs") or {}
+            typed = str(inputs.get("key") or "").strip()
+            if not typed:
+                continue
+            inputs["key"] = ""
+            if len(typed) > 200:
+                continue
+            if not read_saved_key():
+                save_key(typed)
+            key = read_saved_key()
+            try:
+                with open(_CACHE_FILE, encoding="utf-8") as fh:
+                    cache = json.load(fh)
+            except (OSError, ValueError):
+                cache = {}
+            if not cache.get("valid") or (cache.get("token") or "").strip() != key:
+                sync_with_server(key)
+    except Exception as exc:  # noqa: BLE001 - never block a prompt: the node still checks at run time
+        print("[Onyx Session] prompt check skipped: %s" % type(exc).__name__)
+    return json_data
+
+
 def _register_routes():
     try:
         from aiohttp import web
@@ -88,6 +120,10 @@ def _register_routes():
     if getattr(PromptServer.instance, "_onyx_session_routes_registered", False):
         return
     PromptServer.instance._onyx_session_routes_registered = True
+    try:
+        PromptServer.instance.add_on_prompt_handler(_on_prompt)
+    except Exception:  # noqa: BLE001 - very old ComfyUI: the node itself still works locally
+        pass
 
     @PromptServer.instance.routes.get("/onyx_session/key")
     async def _status(request):

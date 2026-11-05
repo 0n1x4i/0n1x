@@ -45,6 +45,8 @@ _LANG_NAMES = {"en": "English", "fr": "French", "es": "Spanish", "pt": "Portugue
                "it": "Italian", "nl": "Dutch", "ru": "Russian", "ja": "Japanese", "ko": "Korean",
                "zh": "Chinese", "ar": "Arabic", "tr": "Turkish", "pl": "Polish"}
 _SPEAKER_MODES = ["gemini (voices + frames)", "one speaker (all hers)", "off"]
+_ENGINES = ["elevenlabs scribe v2 (API)", "whisper (local)"]
+_SCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 _lock = threading.Lock()
 _whisper = {"name": None, "model": None}
 
@@ -231,6 +233,99 @@ def _vertex_speakers(segs, pcm, frames, folder, model_id) -> list:
     return data.get("lines") or []
 
 
+def _scribe_key(given: str) -> str:
+    """ElevenLabs key: the node field (then saved on this computer), else the saved one, else ELEVENLABS_API_KEY."""
+    given = (given or "").strip()
+    try:
+        from .onyx_studio import saved_key, save_key
+    except Exception:
+        saved_key = save_key = None
+    if given:
+        if save_key:
+            try:
+                if saved_key("elevenlabs") != given:
+                    save_key("elevenlabs", given)
+                    print("🔑 [Onyx Speech] ElevenLabs key saved on this computer: you can empty the "
+                          "field so it is not stored in the workflow.")
+            except Exception:
+                pass
+        return given
+    if saved_key:
+        try:
+            k = saved_key("elevenlabs")
+            if k:
+                return k
+        except Exception:
+            pass
+    k = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    if not k:
+        raise RuntimeError("[Onyx Speech] ElevenLabs Scribe needs an API key: paste it once in "
+                           "`elevenlabs_api_key` (it is then kept on this computer), or set "
+                           "ELEVENLABS_API_KEY. Or switch `engine` to whisper (local).")
+    return k
+
+
+def _scribe(pcm: np.ndarray, language: str, key: str, num_speakers: int) -> tuple:
+    """ElevenLabs Scribe v2: word timings + diarization -> the same segments as Whisper
+    ({start, end, text, words:[{word, start, end}], speaker_id})."""
+    import requests
+    data = {"model_id": "scribe_v2", "diarize": "true", "timestamps_granularity": "word",
+            "tag_audio_events": "false"}
+    if language and language != "auto":
+        data["language_code"] = language
+    if num_speakers and int(num_speakers) > 0:
+        data["num_speakers"] = str(int(num_speakers))
+    last = None
+    for attempt in range(3):
+        try:
+            r = requests.post(_SCRIBE_URL, headers={"xi-api-key": key}, data=data,
+                              files={"file": ("audio.wav", _wav_bytes(pcm), "audio/wav")}, timeout=900)
+            if r.status_code == 401:
+                raise RuntimeError("ElevenLabs refused the API key (401).")
+            if r.status_code >= 400:
+                raise RuntimeError(f"ElevenLabs HTTP {r.status_code}: {r.text[:300]}")
+            res = r.json()
+            break
+        except RuntimeError:
+            raise
+        except Exception as e:  # network: retry
+            last = e
+    else:
+        raise RuntimeError(f"[Onyx Speech] ElevenLabs Scribe unreachable: {last}")
+
+    lang = (res.get("language_code") or language or "en")[:2]
+    segs, cur, pending_space = [], None, ""
+    for w in res.get("words") or []:
+        kind = w.get("type", "word")
+        if kind == "spacing":
+            pending_space = " "
+            continue
+        if kind != "word":
+            continue
+        txt = (w.get("text") or "").strip()
+        if not txt:
+            continue
+        st, en, spk = float(w.get("start", 0.0)), float(w.get("end", 0.0)), w.get("speaker_id") or "speaker_0"
+        new = (cur is None or spk != cur["speaker_id"] or st - cur["end"] > 0.9
+               or (cur["text"].rstrip()[-1:] in ".?!" and st - cur["end"] > 0.35))
+        if new:
+            if cur:
+                segs.append(cur)
+            cur = {"start": st, "end": en, "text": "", "words": [], "speaker_id": spk}
+            pending_space = ""
+        # Window Dialogue joins the words as they are: each one carries its leading space
+        piece = (" " if cur["words"] else "") + txt
+        cur["words"].append({"word": piece, "start": st, "end": en})
+        cur["text"] += piece
+        cur["end"] = en
+        pending_space = ""
+    if cur:
+        segs.append(cur)
+    for s_ in segs:
+        s_["text"] = s_["text"].strip()
+    return segs, lang
+
+
 def _readable(t: dict) -> str:
     rows = [f"language: {t.get('language', '?')} · {len(t.get('segments', []))} line(s)"]
     for s in t.get("segments", []):
@@ -265,6 +360,18 @@ class OnyxSpeechTranscribe:
             "optional": {
                 "images": ("IMAGE", {"tooltip": "The source frames (helps Gemini see whose lips move)."}),
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 0.01}),
+                "engine": (_ENGINES, {"default": _ENGINES[0],
+                                      "tooltip": "elevenlabs scribe v2: ElevenLabs' speech-to-text API — very "
+                                                 "accurate words and timings, and it separates the voices "
+                                                 "(paid per minute of audio). whisper: local, free, less exact."}),
+                "elevenlabs_api_key": ("STRING", {"default": "", "multiline": False,
+                                                  "tooltip": "Paste it once: it is then kept on this computer "
+                                                             "(Onyx keys.json) and the field can be emptied, so "
+                                                             "the key never travels with the workflow. "
+                                                             "ELEVENLABS_API_KEY also works."}),
+                "num_speakers": ("INT", {"default": 0, "min": 0, "max": 32,
+                                         "tooltip": "Scribe: how many different voices at most (0 = auto). "
+                                                    "1 for a single person talking to camera."}),
             },
         }
 
@@ -276,17 +383,23 @@ class OnyxSpeechTranscribe:
     CATEGORY = "Onyx/H3"
 
     def run(self, audio, whisper_model, language, speakers, vertex_json_folder, gemini_model,
-            images=None, fps=24.0):
+            images=None, fps=24.0, engine=_ENGINES[0], elevenlabs_api_key="", num_speakers=0):
         from .onyx_render_profile import ensure_profile_ready
         ensure_profile_ready()
         pcm = _audio_16k_mono(audio)
-        key = hashlib.sha256(pcm[::7].tobytes() + f"{whisper_model}|{language}|{speakers}".encode()).hexdigest()[:20]
+        scribe = str(engine or "").startswith("elevenlabs")
+        tag = f"scribe_v2|{num_speakers}" if scribe else whisper_model
+        key = hashlib.sha256(pcm[::7].tobytes() + f"{tag}|{language}|{speakers}".encode()).hexdigest()[:20]
         path = os.path.join(_CACHE_DIR, key + ".json")
         if os.path.isfile(path):
             t = json.load(open(path, encoding="utf-8"))
             print(f"♻️  [Onyx Speech] transcript from cache ({len(t['segments'])} line(s))")
             return (json.dumps(t, ensure_ascii=False), _readable(t))
-        segs, lang = _transcribe(pcm, whisper_model, language)
+        if scribe:
+            print("🎙️  [Onyx Speech] ElevenLabs Scribe v2…")
+            segs, lang = _scribe(pcm, language, _scribe_key(elevenlabs_api_key), num_speakers)
+        else:
+            segs, lang = _transcribe(pcm, whisper_model, language)
         for s in segs:
             s["speaker"], s["on_camera"] = "woman", True
         if segs and speakers.startswith("gemini"):
