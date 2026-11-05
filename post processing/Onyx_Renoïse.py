@@ -84,7 +84,7 @@ _TT = {
     "chroma_blotch": "Taches de couleur basse frequence (violet / vert / magenta). C'est l'effet 'zones de couleurs differentes' d'un ISO eleve. 0.009 = realiste (calibre sur une vraie photo), 0.02 = bien visible, 0.05 = extreme.",
     "blotch_size": "Taille des taches (marbrures + chroma) en px pour une image de 2000 px de cote (adapte automatiquement a la resolution).",
     "purple_green": "Teinte des taches : 0 = toutes les teintes, 1 = uniquement axe violet <-> vert (le plus typique des capteurs de telephone).",
-    "shadow_weight": "Concentration du nouveau bruit dans les ombres (0 = uniforme, 1 = presque que dans les ombres).",
+    "shadow_weight": "Concentration de TOUT le bruit (grain ISO + couche telephone) dans les ombres : 0 = uniforme, 1 = presque que dans les ombres. Avec adapt_to_exposure, les ombres sont relatives a l'exposition de la photo.",
     "nr_smear": "Lissage 'reduction de bruit' de telephone : efface la micro-texture dans les zones plates (peau cireuse) en gardant les contours.",
     "chroma_bleed": "Bavure des couleurs de l'image (flou de la chroma seule, comme le 4:2:0 et le debruitage chroma). En px pour 2000 px. N'attenue plus les taches de bruit.",
     "color_degrade": "Degradation des couleurs : ombres desaturees, noirs releves et legerement olive, hautes lumieres ternes. Au-dessus de 1 = exagere.",
@@ -130,7 +130,7 @@ class Onyx_Renoise:
                 }),
                 "grain_size": ("FLOAT", {
                     "default": 1.0, "min": 0.1, "max": 8.0, "step": 0.1,
-                    "tooltip": "Taille des grains de bruit (PAS l'intensite, qui vient de l'ISO preset). 1.0 = pixel par pixel (comportement d'origine). Au-dessus de 1 = grains plus gros/visibles (bruit genere a resolution reduite puis agrandi en nearest-neighbor). En dessous de 1 (jusqu'a 0.1) = grain plus fin/serre (bruit genere a resolution superieure puis moyenne vers le bas).",
+                    "tooltip": "Taille des grains de bruit (PAS l'intensite, qui vient de l'ISO preset). 1.0 = pixel par pixel (comportement d'origine). Au-dessus de 1 = grains plus gros/visibles (bruit genere a resolution reduite puis agrandi en douceur, comme un grain pris en basse resolution). En dessous de 1 (jusqu'a 0.1) = grain plus fin/serre (bruit genere a resolution superieure puis moyenne vers le bas).",
                 }),
             },
             "optional": {
@@ -147,6 +147,22 @@ class Onyx_Renoise:
                 "chroma_bleed":  ("FLOAT", {"default": 0.0, "min": 0.0, "max": 8.0, "step": 0.1, "tooltip": _TT["chroma_bleed"]}),
                 "color_degrade": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": _TT["color_degrade"]}),
                 "jpeg_quality":  ("INT",   {"default": 0, "min": 0, "max": 100, "step": 1, "tooltip": _TT["jpeg_quality"]}),
+                # Added last (widgets are saved by position).
+                "iso":           ("INT",   {"default": 0, "min": 0, "max": 6400, "step": 10,
+                                  "tooltip": "Fine ISO, in steps of 10 (e.g. 250, 640, 1250). 0 = use iso_preset. Any "
+                                             "other value replaces the preset: grain amount, softness and colour are "
+                                             "blended between the nearest presets."}),
+                "grain_opacity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01,
+                                  "tooltip": "Opacity of all the added noise (ISO grain + phone layer). 1 = full, "
+                                             "0.5 = half as strong, 0 = no noise (colour / NR / JPEG effects stay)."}),
+                "adapt_to_exposure": ("BOOLEAN", {"default": True,
+                                  "tooltip": "shadow_weight reads the photo's own exposure: what counts as a shadow is "
+                                             "relative to this image (a sunny outdoor photo and a dark indoor one get the "
+                                             "same balance). Off = absolute brightness."}),
+                "grain_blur":    ("FLOAT", {"default": 0.0, "min": 0.0, "max": 5.0, "step": 0.05,
+                                  "tooltip": "Extra softness of the grain only (ISO grain + fine grain), in pixels of "
+                                             "blur. 0 = off. The grain keeps its strength (use grain_opacity to lower "
+                                             "it); blotches, mottle and the rest are not touched."}),
             },
         }
 
@@ -170,6 +186,10 @@ class Onyx_Renoise:
 
     def _gen_grain_noise(self, *args, **kwargs):
         return _onyx_core()['Onyx_Renoise']._gen_grain_noise(self, *args, **kwargs)
+
+
+    def _soften(self, *args, **kwargs):
+        return _onyx_core()['Onyx_Renoise']._soften(self, *args, **kwargs)
 
 
     def renoise(self, *args, **kwargs):

@@ -50,12 +50,26 @@ function link(url, label) {
   return a;
 }
 
+// Items the user chose to "never show again" (false positives): kept in this browser.
+const IGNORE_KEY = "Onyx.SetupCheck.ignored";
+const keyPack = (m) => "pack:" + m.pack;
+const keyModel = (m) => "model:" + m.file;
+const keyElse = (m) => "else:" + m.file;
+
+function loadIgnored() {
+  try { return new Set(JSON.parse(localStorage.getItem(IGNORE_KEY) || "[]")); } catch { return new Set(); }
+}
+function saveIgnored(set) {
+  try { localStorage.setItem(IGNORE_KEY, JSON.stringify([...set])); } catch {}
+}
+
 function showReport(r, { manual }) {
   // Node types whose pack is not in the registry ("unknown pack") are not reported:
   // too noisy (frontend-only nodes, renamed types, local packs).
-  r.missing_nodes = (r.missing_nodes || []).filter((m) => m.pack);
-  r.missing_models = r.missing_models || [];
-  r.elsewhere = r.elsewhere || [];
+  const ignored = loadIgnored();
+  r.missing_nodes = (r.missing_nodes || []).filter((m) => m.pack && !ignored.has(keyPack(m)));
+  r.missing_models = (r.missing_models || []).filter((m) => !ignored.has(keyModel(m)));
+  r.elsewhere = (r.elsewhere || []).filter((m) => !ignored.has(keyElse(m)));
   if (!r.missing_nodes.length && !r.missing_models.length && !r.elsewhere.length) r.ok = true;
   if (r.ok) {
     if (manual) {
@@ -109,7 +123,16 @@ function showReport(r, { manual }) {
       (primary ? "background:#7c5cff;color:#fff;border:1px solid #7c5cff" : "background:transparent;color:inherit;border:1px solid #666"), label);
     b.onclick = fn; return b;
   };
+  const neverAgain = () => {
+    const set = loadIgnored();
+    for (const m of r.missing_nodes) set.add(keyPack(m));
+    for (const m of r.missing_models) set.add(keyModel(m));
+    for (const m of r.elsewhere) set.add(keyElse(m));
+    saveIgnored(set);
+    overlay.remove();
+  };
   row.append(
+    btn("Never show again for these models", false, neverAgain),
     btn("Copy list", false, () => navigator.clipboard?.writeText(lines.join("\n"))),
     btn("Close", true, () => overlay.remove()));
   box.append(row);
@@ -172,6 +195,12 @@ app.registerExtension({
     proto.getCanvasMenuOptions = function () {
       const options = orig.apply(this, arguments) || [];
       options.push(null, { content: "Onyx: Check workflow setup", callback: () => runCheck({ manual: true }) });
+      if (loadIgnored().size) {
+        options.push({ content: "Onyx: Show ignored setup warnings again", callback: () => {
+          saveIgnored(new Set());
+          runCheck({ manual: true });
+        } });
+      }
       return options;
     };
   },

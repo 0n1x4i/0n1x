@@ -267,7 +267,9 @@ function setupPostStudio(node) {
   const tabsBar = h("div", { class: "ops-tabs" });
   const body = h("div", { class: "ops-body" });
   const pages = {};
-  root.append(head, presetBar, prevBox, h("div", { class: "ops-main" }, tabsBar, body));
+  // The preview was removed (not practical in the node): the panel is presets + stages only.
+  const PREVIEW_ON = false;
+  root.append(head, presetBar, ...(PREVIEW_ON ? [prevBox] : []), h("div", { class: "ops-main" }, tabsBar, body));
 
   // ── compare slider ─────────────────────────────────────────────────────────
   const setSplit = (x) => {
@@ -369,10 +371,10 @@ function setupPostStudio(node) {
   imgAfter.addEventListener("load", () => { if (pendingView) { lastView = pendingView; pendingView = null; } live(); });
   // drop an image: becomes the preview source (never reaches ComfyUI's canvas)
   const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
-  root.addEventListener("dragover", (e) => { if (!isFileDrag(e)) return; e.preventDefault(); e.stopPropagation(); cmp.classList.add("hot"); });
+  root.addEventListener("dragover", (e) => { if (!PREVIEW_ON || !isFileDrag(e)) return; e.preventDefault(); e.stopPropagation(); cmp.classList.add("hot"); });
   root.addEventListener("dragleave", () => cmp.classList.remove("hot"));
   root.addEventListener("drop", async (e) => {
-    if (!isFileDrag(e)) return;
+    if (!PREVIEW_ON || !isFileDrag(e)) return;
     e.preventDefault(); e.stopPropagation(); cmp.classList.remove("hot");
     const f = [...e.dataTransfer.files].find((x) => x.type.startsWith("image/"));
     if (!f) return toast("Drop an image file.", "warn");
@@ -388,10 +390,12 @@ function setupPostStudio(node) {
   let busy = false, again = false, timer = null;
   function schedulePreview() {
     renderChrome();
+    if (!PREVIEW_ON) return;
     if (!state.view.auto || !state.view.open) return;
     clearTimeout(timer); timer = setTimeout(runPreview, 450);
   }
   async function runPreview() {
+    if (!PREVIEW_ON) return;
     if (busy) { again = true; return; }
     busy = true; refreshBtn.disabled = true; fill(refreshBtn, h("span", { class: "ops-spin" }), "Rendering");
     try {

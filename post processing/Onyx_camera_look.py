@@ -57,6 +57,11 @@ def _bayer_demosaic_effect(*args, **kwargs):
 
 
 
+def _bayer_cfa_demosaic(*args, **kwargs):
+    return _onyx_core()['_bayer_cfa_demosaic'](*args, **kwargs)
+
+
+
 def _motion_blur(*args, **kwargs):
     return _onyx_core()['_motion_blur'](*args, **kwargs)
 
@@ -104,6 +109,24 @@ class Onyx_Camera_Look:
                 "jpeg_compression": ("INT", {
                     "default": 98, "min": 85, "max": 100, "step": 1,
                     "tooltip": "JPEG quality. 100 = near-lossless, 85 = visible artifacts.",
+                }),
+            },
+            # Added last (widgets are saved by position): older workflows keep their values.
+            "optional": {
+                "bayer_demosaic": ("BOOLEAN", {
+                    "default": False, "label_on": "Enabled", "label_off": "Disabled",
+                    "tooltip": "Real sensor pass, done first: the image is sampled through an RGGB colour "
+                               "filter (one colour per pixel) and rebuilt by demosaicing, like a phone "
+                               "sensor. Softens the finest detail a little and adds the faint colour "
+                               "zippering of real photos on sharp edges. Same idea as the Bayer step of "
+                               "INSTARAW's camera simulation.",
+                }),
+                "pixel_perturbation": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 0.2, "step": 0.001,
+                    "tooltip": "Tiny random offset on every pixel and channel (uniform, ± this fraction of full "
+                               "range), new seed every run. 0.008 = barely visible, 0.05 = clearly noisy. "
+                               "Done after the Bayer pass, before sensor noise. Same idea as INSTARAW's "
+                               "Pixel perturbation node. 0 = off.",
                 }),
             },
         }
