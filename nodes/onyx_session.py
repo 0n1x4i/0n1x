@@ -107,12 +107,14 @@ def late_session():
     if now - _LATE["at"] < 60:
         return False
     _LATE["at"] = now
-    key = read_saved_key()
-    if not key:
-        key = _key_in_running_prompt()
-        if not key:
-            return False
+    # the running prompt's own key first (the saved one may be an earlier run's, already revoked)
+    key = _key_in_running_prompt()
+    if key and not (os.environ.get(_ENV) or "").strip():
         save_key(key)
+    else:
+        key = read_saved_key()
+    if not key:
+        return False
     return bool(sync_with_server(key).get("valid"))
 
 
@@ -133,7 +135,10 @@ def _on_prompt(json_data):
             inputs["key"] = ""
             if len(typed) > 200:
                 continue
-            if not read_saved_key():
+            # the key of the newest prompt always wins: the site sends a short-lived key per run, so on a
+            # warm worker the key saved by an earlier run is already revoked (SS-204 on the next runs).
+            # A local ComfyUI never puts the key in the prompt (js/onyx_session.js), so it is not touched.
+            if typed != read_saved_key() and not (os.environ.get(_ENV) or "").strip():
                 save_key(typed)
             key = read_saved_key()
             try:
