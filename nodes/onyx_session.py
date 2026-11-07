@@ -82,6 +82,16 @@ def masked(key):
 _LATE = {"at": 0.0}
 
 
+def _kick_factory_data():
+    """The session just became valid: fetch the factory data (looks, presets) now, in the background, so the
+    first run of a fresh machine finds them (the startup fetch failed without a session)."""
+    try:
+        from ..utils import onyx_remote_data as _rd
+        _rd.refresh(force=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _key_in_running_prompt():
     """The key carried by the Onyx Session node of the prompt being executed (API runs whose prompt did not
     go through _on_prompt)."""
@@ -115,7 +125,10 @@ def late_session():
         key = read_saved_key()
     if not key:
         return False
-    return bool(sync_with_server(key).get("valid"))
+    ok = bool(sync_with_server(key).get("valid"))
+    if ok:
+        _kick_factory_data()
+    return ok
 
 
 def _on_prompt(json_data):
@@ -147,7 +160,8 @@ def _on_prompt(json_data):
             except (OSError, ValueError):
                 cache = {}
             if not cache.get("valid") or (cache.get("token") or "").strip() != key:
-                sync_with_server(key)
+                if sync_with_server(key).get("valid"):
+                    _kick_factory_data()
     except Exception as exc:  # noqa: BLE001 - never block a prompt: the node still checks at run time
         print("[Onyx Session] prompt check skipped: %s" % type(exc).__name__)
     return json_data

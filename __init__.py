@@ -57,6 +57,7 @@ from .nodes.onyx_h3_infinity import (OnyxH3InfinityPrepare, OnyxH3InfinityGuides
                                      OnyxH3InfinityCommit)
 from .nodes.save_image_no_metadata import OnyxSaveImageNoMetadataNode
 from .nodes.onyx_speed_hd_sampler import OnyxSpeedHDSampler
+from .nodes.onyx_hair_weave_fix import OnyxHairWeaveFix
 from .nodes.onyx_eye_detailer import OnyxEyeBBoxDetectorProvider, OnyxDetailer
 from .nodes.onyx_temporal_mask_smooth import OnyxTemporalMaskSmooth
 from .nodes.onyx_depth_colormap import OnyxDepthColormap
@@ -225,6 +226,7 @@ NODE_CLASS_MAPPINGS["OnyxH3ContextIR"] = OnyxH3ContextIR
 NODE_CLASS_MAPPINGS["OnyxGroupToggle"] = OnyxGroupToggle
 NODE_CLASS_MAPPINGS["OnyxSaveImageNoMetadataNode"] = OnyxSaveImageNoMetadataNode
 NODE_CLASS_MAPPINGS["OnyxSpeedHDSampler"] = OnyxSpeedHDSampler
+NODE_CLASS_MAPPINGS["OnyxHairWeaveFix"] = OnyxHairWeaveFix
 NODE_CLASS_MAPPINGS["OnyxEyeBBoxDetectorProvider"] = OnyxEyeBBoxDetectorProvider
 NODE_CLASS_MAPPINGS["OnyxDetailer"] = OnyxDetailer
 NODE_CLASS_MAPPINGS["OnyxTemporalMaskSmooth"] = OnyxTemporalMaskSmooth
@@ -317,6 +319,7 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxH3ContextIR"] = "H3 Context-IR (Gemini)"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxGroupToggle"] = "Onyx Group Toggle"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxSaveImageNoMetadataNode"] = "Onyx Save Image No Metadata"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxSpeedHDSampler"] = "Onyx Speed HD Sampler"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxHairWeaveFix"] = "Onyx Hair Weave Fix"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxEyeBBoxDetectorProvider"] = "Onyx HD Ultralytic BBox Loader"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxDetailer"] = "Onyx Detailer"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxTemporalMaskSmooth"] = "Onyx Temporal Mask Smooth"

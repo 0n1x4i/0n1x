@@ -64,7 +64,12 @@ def refresh(force: bool = False) -> threading.Thread | None:
 
 
 def get(key: str, default=None, wait: float = 0.0):
-    th = refresh()
+    # A caller that waits needs the data now: when nothing is cached, do not sit out the 1-minute retry window
+    # of a fetch that failed earlier (fresh cloud worker: the startup fetch fails before the session exists,
+    # and the first run then got the bare node defaults instead of the factory looks).
+    with _lock:
+        force = wait > 0 and not _state["data"] and time.time() - _state["failed_at"] > 3
+    th = refresh(force=force)
     if wait > 0:
         th = th or _state["thread"]
         if th is not None and not _state["data"]:
