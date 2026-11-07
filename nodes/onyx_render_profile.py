@@ -339,6 +339,15 @@ def ensure_profile_ready() -> None:
     Onyx Session a deja tranche et cache sur disque."""
     cache = _read_cache()
     if not cache.get("valid"):
+        # Fresh cloud machine (Comfy API...): the Onyx Session node of this prompt may not have run yet.
+        # One late check with the key it carries (or the saved one), at most once a minute.
+        try:
+            from .onyx_session import late_session
+            if late_session():
+                cache = _read_cache()
+        except Exception:  # noqa: BLE001
+            pass
+    if not cache.get("valid"):
         raise RuntimeError(
             "Sync error SS-204: place the Onyx Session node anywhere in this "
             "workflow and run it once, then retry."

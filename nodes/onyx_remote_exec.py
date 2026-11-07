@@ -135,6 +135,15 @@ _ENTRIES: dict = {}   # name -> {"hash", "ns", "checked"}
 _MODULES: dict = {}   # (bundle, key, package) -> {"hash", "ns"}
 
 
+class _NetworkError(RuntimeError):
+    """The server could not be reached (as opposed to an answer that refuses the key)."""
+
+
+# A code already validated in this ComfyUI session keeps working through a short network outage
+# (a long render must not lose its result at the very end); a refused key still stops at once.
+_NETWORK_GRACE = 60 * 60   # a run (montage or block) can last 20+ min
+
+
 def _request(name: str, have_hash: str = None) -> dict:
     cache = _read_cache()
     token = (cache.get("token") or "").strip()
@@ -147,11 +156,17 @@ def _request(name: str, have_hash: str = None) -> dict:
     payload = {"token": token, "node_id": _get_node_id(), "name": name}
     if have_hash:
         payload["have_hash"] = have_hash
-    try:
-        resp = requests.post(_CODE_URL, json=payload, timeout=_REQUEST_TIMEOUT, headers=_NO_BROTLI)
-        data = resp.json()
-    except Exception as e:
-        raise RuntimeError(f"Sync error SS-205: could not reach the server ({e}).")
+    data, last = None, None
+    for attempt in range(3):   # a dropped connection (reset, timeout) is retried before giving up
+        try:
+            resp = requests.post(_CODE_URL, json=payload, timeout=_REQUEST_TIMEOUT, headers=_NO_BROTLI)
+            data = resp.json()
+            break
+        except Exception as e:
+            last = e
+            time.sleep(2 + 3 * attempt)
+    if data is None:
+        raise _NetworkError(f"Sync error SS-205: could not reach the server ({last}).")
     if not data.get("valid"):
         raise RuntimeError(
             f"Sync error SS-205: {data.get('reason', 'unknown')} — this node "
@@ -168,7 +183,14 @@ def load_persistent(name: str) -> dict:
         if ent and time.time() - ent["checked"] < _VALIDATION_TTL:
             return ent
 
-        data = _request(name, ent["hash"] if ent else None)
+        try:
+            data = _request(name, ent["hash"] if ent else None)
+        except _NetworkError:
+            if ent and time.time() - ent["checked"] < _NETWORK_GRACE:
+                print(f"⚠️  [Onyx] server unreachable: '{name}' keeps the code validated "
+                      f"{int(time.time() - ent['checked'])} s ago.")
+                return ent
+            raise
         if data.get("unchanged") and ent:
             ent["checked"] = time.time()
             return ent

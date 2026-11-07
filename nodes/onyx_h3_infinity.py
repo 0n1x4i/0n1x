@@ -151,10 +151,16 @@ class OnyxH3InfinityCommit:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE", {"tooltip": "The decoded frames of this run (VAE Decode)."}),
-                "session_name": ("STRING", {"default": "infinity", "multiline": False,
-                                            "tooltip": "Same name as on Prepare."}),
+                "images": ("IMAGE", {"tooltip": "The decoded frames of this run (VAE Decode). The session "
+                                                "is the one Prepare handed out: set its name on Prepare only."}),
             },
+            "optional": {
+                "auto_continue": ("BOOLEAN", {"default": True,
+                                              "tooltip": "On: while runs are left, this run is queued again by "
+                                                         "the server (same graph, same settings) until the video "
+                                                         "is finished — browser open or not, on RunPod too."}),
+            },
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
 
     RETURN_TYPES = ("STRING", "STRING", "IMAGE")

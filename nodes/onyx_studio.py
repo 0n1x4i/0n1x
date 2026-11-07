@@ -627,12 +627,18 @@ class OnyxStudio:
         # 2. Prompt.
         pil = _tensor_to_pil(ref[0]) if ref is not None else None
         try:
-            # API keys: the ones saved in Settings (on this computer, outside the pack).
-            res = _interruptible(lambda: generate(state, image=pil, keys={}, seed=int(seed or 0)),
+            # API keys: the ones saved in Settings (on this computer, outside the pack); a run sent by the
+            # Onyx.AI site (Comfy API) carries the member's own key in the state instead.
+            run_keys = state.get("api_keys") if isinstance(state.get("api_keys"), dict) else {}
+            res = _interruptible(lambda: generate(state, image=pil, keys=run_keys, seed=int(seed or 0)),
                                  f"writer model ({state.get('provider', 'ollama')})")
         except OnyxAPIError as e:
             raise RuntimeError(str(e)) from None
         prompt = res["prompt"]
+        # Onyx.AI site runs: the member's own LoRA comes with its trigger word, put first when missing
+        api_trigger = str(state.get("api_trigger") or "").strip()
+        if api_trigger and api_trigger.lower() not in prompt.lower():
+            prompt = "%s, %s" % (api_trigger, prompt)
         add_history({"prompt": prompt, "notes": res["notes"], "mode": res["mode"], "skill": res["skill"],
                      "preset": res.get("preset", "")})
         print(f"🎬 [Onyx Studio] {res['mode']} prompt ({len(prompt)} chars)"

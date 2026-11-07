@@ -8,8 +8,18 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
+// The next run is queued by the server itself (Commit, auto_continue): here, only the end notice.
+api.addEventListener("executed", (e) => {
+  const info = e?.detail?.output?.h3_infinity?.[0];
+  if (info && info.left <= 0) {
+    app.extensionManager?.toast?.add?.({ severity: "success", summary: "H3 Infinity",
+      detail: `Video finished (${info.session || ""}): ${info.final}`, life: 15000 });
+  }
+});
+
 app.registerExtension({
   name: "onyx.H3Infinity",
+
 
   nodeCreated(node) {
     if (node.comfyClass !== "OnyxH3InfinityPrepare") return;

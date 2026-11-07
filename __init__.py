@@ -351,6 +351,14 @@ NODE_DISPLAY_NAME_MAPPINGS["Onyx_Skin_Tone"]    = "🧑 Onyx Skin Tone Line"
 NODE_CLASS_MAPPINGS.update(_K2C_NODES)
 NODE_DISPLAY_NAME_MAPPINGS.update(_K2C_NAMES)
 
+# Onyx API media: the member's LoRA / reference picture sent by the Onyx.AI site (Comfy API runs)
+try:
+    from .nodes.onyx_api_media import NODE_CLASS_MAPPINGS as _API_MEDIA, NODE_DISPLAY_NAME_MAPPINGS as _API_MEDIA_N
+    NODE_CLASS_MAPPINGS.update(_API_MEDIA)
+    NODE_DISPLAY_NAME_MAPPINGS.update(_API_MEDIA_N)
+except Exception as _e:  # noqa: BLE001
+    print("[Onyx] Onyx API media nodes not loaded:", _e)
+
 # Onyx Endless Sampler: removed (long videos are now rendered in one pass).
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

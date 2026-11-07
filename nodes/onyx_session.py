@@ -79,6 +79,43 @@ def masked(key):
     return (key[:9] + "…" + key[-3:]) if len(key) > 14 else ("saved" if key else "")
 
 
+_LATE = {"at": 0.0}
+
+
+def _key_in_running_prompt():
+    """The key carried by the Onyx Session node of the prompt being executed (API runs whose prompt did not
+    go through _on_prompt)."""
+    try:
+        from server import PromptServer
+        running = list(getattr(PromptServer.instance.prompt_queue, "currently_running", {}).values())
+    except Exception:  # noqa: BLE001
+        return ""
+    for item in running:
+        prompt = item[2] if isinstance(item, (list, tuple)) and len(item) > 2 else {}
+        for node in (prompt or {}).values():
+            if isinstance(node, dict) and node.get("class_type") == "OnyxSessionNode":
+                key = str((node.get("inputs") or {}).get("key") or "").strip()
+                if key and len(key) <= 200:
+                    return key
+    return ""
+
+
+def late_session():
+    """Called by a gated node that found no valid session: one check with the saved key or the key of the
+    running prompt, at most once a minute. -> True when the session is now valid."""
+    now = time.time()
+    if now - _LATE["at"] < 60:
+        return False
+    _LATE["at"] = now
+    key = read_saved_key()
+    if not key:
+        key = _key_in_running_prompt()
+        if not key:
+            return False
+        save_key(key)
+    return bool(sync_with_server(key).get("valid"))
+
+
 def _on_prompt(json_data):
     """API runs (Comfy API, the Onyx site): the key comes in the `key` input of the Onyx Session node of
     the prompt. ComfyUI does not run that node before the others, so on a fresh machine a gated node could
