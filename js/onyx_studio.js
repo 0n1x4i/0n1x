@@ -113,7 +113,10 @@ function injectStyle() {
 .ost-tog i:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#9a9aa8;transition:left .15s,background .15s}
 .ost-tog.on i{background:#5468c9}.ost-tog.on i:after{left:16px;background:#fff}
 .ost-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
-.ost-gal{border:1px solid var(--ln);border-radius:9px;overflow:hidden;background:var(--p2);cursor:pointer;transition:border-color .12s}
+.ost-gal{position:relative;border:1px solid var(--ln);border-radius:9px;overflow:hidden;background:var(--p2);cursor:pointer;transition:border-color .12s}
+.ost-gal .x{position:absolute;top:4px;right:4px;z-index:2;width:22px;height:22px;border:0;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:11px;line-height:22px;padding:0;cursor:pointer;opacity:0;transition:opacity .12s}
+.ost-gal:hover .x{opacity:1}
+.ost-gal .x:hover{background:#c0392b}
 .ost-gal:hover{border-color:var(--ln2)}
 .ost-gal.on{border-color:var(--ac);box-shadow:0 0 0 2px rgba(159,180,255,.25)}
 .ost-gal img,.ost-gal .ph{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;background:#0f0f15}
@@ -655,21 +658,36 @@ function setupStudio(node) {
       set({ mode: "manual", manual: text, tab: "prompt" });
       toast(how === "append" ? "Gallery prompt appended." : "Gallery prompt sent to the prompt.", "success");
     };
+    // Remove an entry (prompt + its thumbnail) from the library, after a confirmation.
+    const remove = async (entry, ev) => {
+      ev?.stopPropagation();
+      if (!entry || !confirm(`Delete "${entry.name || "this prompt"}" from the gallery?\n\nThe prompt and its photo are removed for good.`)) return;
+      try {
+        const r = await postJSON("/onyx/prompt_library/delete", { id: entry.id });
+        if (!r.success) throw new Error(r.error || "entry not found");
+        gallery = gallery.filter((x) => x.id !== entry.id);
+        if (state.gallery_sel === entry.id) { state.gallery_sel = null; saveState(); }
+        renderGallery();
+        toast("Deleted from the gallery.", "success");
+      } catch (err) { toast("Delete failed: " + (err.message || err), "error"); }
+    };
     fill(p,
       h("div", { class: "ost-row", style: "flex-wrap:nowrap" }, search, h("button", { class: "ost-btn ghost", onclick: () => { galleryLoaded = false; gallery = []; renderGallery(); } }, "↻")),
       sel ? h("div", { class: "ost-card" }, h("h4", {}, sel.name), h("div", { class: "ost-pre" }, sel.prompt),
         h("div", { class: "ost-row", style: "margin-top:8px" },
           h("button", { class: "ost-btn pri", onclick: () => send("replace") }, "⤵ Use as prompt"),
           h("button", { class: "ost-btn", onclick: () => send("append") }, "＋ Append to my prompt"),
-          h("button", { class: "ost-btn ghost", onclick: () => navigator.clipboard?.writeText(sel.prompt) }, "⧉ Copy"))) : null,
+          h("button", { class: "ost-btn ghost", onclick: () => navigator.clipboard?.writeText(sel.prompt) }, "⧉ Copy"),
+          h("button", { class: "ost-btn ghost", style: "margin-left:auto;color:#ff8a8a", onclick: (ev) => remove(sel, ev) }, "🗑 Delete"))) : null,
       items.length ? h("div", { class: "ost-grid" }, items.map((e) => h("div", {
           class: "ost-gal" + (state.gallery_sel === e.id ? " on" : ""), title: e.prompt,
           onclick: () => { state.gallery_sel = e.id; saveState(); renderGallery(); },
           ondblclick: () => { state.gallery_sel = e.id; send("replace"); } },
+          h("button", { class: "x", title: "Delete from the gallery", onclick: (ev) => remove(e, ev), ondblclick: (ev) => ev.stopPropagation() }, "✕"),
           e.thumb ? h("img", { src: api.apiURL("/onyx/prompt_library/thumb?id=" + e.id), loading: "lazy" }) : h("div", { class: "ph" }, "✦"),
           h("div", { class: "t" }, e.name))))
         : h("div", { class: "ost-empty" }, gallery.length ? "No match." : "The gallery is empty — save prompts with the Onyx Prompt Saver node."),
-      h("div", { class: "ost-hint", style: "margin-top:8px" }, "Click to preview, double-click to use it directly."));
+      h("div", { class: "ost-hint", style: "margin-top:8px" }, "Click to preview, double-click to use it directly. ✕ on a tile (or 🗑 Delete) removes it from the gallery."));
   }
 
   // ── Post tab ───────────────────────────────────────────────────────────────

@@ -57,6 +57,24 @@ CAMERA_T2I = {
 }
 BACKENDS = ("Vertex AI", "Gemini API", "Grok API", "Transformers local")
 
+# The places, activities and props every LLM reaches for first. They make a set read as AI at a glance.
+DEFAULT_AVOID = ("matcha, iced latte, coffee shop, café terrace, outdoor café, bakery, croissant, library, "
+                 "bookstore, reading nook, laundromat, farmers market, flower shop, bouquet of flowers, "
+                 "thrift store, vinyl record store, art gallery, museum, yoga studio, pilates studio, "
+                 "rooftop bar, golden hour field, picnic, park bench")
+
+
+def _avoid_terms(text):
+    return [t.strip().lower() for t in re.split(r"[,;\n]+", str(text or "")) if len(t.strip()) > 1][:80]
+
+
+def _banned_hits(shot, terms):
+    """Banned terms this shot still uses (place, pose, action, background...)."""
+    if not terms:
+        return []
+    blob = json.dumps(shot, ensure_ascii=False).lower()
+    return [t for t in terms if re.search(r"\b" + re.escape(t) + r"s?\b", blob)]
+
 _PACK_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _CACHE_DIR = os.path.join(_PACK_ROOT, "_cache", "story_plans")
 
@@ -309,12 +327,19 @@ class OnyxKrea2StoryDirector:
                     "tooltip": "How much time the set covers. one moment = same place, same light, a burst of "
                                "photos · one hour · one day (morning to night) · a trip. auto = the mode's own "
                                "(Lifestyle: one day). The `story` text still adds details."}),
+                # Last on purpose: widget values are saved by position.
+                "avoid": ("STRING", {"default": DEFAULT_AVOID, "multiline": True,
+                    "tooltip": "Places, activities and props that are BANNED from the plan (comma or one per "
+                               "line). Pre-filled with the usual AI clichés (matcha, café terrace, library, "
+                               "laundromat...): edit freely, empty = no ban. A shot that still uses one is "
+                               "replanned once."}),
             },
         }
 
     # ── plan ────────────────────────────────────────────────────────────────
     def _plan(self, photo, image_2, kind, mode, n, face, custom, scene, story, outfit, body_shape,
-              creativity, image_2_name, seed, backend, model_id, json_folder, candid=False, time_span="auto"):
+              creativity, image_2_name, seed, backend, model_id, json_folder, candid=False, time_span="auto",
+              avoid=()):
         scene_lines = _lines(scene)
         if len(scene_lines) > 1:
             scene_txt = "Use exactly these places, in order: " + " | ".join(scene_lines[:n]) + "."
@@ -362,6 +387,12 @@ class OnyxKrea2StoryDirector:
                                 creativity=creativity, outfit_rule=outfit_rule)
         if candid:
             system += _CANDID_RULES
+        if avoid:
+            system += ("\n\nBANNED — these read as AI-generated clichés. Never use any of them as a place, an "
+                       "activity, a drink, a food, a prop or a background element, not even in passing: "
+                       + ", ".join(avoid) + ". Pick specific, lived-in, less obvious real places and "
+                       "everyday moments instead (the kind of photo a real person would actually take), "
+                       "and never the first idea that comes to mind.")
         user = f"Plan the {n} shots now. Seed {seed}."
         if face == "custom" and custom:
             user += "\nExpressions given by the user, in order: " + " | ".join(custom)
@@ -373,19 +404,41 @@ class OnyxKrea2StoryDirector:
         from . import pose_generator as pg
         core = pg._onyx_core()
         timeout = 300
-        if backend == "Vertex AI":
-            text = core["_vertex_generate"](json_folder, model_id or "gemini-3.6-flash", system, user, image, timeout)
-        elif backend == "Gemini API":
-            text = core["_gemini_generate"](pg.RUNTIME_KEYS.get("Gemini API", ""), model_id, system, user,
-                                            image, timeout)
-        elif backend == "Grok API":
-            text = core["_grok_generate"](pg.RUNTIME_KEYS.get("Grok API", ""), model_id, system, user,
-                                          image, timeout)
-        else:
+
+        def ask(user):
+            if backend == "Vertex AI":
+                return core["_vertex_generate"](json_folder, model_id or "gemini-3.6-flash", system, user, image,
+                                                timeout)
+            if backend == "Gemini API":
+                return core["_gemini_generate"](pg.RUNTIME_KEYS.get("Gemini API", ""), model_id, system, user,
+                                                image, timeout)
+            if backend == "Grok API":
+                return core["_grok_generate"](pg.RUNTIME_KEYS.get("Grok API", ""), model_id, system, user,
+                                              image, timeout)
             from . import local_vlm
-            text = local_vlm.generate_text(system, user, pil_images=[image], image_labels=["PHOTO"],
+            return local_vlm.generate_text(system, user, pil_images=[image], image_labels=["PHOTO"],
                                            model_id=None, temperature=0.8, max_new_tokens=3000, seed=seed)
-        plan = _parse_json(text)
+
+        plan = _parse_json(ask(user))
+        # A banned cliché slipped through: replan once, naming the shots and the words to drop.
+        bad = {i: _banned_hits(s, avoid) for i, s in enumerate(plan.get("shots") or []) if isinstance(s, dict)}
+        bad = {i: h for i, h in bad.items() if h}
+        if bad:
+            print("[Onyx Story Director] banned clichés in the plan "
+                  + "; ".join(f"shot {i + 1}: {', '.join(h)}" for i, h in bad.items()) + " — replanning once")
+            retry = (user + "\n\nYour previous plan used BANNED clichés: "
+                     + "; ".join(f"shot {i + 1} ({', '.join(h)})" for i, h in bad.items())
+                     + ". Write the whole plan again with different, less obvious places and activities, "
+                       "and none of the banned words anywhere.")
+            try:
+                again = _parse_json(ask(retry))
+                left = sum(1 for s in (again.get("shots") or []) if isinstance(s, dict) and _banned_hits(s, avoid))
+                if again.get("shots") and left <= len(bad):
+                    plan = again
+                if left:
+                    print(f"[Onyx Story Director] {left} shot(s) still mention a banned word after the replan.")
+            except Exception as e:
+                print(f"[Onyx Story Director] replan failed ({e}); keeping the first plan.")
         shots = [s for s in (plan.get("shots") or []) if isinstance(s, dict)]
         if not shots:
             raise ValueError("[Onyx Story Director] The plan has no shots.")
@@ -537,7 +590,8 @@ class OnyxKrea2StoryDirector:
 
     def execute(self, photo, mode, prompt_style, shots, camera, face, seed, backend, model_id, vertex_json_folder,
                 image_2=None, image_2_is="outfit", image_2_name="", scene="", story="", custom_faces="",
-                outfit="", bottoms="", body_shape="", creativity=0.9, character_trigger="", extra_prompt="", time_span="auto"):
+                outfit="", bottoms="", body_shape="", creativity=0.9, character_trigger="", extra_prompt="", time_span="auto",
+                avoid=DEFAULT_AVOID):
         n = max(1, min(MAX_SHOTS, int(shots)))
         mode = mode if mode in MODES else "Lifestyle"
         cam = camera if camera in CAMERA_LINES else ("smartphone" if mode == "Lifestyle" else "professional")
@@ -545,6 +599,9 @@ class OnyxKrea2StoryDirector:
         custom = _lines(custom_faces)
         outfit, bottoms, body_shape = _clean(outfit, 1500), _clean(bottoms, 300), _clean(body_shape, 300)
         has_img2 = image_2 is not None and kind != "body shape"
+        # Words the user asked for in scene / story / outfit are never banned, even if on the list.
+        wanted = (str(scene) + " " + str(story) + " " + str(outfit)).lower()
+        avoid_terms = [t for t in _avoid_terms(avoid) if t not in wanted]
         # Smartphone look in text-to-image = the Candid Snap prompt structure (the Candid skill).
         candid = cam == "smartphone" and prompt_style != STYLE_EDIT
 
@@ -555,7 +612,8 @@ class OnyxKrea2StoryDirector:
                                     .tobytes()).hexdigest() if image_2 is not None else ""),
             "mode": mode, "n": n, "face": face, "custom": custom, "scene": scene, "story": story,
             "outfit": outfit, "body": body_shape, "creativity": creativity, "kind": kind,
-            "name": image_2_name, "seed": seed, "backend": backend, "model": model_id, "candid": candid, "span": time_span, "v": 5,
+            "name": image_2_name, "seed": seed, "backend": backend, "model": model_id, "candid": candid, "span": time_span, "v": 6,
+            "avoid": avoid_terms,
         }
         key = hashlib.sha256(json.dumps(key_src, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:20]
         path = os.path.join(_CACHE_DIR, f"{key}.json")
@@ -571,7 +629,7 @@ class OnyxKrea2StoryDirector:
             print(f"[Onyx Story Director] planning {n} {mode} shots with {backend}…")
             plan = self._plan(photo, image_2, kind, mode, n, face, custom, scene, story, outfit, body_shape,
                               creativity, image_2_name, seed, backend, model_id, vertex_json_folder,
-                              candid=candid, time_span=time_span)
+                              candid=candid, time_span=time_span, avoid=avoid_terms)
             os.makedirs(_CACHE_DIR, exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(plan, fh, ensure_ascii=False, indent=1)
