@@ -55,7 +55,52 @@ CAMERA_T2I = {
     "cinematic": "Cinematic film still, moody directional light, rich contrast, deep shadows, subtle film grain.",
     "clean": "Natural realistic photo, true-to-life colors.",
 }
-BACKENDS = ("Vertex AI", "Gemini API", "Grok API", "Transformers local")
+BACKENDS = ("Vertex AI", "Gemini API", "Grok API", "Kie API", "Transformers local")
+# Kie.ai Gemini models, OpenAI format: model_id "gemini-3-8-flash" -> its own URL (or a full URL as model_id)
+KIE_DEFAULT_MODEL = "gemini-3-8-flash"
+
+
+def _kie_url(model_id):
+    m = str(model_id or "").strip() or KIE_DEFAULT_MODEL
+    if m.startswith("https://api.kie.ai/"):
+        return m, m.split("/")[3].replace("-openai", "")
+    return "https://api.kie.ai/%s-openai/v1/chat/completions" % m, m
+
+
+def _kie_generate(api_key, model_id, system, user, image, timeout):
+    """Kie.ai (Gemini behind an OpenAI-style chat API), with the photo as a data URL."""
+    import base64
+    import io
+    import requests
+    key = str(api_key or os.getenv("KIE_API_KEY") or "").strip()
+    if not key:
+        raise ValueError("[Onyx Story Director] The Kie.ai API key is missing (api_key or KIE_API_KEY).")
+    url, model = _kie_url(model_id)
+    content = [{"type": "text", "text": user}]
+    if image is not None:
+        buf = io.BytesIO()
+        image.convert("RGB").save(buf, "JPEG", quality=90)
+        content.insert(0, {"type": "image_url", "image_url": {
+            "url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()}})
+    r = requests.post(url, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+                      json={"model": model, "messages": [{"role": "system", "content": system},
+                                                         {"role": "user", "content": content}],
+                            "temperature": 0.8, "max_tokens": 6000, "stream": False}, timeout=timeout)
+    try:
+        d = r.json() or {}
+    except ValueError:
+        raise ValueError("[Onyx Story Director] Kie.ai sent an unreadable answer (HTTP %d)." % r.status_code)
+    if r.status_code >= 400 or (isinstance(d.get("code"), int) and d["code"] not in (0, 200)):
+        raise ValueError("[Onyx Story Director] Kie.ai error %s: %s" % (d.get("code") or r.status_code,
+                                                                    str(d.get("msg") or d.get("error") or "")[:200]))
+    d = d.get("data") if isinstance(d.get("data"), dict) and not d.get("choices") else d
+    try:
+        text = d["choices"][0]["message"]["content"]
+        if isinstance(text, list):
+            text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
+        return str(text)
+    except (KeyError, IndexError, TypeError):
+        raise ValueError("[Onyx Story Director] Kie.ai returned no text.") from None
 
 # The places, activities and props every LLM reaches for first. They make a set read as AI at a glance.
 DEFAULT_AVOID = ("matcha, iced latte, coffee shop, café terrace, outdoor café, bakery, croissant, library, "
@@ -328,6 +373,12 @@ class OnyxKrea2StoryDirector:
                                "photos · one hour · one day (morning to night) · a trip. auto = the mode's own "
                                "(Lifestyle: one day). The `story` text still adds details."}),
                 # Last on purpose: widget values are saved by position.
+                "vertex_json": ("STRING", {"default": "", "tooltip": "Vertex AI only: a service-account JSON (its "
+                                                                "text) for this run, used instead of the folder. "
+                                                                "Written to a temporary folder, removed after."}),
+                "api_key": ("STRING", {"default": "", "tooltip": "Gemini / Grok API key for this run (Gemini API "
+                                                            "or Grok API backend). Empty = the key set in the UI or "
+                                                            "GEMINI_API_KEY / XAI_API_KEY. Never written to disk."}),
                 "avoid": ("STRING", {"default": DEFAULT_AVOID, "multiline": True,
                     "tooltip": "Places, activities and props that are BANNED from the plan (comma or one per "
                                "line). Pre-filled with the usual AI clichés (matcha, café terrace, library, "
@@ -339,7 +390,7 @@ class OnyxKrea2StoryDirector:
     # ── plan ────────────────────────────────────────────────────────────────
     def _plan(self, photo, image_2, kind, mode, n, face, custom, scene, story, outfit, body_shape,
               creativity, image_2_name, seed, backend, model_id, json_folder, candid=False, time_span="auto",
-              avoid=()):
+              avoid=(), api_key=""):
         scene_lines = _lines(scene)
         if len(scene_lines) > 1:
             scene_txt = "Use exactly these places, in order: " + " | ".join(scene_lines[:n]) + "."
@@ -410,11 +461,14 @@ class OnyxKrea2StoryDirector:
                 return core["_vertex_generate"](json_folder, model_id or "gemini-3.6-flash", system, user, image,
                                                 timeout)
             if backend == "Gemini API":
-                return core["_gemini_generate"](pg.RUNTIME_KEYS.get("Gemini API", ""), model_id, system, user,
+                return core["_gemini_generate"](api_key or pg.RUNTIME_KEYS.get("Gemini API", ""), model_id, system, user,
                                                 image, timeout)
             if backend == "Grok API":
-                return core["_grok_generate"](pg.RUNTIME_KEYS.get("Grok API", ""), model_id, system, user,
+                return core["_grok_generate"](api_key or pg.RUNTIME_KEYS.get("Grok API", ""), model_id, system, user,
                                               image, timeout)
+            if backend == "Kie API":
+                return _kie_generate(api_key or pg.RUNTIME_KEYS.get("Kie API", ""), model_id, system, user, image,
+                                     timeout)
             from . import local_vlm
             return local_vlm.generate_text(system, user, pil_images=[image], image_labels=["PHOTO"],
                                            model_id=None, temperature=0.8, max_new_tokens=3000, seed=seed)
@@ -591,7 +645,7 @@ class OnyxKrea2StoryDirector:
     def execute(self, photo, mode, prompt_style, shots, camera, face, seed, backend, model_id, vertex_json_folder,
                 image_2=None, image_2_is="outfit", image_2_name="", scene="", story="", custom_faces="",
                 outfit="", bottoms="", body_shape="", creativity=0.9, character_trigger="", extra_prompt="", time_span="auto",
-                avoid=DEFAULT_AVOID):
+                avoid=DEFAULT_AVOID, api_key="", vertex_json=""):
         n = max(1, min(MAX_SHOTS, int(shots)))
         mode = mode if mode in MODES else "Lifestyle"
         cam = camera if camera in CAMERA_LINES else ("smartphone" if mode == "Lifestyle" else "professional")
@@ -627,9 +681,22 @@ class OnyxKrea2StoryDirector:
                 plan = None
         if plan is None:
             print(f"[Onyx Story Director] planning {n} {mode} shots with {backend}…")
-            plan = self._plan(photo, image_2, kind, mode, n, face, custom, scene, story, outfit, body_shape,
-                              creativity, image_2_name, seed, backend, model_id, vertex_json_folder,
-                              candid=candid, time_span=time_span, avoid=avoid_terms)
+            vtmp = None
+            if backend == "Vertex AI" and str(vertex_json or "").strip():
+                import shutil
+                import tempfile
+                vtmp = tempfile.mkdtemp(prefix="onyx_vx_")
+                with open(os.path.join(vtmp, "service_account.json"), "w", encoding="utf-8") as fh:
+                    fh.write(str(vertex_json).strip())
+                vertex_json_folder = vtmp
+            try:
+                plan = self._plan(photo, image_2, kind, mode, n, face, custom, scene, story, outfit, body_shape,
+                                creativity, image_2_name, seed, backend, model_id, vertex_json_folder,
+                                candid=candid, time_span=time_span, avoid=avoid_terms,
+                                api_key=(api_key or "").strip())
+            finally:
+                if vtmp:
+                    shutil.rmtree(vtmp, ignore_errors=True)
             os.makedirs(_CACHE_DIR, exist_ok=True)
             with open(path, "w", encoding="utf-8") as fh:
                 json.dump(plan, fh, ensure_ascii=False, indent=1)

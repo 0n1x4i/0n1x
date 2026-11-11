@@ -110,6 +110,7 @@ TARGET_SEEDANCE_SEVERED = "Seedance Severed"
 TARGET_H3_RELAY = "MiniMax H3 Relay (timeless, windowed swap)"
 TARGET_H3_RELAY_HEAD = "MiniMax H3 Relay v2 (head swap, blurred head)"
 TARGET_H3_RELAY_HEAD_RAW = "MiniMax H3 Relay v3 (head swap, raw video)"
+TARGET_H3_MOTION = "MiniMax H3 Motion Transfer (native ref video, no guide)"
 # Seedance Recreate: 3 body-physics registers x 2 Seedance versions x (outfit from the video | from the reference).
 _RECREATE_ALL = tuple(
     f"Seedance {_v} Recreate ({_k} jiggle" + (", outfit from ref)" if _o else ")")
@@ -128,7 +129,8 @@ _NATURAL_ALL = tuple(
     for _o in (False, True)
 )
 _TARGETS = [TARGET_H3, TARGET_SEEDANCE, TARGET_SEEDANCE_V2, TARGET_H3_ENDLESS, TARGET_SEEDANCE_SEVERED,
-            *_RECREATE_ALL, *_NATURAL_ALL, TARGET_H3_RELAY, TARGET_H3_RELAY_HEAD, TARGET_H3_RELAY_HEAD_RAW]
+            *_RECREATE_ALL, *_NATURAL_ALL, TARGET_H3_RELAY, TARGET_H3_RELAY_HEAD, TARGET_H3_RELAY_HEAD_RAW,
+            TARGET_H3_MOTION]
 
 ROLE_REFERENCE = "reference"
 ROLE_FIRST = "first_frame"
@@ -227,6 +229,12 @@ class OnyxH3ContextIR:
                                "MiniMax H3 Relay v3 (head swap, raw video): same, but the guide is the untouched "
                                "source video (no mask, no blur): the video drives everything that moves, the picture "
                                "only the identity (face, facial skin, hair).\n"
+                               "MiniMax H3 Motion Transfer (native ref video, no guide): wjc573 method. The source goes "
+                               "ONLY in ref_videos (+ its audio in ref_video_audios), no AddGuide; use with the character "
+                               "swap LoRA. The prompt is a FIXED template (validated by render); the model only fills the "
+                               "slots (appearance card of <Picture 1>, source performer, source clothing kept, place, clip "
+                               "structure). The slots come out in grounding_json. intent = optional notes (which person to "
+                               "replace, corrections).\n"
                                "Seedance: compiles against ByteDance's six-slot grammar with "
                                "@Image 1 / @Video 1 tags.\n"
                                "Seedance v2: same tags, but outputs one structured JSON "
@@ -561,7 +569,7 @@ class OnyxH3ContextIR:
         # A mode the server core does not know falls into the generic H3 branch and
         # silently returns a normal timeline prompt: stop before any API call instead.
         _relay_consts = {TARGET_H3_RELAY: "TARGET_H3_RELAY", TARGET_H3_RELAY_HEAD: "TARGET_H3_RELAY_HEAD",
-                         TARGET_H3_RELAY_HEAD_RAW: "TARGET_H3_RELAY_HEAD_RAW"}
+                         TARGET_H3_RELAY_HEAD_RAW: "TARGET_H3_RELAY_HEAD_RAW", TARGET_H3_MOTION: "TARGET_H3_MOTION"}
         if target_model in _relay_consts:
             _const = _relay_consts[target_model]
             if ns.get(_const) != target_model:

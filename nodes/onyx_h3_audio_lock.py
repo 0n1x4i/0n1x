@@ -26,18 +26,20 @@ import logging
 
 import torch
 
+from .onyx_remote_exec import load_bundle_module as _onyx_load_bundle_module
+
+
+def _onyx_core():
+    ns = _onyx_load_bundle_module('h3_tools_bundle', 'onyx_h3_audio_lock', __package__)
+    return ns
+
+
 LOG = logging.getLogger("onyx.h3_audio_lock")
 
 
-def _resample(waveform, rate, target):
-    if rate == target:
-        return waveform
-    try:
-        import torchaudio
-        return torchaudio.functional.resample(waveform, rate, target)
-    except Exception:
-        import comfy.audio
-        return comfy.audio.resample(waveform, rate, target)
+def _resample(*args, **kwargs):
+    return _onyx_core()['_resample'](*args, **kwargs)
+
 
 
 class OnyxH3LockSourceAudio:
@@ -63,58 +65,13 @@ class OnyxH3LockSourceAudio:
                    "and the lips are generated against the original soundtrack, not a regenerated one.")
 
     @staticmethod
-    def _ensure_av_masks():
-        """Per-stream (video / audio) denoise masks for H3: native in recent ComfyUI, otherwise
-        enabled by the H3 Relay pack's compatibility layer (same one its masked modes use)."""
-        import sys
-        for name, mod in list(sys.modules.items()):
-            if name.endswith("vendor.context_loop.masked_context") and hasattr(mod, "_require_h3_mask_support"):
-                mod._require_h3_mask_support()
-                return
-        LOG.warning("[Onyx H3 Audio Lock] H3 Relay pack not found: relying on native ComfyUI AV masks.")
+    def _ensure_av_masks(*args, **kwargs):
+        return _onyx_core()['OnyxH3LockSourceAudio']._ensure_av_masks(*args, **kwargs)
 
-    def lock(self, latent, audio, audio_vae, enabled=True):
-        if not enabled:
-            return (latent,)
-        from comfy.nested_tensor import NestedTensor
-        self._ensure_av_masks()
 
-        samples = latent["samples"]
-        if not getattr(samples, "is_nested", False) or len(samples.tensors) != 2:
-            raise ValueError("[Onyx H3 Audio Lock] expected the native H3 video/audio latent pair.")
-        video, target_audio = samples.tensors
-        steps = int(target_audio.shape[-1])
+    def lock(self, *args, **kwargs):
+        return _onyx_core()['OnyxH3LockSourceAudio'].lock(self, *args, **kwargs)
 
-        rate = int(getattr(audio_vae, "audio_sample_rate", 32000))
-        wave = _resample(audio["waveform"], int(audio["sample_rate"]), rate)[:1]
-        # Same call as H3 Relay's own audio encode: [B, C, T] -> [B, T, C].
-        encoded = audio_vae.encode(wave.movedim(1, -1))
-        enc_steps = int(encoded.shape[-1])
-        # reference_audio and the latent both END at the window's last frame (the latent may or
-        # may not include the history span at its start): align on the end.
-        if enc_steps > steps:
-            encoded = encoded[..., -steps:]
-        elif enc_steps < steps:                  # rounding at the edges: hold the first step
-            pad = encoded[..., :1].expand(*encoded.shape[:-1], steps - enc_steps)
-            encoded = torch.cat([pad, encoded], -1)
-        if enc_steps < steps - 2:
-            LOG.warning("[Onyx H3 Audio Lock] source audio gave %d latent steps for %d expected: "
-                        "check that `audio` is the window's reference_audio.", enc_steps, steps)
-        encoded = encoded.to(device=target_audio.device, dtype=target_audio.dtype)
-        if encoded.shape[1:] != target_audio.shape[1:]:
-            raise ValueError(f"[Onyx H3 Audio Lock] encoded audio {tuple(encoded.shape)} does not match "
-                             f"the H3 audio latent {tuple(target_audio.shape)}.")
-        encoded = encoded.expand_as(target_audio).clone()
-
-        old = latent.get("noise_mask")
-        if old is not None and getattr(old, "is_nested", False):
-            video_mask = old.tensors[0]
-        else:
-            video_mask = torch.ones_like(video)
-        audio_mask = torch.zeros_like(target_audio)
-        print(f"🔒 [Onyx H3 Audio Lock] window audio locked to the source ({steps} latent steps)")
-        return ({**latent, "samples": NestedTensor([video, encoded]),
-                 "noise_mask": NestedTensor([video_mask, audio_mask])},)
 
 
 NODE_CLASS_MAPPINGS = {"OnyxH3LockSourceAudio": OnyxH3LockSourceAudio}
