@@ -40,13 +40,14 @@ class SaveImageWithoutMetadata:
     OUTPUT_NODE = True
     CATEGORY = "Onyx/image"
 
-    def save_images(self, images, filename_prefix="IMG", video="", prompt=None, extra_pnginfo=None):
-        # ── Mode vidéo ───────────────────────────────────────────
+    def save_images(self, images=None, filename_prefix="IMG", video="", prompt=None, extra_pnginfo=None):
+        # ── Video mode ───────────────────────────────────────────
         ensure_profile_ready()
-        if video and video != "(non sauvegardé)" and os.path.isfile(video):
-            ext = os.path.splitext(video)[1].lower()
-            if ext in (".mp4", ".webm", ".gif"):
-                return self._preview_video(video)
+        video_file = self._video_file(video)
+        if video_file:
+            return self._preview_video(video_file)
+        if images is None:
+            return {"ui": {"images": []}}
 
         # ── Mode image (comportement original) ───────────────────
         filename_prefix += self.prefix_append
@@ -76,15 +77,55 @@ class SaveImageWithoutMetadata:
 
         return {"ui": {"images": results}}
 
-    def _preview_video(self, video_path: str) -> dict:
-        """Retourne un dict UI ComfyUI pour afficher un player vidéo natif."""
+    _VIDEO_EXT = (".mp4", ".webm", ".gif", ".mov", ".m4v", ".mkv")
+
+    def _video_file(self, video):
+        """Path of the video to show: a path string, or the file behind a VIDEO object
+        (saved to the temp folder when it has no file)."""
+        if video is None or (isinstance(video, str) and video in ("", "(non sauvegardé)")):
+            return ""
+        if isinstance(video, str):
+            p = video.strip().strip('"')
+            return p if os.path.isfile(p) and os.path.splitext(p)[1].lower() in self._VIDEO_EXT else ""
         try:
-            tmp_dir = folder_paths.get_temp_directory()
-            rel_sub = os.path.relpath(os.path.dirname(video_path), tmp_dir)
-            if rel_sub == ".":
-                rel_sub = ""
-        except ValueError:
-            rel_sub = ""
+            src = video.get_stream_source()
+            if isinstance(src, str) and os.path.isfile(src):
+                return src
+        except Exception:
+            pass
+        try:
+            tmp = folder_paths.get_temp_directory()
+            os.makedirs(tmp, exist_ok=True)
+            out = os.path.join(tmp, f"onyx_preview_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.mp4")
+            video.save_to(out)
+            return out
+        except Exception as e:
+            print(f"[Onyx Preview] cannot read the connected video: {e}")
+            return ""
+
+    def _preview_video(self, video_path: str) -> dict:
+        """UI dict that shows the video in the node's player."""
+        video_path = os.path.abspath(video_path)
+        rel_sub, kind = None, "temp"
+        for kind_name, getter in (("temp", folder_paths.get_temp_directory),
+                                  ("output", folder_paths.get_output_directory),
+                                  ("input", folder_paths.get_input_directory)):
+            try:
+                base = os.path.abspath(getter())
+                if os.path.commonpath([base, video_path]) == base:
+                    rel = os.path.relpath(os.path.dirname(video_path), base)
+                    rel_sub, kind = ("" if rel == "." else rel), kind_name
+                    break
+            except (ValueError, OSError):
+                continue
+        if rel_sub is None:      # outside ComfyUI's folders: show a temp copy
+            import shutil
+            tmp = folder_paths.get_temp_directory()
+            os.makedirs(tmp, exist_ok=True)
+            copy = os.path.join(tmp, f"onyx_preview_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+                                     f"{os.path.splitext(video_path)[1]}")
+            shutil.copy2(video_path, copy)
+            video_path, rel_sub, kind = copy, "", "temp"
 
         # Détection fps via cv2 si disponible
         fps = 24.0
@@ -104,8 +145,8 @@ class SaveImageWithoutMetadata:
                 "gifs": [{
                     "filename":   filename,
                     "subfolder":  rel_sub,
-                    "type":       "temp",
-                    "format":     "video/h264-mp4",
+                    "type":       kind,
+                    "format":     "video/webm" if filename.lower().endswith(".webm") else "video/h264-mp4",
                     "frame_rate": fps,
                 }]
             }
@@ -122,11 +163,10 @@ class OnyxPreviewImageWithoutMetadata(SaveImageWithoutMetadata):
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {
-                "images": ("IMAGE",),
-            },
+            "required": {},
             "optional": {
-                "video": ("STRING", {"forceInput": True}),
+                "images": ("IMAGE",),
+                "video": ("STRING,VIDEO", {"forceInput": True}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }

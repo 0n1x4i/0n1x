@@ -154,6 +154,7 @@ const ALL_NODES = new Set([
     "OnyxCameraShake",
     "OnyxPostStyle",
     "OnyxPostProcessSuite",
+    "OnyxFastVideoGrade",
     "OnyxFameGridColorFinish",
     "OnyxEndlessSampler",
     "OnyxH3SeamlessSampler",

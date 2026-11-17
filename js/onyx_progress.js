@@ -120,9 +120,43 @@ function hintFor(text) {
   return null;
 }
 
+// ── a clean end for every run ────────────────────────────────────────────────
+// A run queued without a browser tab behind it (the API, a script, a remote tool) reports its
+// progress to every tab, but ComfyUI announces its END only to the tab that queued it: nobody.
+// Every progress display that waits for that end (ComfyUI's own, rgthree's bar at the top, this
+// badge) then stays on the last node for ever, although nothing runs. So: when the server says its
+// queue is empty and this tab saw work whose end was never announced, the end is announced here,
+// with the same event ComfyUI sends.
+const IDLE = { sawWork: false, timer: null };
+
+async function announceEndIfIdle() {
+  if (!IDLE.sawWork) return;
+  try {
+    const q = await (await api.fetchApi("/queue")).json();
+    if ((q.queue_running?.length || 0) + (q.queue_pending?.length || 0) > 0) return;
+  } catch { return; }
+  if (!IDLE.sawWork) return;
+  IDLE.sawWork = false;
+  api.dispatchEvent(new CustomEvent("executing", { detail: null }));
+}
+
+function watchIdle() {
+  const work = () => { IDLE.sawWork = true; };
+  for (const type of ["execution_start", "execution_cached", "executed", "progress"]) api.addEventListener(type, work);
+  api.addEventListener("executing", ({ detail }) => {
+    const node = typeof detail === "object" && detail !== null ? detail.node : detail;
+    IDLE.sawWork = node != null;
+  });
+  api.addEventListener("status", ({ detail }) => {
+    clearTimeout(IDLE.timer);
+    if ((detail?.exec_info?.queue_remaining ?? 0) === 0) IDLE.timer = setTimeout(announceEndIfIdle, 1500);
+  });
+}
+
 app.registerExtension({
   name: "Onyx.Progress",
   setup() {
+    watchIdle();
     api.addEventListener("status", ({ detail }) => {
       STATE.queueRemaining = detail?.exec_info?.queue_remaining ?? 0;
     });

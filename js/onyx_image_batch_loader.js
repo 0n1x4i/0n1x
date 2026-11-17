@@ -790,20 +790,49 @@ function setupBatchLoader(node, opts = {}) {
         addBtn.disabled = true;
         const prev = status.textContent;
         status.textContent = `Uploading ${files.length} file${files.length > 1 ? "s" : ""}…`;
-        const form = new FormData();
-        for (const f of files) form.append("files", f);
-        try {
-            const resp = await fetch("/onyx/batch_upload", { method: "POST", body: form });
-            const json = await resp.json();
-            if (json.success) {
-                for (const m of json.images) {
-                    if (!metaOf(m.id)) { data.images.push(m); data.order.push(m.id); }
-                }
-                syncBatch(); render();
-            } else {
-                console.error("[Onyx Batch] Upload failed:", json.error);
-                status.textContent = `Upload failed: ${json.error || "unknown error"}`;
+        // ComfyUI refuses any request above --max-upload-size (100 MB by default: "entity too
+        // large"), RunPod's proxy too. Small files go in multipart groups kept under GROUP_MAX;
+        // a big file is sent in CHUNK pieces to /onyx/batch_upload_chunk.
+        const CHUNK = 16 * 1024 * 1024, GROUP_MAX = 40 * 1024 * 1024;
+        const add = (items) => {
+            for (const m of items || []) {
+                if (!metaOf(m.id)) { data.images.push(m); data.order.push(m.id); }
             }
+            syncBatch(); render();
+        };
+        const newId = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+            : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+                const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
+        const sendGroup = async (group) => {
+            const form = new FormData();
+            for (const f of group) form.append("files", f);
+            const resp = await fetch("/onyx/batch_upload", { method: "POST", body: form });
+            const json = await resp.json().catch(() => ({ success: false, error: `HTTP ${resp.status}` }));
+            if (!json.success) throw new Error(json.error || `HTTP ${resp.status}`);
+            add(json.images);
+        };
+        const sendBig = async (f) => {
+            const id = newId(), total = Math.max(1, Math.ceil(f.size / CHUNK));
+            for (let i = 0; i < total; i++) {
+                const off = i * CHUNK;
+                status.textContent = `Uploading ${f.name}: ${Math.round(100 * off / f.size)}%`;
+                const qs = new URLSearchParams({ upload_id: id, index: i, total, offset: off, name: f.name });
+                const resp = await fetch(`/onyx/batch_upload_chunk?${qs}`, {
+                    method: "POST", body: f.slice(off, off + CHUNK),
+                    headers: { "Content-Type": "application/octet-stream" } });
+                const json = await resp.json().catch(() => ({ success: false, error: `HTTP ${resp.status}` }));
+                if (!json.success) throw new Error(`${f.name}: ${json.error || `HTTP ${resp.status}`}`);
+                if (json.done) add(json.images);
+            }
+        };
+        try {
+            let group = [], groupSize = 0;
+            for (const f of files) {
+                if (f.size > GROUP_MAX) { await sendBig(f); continue; }
+                if (group.length && groupSize + f.size > GROUP_MAX) { await sendGroup(group); group = []; groupSize = 0; }
+                group.push(f); groupSize += f.size;
+            }
+            if (group.length) await sendGroup(group);
         } catch (e) {
             console.error("[Onyx Batch] Upload error:", e);
             status.textContent = `Upload error: ${e.message || e}`;
@@ -875,6 +904,9 @@ function setupBatchLoader(node, opts = {}) {
     // ── Server events ──────────────────────────────────────────────────────
     const wsHandler = ({ detail }) => {
         if (String(detail?.node_id) !== String(node.id)) return;
+        // A run queued again by the server for ONE item (H3 Infinity: the next run of a video) reports
+        // index 0 of a list of 1. It says nothing about this list: the highlighted item stays.
+        if (detail.total === 1 && data.order.length > 1) return;
         const i = detail.current_index ?? -1;
         // index dans la liste envoyee au run : on le retraduit en id, la liste
         // locale ayant pu etre reordonnee depuis.

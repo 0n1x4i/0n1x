@@ -516,6 +516,49 @@ if not getattr(PromptServer.instance, "_onyx_batch_routes_registered", False):
             return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
+    @PromptServer.instance.routes.post("/onyx/batch_upload_chunk")
+    async def _onyx_batch_upload_chunk(request):
+        """Big files, sent in pieces: ComfyUI refuses any request above --max-upload-size
+        (100 MB by default, "entity too large"), and the RunPod proxy has a similar cap.
+        Query: upload_id (uuid), index, total, offset (bytes already sent), name. Body: raw bytes."""
+        import asyncio
+        import re as _re
+        try:
+            q = request.query
+            uid = _re.sub(r"[^0-9a-fA-F-]", "", q.get("upload_id", ""))[:36].lower()
+            idx, total, offset = int(q.get("index", 0)), int(q.get("total", 1)), int(q.get("offset", 0))
+            raw_name = os.path.basename(q.get("name") or "file.bin")
+            if len(uid) < 16 or total < 1 or not (0 <= idx < total):
+                return web.json_response({"success": False, "error": "bad chunk parameters"}, status=400)
+            pool = _ui_pool_dir()
+            ext = os.path.splitext(raw_name)[1].lower() or ".bin"
+            part = os.path.join(pool, f"{uid}{ext}.part")
+            if idx == 0:
+                if os.path.exists(part):
+                    os.remove(part)
+            elif not os.path.exists(part) or os.path.getsize(part) != offset:
+                have = os.path.getsize(part) if os.path.exists(part) else 0
+                return web.json_response({"success": False, "error": f"chunk {idx} out of order "
+                                          f"(server has {have} bytes, client says {offset})"}, status=409)
+            # streamed: request.content is not subject to client_max_size
+            with open(part, "ab") as fh:
+                async for piece in request.content.iter_chunked(1 << 20):
+                    fh.write(piece)
+            if idx < total - 1:
+                return web.json_response({"success": True, "done": False, "size": os.path.getsize(part)})
+            final = os.path.join(pool, f"{uid}{ext}")
+            os.replace(part, final)
+            try:
+                item = await asyncio.get_running_loop().run_in_executor(None, _register_pool_file, final, raw_name)
+            except Exception as e:
+                if os.path.exists(final):
+                    os.remove(final)
+                return web.json_response({"success": False, "error": f"{raw_name}: {e}"}, status=500)
+            return web.json_response({"success": True, "done": True, "images": [item]})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
     @PromptServer.instance.routes.post("/onyx/batch_url")
     async def _onyx_batch_url(request):
         """Web import: links dropped on the node (Instagram, TikTok, Pinterest,

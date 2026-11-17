@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-01",
+  "updated": "2026-11-17",
   "_comment": "Defaults shipped with the pack. The Worker can serve a newer copy at /registry (same shape); it is merged on top of this file at startup, so a new model or a new price reaches every install without a pack release. Ids are NEVER removed from a dropdown, even when retired: ComfyUI saves the chosen string in the workflow and would refuse to load it if the option disappeared. Retired ids are flagged deprecated instead: sorted last, and a warning names the replacement when one is run.",
   "models": {
     "gemini_text": {
@@ -88,6 +88,22 @@
     "grok": {
       "default": "grok-4.20-0309-reasoning",
       "entries": [
+        {
+          "id": "grok-4.7",
+          "vision": true
+        },
+        {
+          "id": "grok-4.6",
+          "vision": true
+        },
+        {
+          "id": "grok-4.5",
+          "vision": true
+        },
+        {
+          "id": "grok-4.3",
+          "vision": true
+        },
         {
           "id": "grok-4.20-0309-reasoning",
           "vision": true

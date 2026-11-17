@@ -149,6 +149,7 @@ _PROVIDERS = ["Gemini", "Vertex", "Grok", "Kie"]   # Kie: same Gemini models / K
 
 # Meme liste que _GROK_MODELS dans grok_prompt.py, modeles vision en tete.
 _GROK_MODELS = _reg.model_ids("grok", vision=True, always=(
+    "grok-4.7", "grok-4.6", "grok-4.5", "grok-4.3",
     "grok-4.20-0309-reasoning", "grok-4.20-0309-non-reasoning",
     "grok-4-1-fast-reasoning", "grok-4-1-fast-non-reasoning", "grok-2-vision-1212",
 ))
@@ -234,7 +235,8 @@ class OnyxH3ContextIR:
                                "swap LoRA. The prompt is a FIXED template (validated by render); the model only fills the "
                                "slots (appearance card of <Picture 1>, source performer, source clothing kept, place, clip "
                                "structure). The slots come out in grounding_json. intent = optional notes (which person to "
-                               "replace, corrections).\n"
+                               "replace, corrections). Connect Prepare's `window` to this node's `window` "
+                               "input for long videos.\n"
                                "Seedance: compiles against ByteDance's six-slot grammar with "
                                "@Image 1 / @Video 1 tags.\n"
                                "Seedance v2: same tags, but outputs one structured JSON "
@@ -492,6 +494,15 @@ class OnyxH3ContextIR:
                 "vfx_mode": (_h3vfx.VFX_MODES, {
                     "default": _h3vfx.VFX_NONE,
                     "tooltip": _h3vfx.VFX_TOOLTIP}),
+                # A link, not a widget: it shifts no saved widget value.
+                "window": ("H3_RELAY_WINDOW", {
+                    "tooltip": "Motion Transfer only. Connect Onyx H3 Infinity — Prepare → window.\n"
+                               "It tells this node whether the run is a block or an anchor montage (a "
+                               "montage is looked at one frame per moment and is never described as one "
+                               "continuous scene) and where the session folder is: the list of what the "
+                               "performer wears, carries and handles is written there once "
+                               "(continuity.json) and every run reuses the same words.\n"
+                               "Not connected: a single clip, nothing is kept between runs."}),
             },
         }
 
@@ -520,7 +531,7 @@ class OnyxH3ContextIR:
             motion_from_video_only=False, keyframes_match_model=False,
             extra_prompt_rules=False, kie_api_key="", video_analysis_fps=8.0, seed=0,
             remove_observations=True, gemini_thinking_mode="high",
-            vfx_mode=_h3vfx.VFX_NONE):
+            vfx_mode=_h3vfx.VFX_NONE, window=None):
         ensure_profile_ready()
 
         # ── H3 VFX mode: checks + inputs, before anything is sent ──────────
@@ -552,6 +563,8 @@ class OnyxH3ContextIR:
             kie["gemini_thinking_mode"] = gemini_thinking_mode   # new core only; "high" = the model's own default
         if vfx is not None:
             kie["vfx_mode"] = vfx.mode       # new core only: lets pass B write an edit instruction
+        if target_model == TARGET_H3_MOTION and isinstance(window, dict):
+            kie["infinity"] = window         # new core only: block / montage + session folder
         call_args = (
             OnyxH3ContextIR._grounding_cache, guides_text,
             intent, duration_seconds, aspect_ratio, target_model,
@@ -584,6 +597,12 @@ class OnyxH3ContextIR:
             # A server core older than vfx_mode refuses the keyword before doing
             # any work (no API call made yet): run it without, the local
             # post-processing below still applies the VFX rules to the prompt.
+            if "infinity" in str(e):
+                raise RuntimeError(
+                    "[H3 Context-IR] The server core is older than this node (it does not know the "
+                    "`window` input). Push h3_context_ir_core to the Worker (npx wrangler kv key put "
+                    "--binding=NODE_CODE \"h3_context_ir_core\" --path=protected_nodes/h3_context_ir_core.py "
+                    "--remote), then queue again.") from e
             if "vfx_mode" not in str(e):
                 raise
             kie.pop("vfx_mode", None)

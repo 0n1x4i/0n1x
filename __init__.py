@@ -59,6 +59,9 @@ from .nodes.save_image_no_metadata import OnyxSaveImageNoMetadataNode
 from .nodes.onyx_speed_hd_sampler import OnyxSpeedHDSampler
 from .nodes.onyx_hair_weave_fix import OnyxHairWeaveFix
 from .nodes.onyx_h3_guide_exclude import OnyxH3GuideExcludeZone
+from .nodes.onyx_h3_identity_ref import OnyxH3IdentityReference
+from .nodes.onyx_fast_grade import OnyxFastVideoGrade
+from .nodes import onyx_fast_grade_preview as _onyx_fast_grade_preview
 from .nodes.onyx_eye_detailer import OnyxEyeBBoxDetectorProvider, OnyxDetailer
 from .nodes.onyx_temporal_mask_smooth import OnyxTemporalMaskSmooth
 from .nodes.onyx_depth_colormap import OnyxDepthColormap
@@ -172,6 +175,7 @@ try:
     _onyx_setup_check.register_routes()
     _onyx_studio_mod.register_routes()
     _onyx_post_studio_mod.register_routes()
+    _onyx_fast_grade_preview.register_routes()
 except Exception as _e:
     print(f"[Onyx] Registry / cost routes failed: {_e}")
 if _onyx_opencv is not None:
@@ -229,6 +233,8 @@ NODE_CLASS_MAPPINGS["OnyxSaveImageNoMetadataNode"] = OnyxSaveImageNoMetadataNode
 NODE_CLASS_MAPPINGS["OnyxSpeedHDSampler"] = OnyxSpeedHDSampler
 NODE_CLASS_MAPPINGS["OnyxHairWeaveFix"] = OnyxHairWeaveFix
 NODE_CLASS_MAPPINGS["OnyxH3GuideExcludeZone"] = OnyxH3GuideExcludeZone
+NODE_CLASS_MAPPINGS["OnyxH3IdentityReference"] = OnyxH3IdentityReference
+NODE_CLASS_MAPPINGS["OnyxFastVideoGrade"] = OnyxFastVideoGrade
 NODE_CLASS_MAPPINGS["OnyxEyeBBoxDetectorProvider"] = OnyxEyeBBoxDetectorProvider
 NODE_CLASS_MAPPINGS["OnyxDetailer"] = OnyxDetailer
 NODE_CLASS_MAPPINGS["OnyxTemporalMaskSmooth"] = OnyxTemporalMaskSmooth
@@ -310,7 +316,7 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainJoin"] = "Onyx Video Chain — Join"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainPrepare"] = "Onyx Video Chain — Prepare"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainCommit"] = "Onyx Video Chain — Commit"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3InfinityPrepare"] = "Onyx H3 Infinity — Prepare"
-NODE_DISPLAY_NAME_MAPPINGS["OnyxH3InfinityGuides"] = "Onyx H3 Infinity — Guides"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxH3InfinityGuides"] = "Onyx H3 Infinity — Apply"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3InfinityCommit"] = "Onyx H3 Infinity — Commit"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxAudioSwitch"] = "Onyx Audio Switch"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxLoraTrigger"] = "Onyx LoRA Trigger"
@@ -323,6 +329,8 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxSaveImageNoMetadataNode"] = "Onyx Save Image No 
 NODE_DISPLAY_NAME_MAPPINGS["OnyxSpeedHDSampler"] = "Onyx Speed HD Sampler"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxHairWeaveFix"] = "Onyx Hair Weave Fix"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxH3GuideExcludeZone"] = "Onyx H3 Guide Exclude Zone"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxH3IdentityReference"] = "Onyx H3 Identity Reference (head only)"
+NODE_DISPLAY_NAME_MAPPINGS["OnyxFastVideoGrade"] = "Onyx Fast Video Grade (GPU, streamed)"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxEyeBBoxDetectorProvider"] = "Onyx HD Ultralytic BBox Loader"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxDetailer"] = "Onyx Detailer"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxTemporalMaskSmooth"] = "Onyx Temporal Mask Smooth"

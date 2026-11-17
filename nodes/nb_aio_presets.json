@@ -1,1 +1,20 @@
-{}
+{
+  "10": {
+    "preset_name": "sheet ref body",
+    "provider": "VERTEX",
+    "prompt": "Use the provided image as identity reference, preserve facial features, hairstyle, and body proportions. Same bone structure, same facial features, same body shape, same height and limb proportions.\nIt's the exact same girl.\n\nFull body character reference sheet of a young woman, head to toe, 4 panels layout: front view + side profile view + 3/4 left view + 3/4 right view. No text, no labels, neutral grey seamless background, high detail skin texture.\n\nLayout:\n4 tall vertical panels placed side by side horizontally, each panel in portrait orientation.\nEach panel shows the full figure from the top of the head to the feet, nothing cropped, feet and shoes fully visible, small even margin above the head and below the feet.\nSame scale and same framing height in every panel, the figure is centered in each panel and fills most of its height.\n\nPose:\nPanel 1: front view\nPanel 2: side profile view\nPanel 3: 3/4 left view\nPanel 4: 3/4 right view\nStanding upright, neutral relaxed stance, weight evenly on both feet, arms relaxed slightly away from the body so the waist and hips silhouette stay readable, neutral expression.\n\nCamera/look:\nAmateur smartphone raw crispness, everything is sharp, immense detail.\nCamera at mid-body height, straight-on, no wide-angle distortion, natural body proportions.\nDeep focus, entire figure in focus from head to feet.\nBackground is sharp and detailed, no blur.\nNo haze, no glow, no smoothing.\nCrisp and detailed skin texture with visible pores, natural sensor grain.\nNo bokeh, no shallow depth of field, no motion blur. 8K native resolution, ULTRA DETAILED, a few subtle skin imperfections, no pimples, visible pores, masterpiece, crispy skin.\n\nImportant: same person across all panels, identical face, identical body proportions and height, consistent outfit (same clothes and shoes in every panel), consistent lighting, same ground line for the feet in all 4 panels.",
+    "image_size": "2K",
+    "disable_safety_threshold": 2,
+    "model": "Nano Banana Pro",
+    "batch_size": 2,
+    "use_search": false,
+    "system_instructions": "",
+    "video_duration": 5,
+    "aspect_ratio": "16:9",
+    "temperature": 0.2,
+    "top_p": 0.8,
+    "fal_safety_tolerance": "6",
+    "fal_enable_web_search": false,
+    "video_mode_enabled": false
+  }
+}
