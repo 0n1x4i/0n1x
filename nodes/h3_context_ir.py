@@ -145,7 +145,9 @@ _MODELS = _reg.model_ids("gemini_text", always=(
     "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash",
 ))
 
-_PROVIDERS = ["Gemini", "Vertex", "Grok", "Kie"]   # Kie: same Gemini models / Kie Grok models, Kie.ai key
+_PROVIDERS = ["Gemini", "Vertex", "Grok", "Kie", "OpenRouter"]   # Kie: same Gemini models / Kie Grok models, Kie.ai key;
+# OpenRouter: the chosen model (or openrouter_model), billed on an OpenRouter key. Appended last: combos store
+# the string, so no saved workflow moves.
 
 # Meme liste que _GROK_MODELS dans grok_prompt.py, modeles vision en tete.
 _GROK_MODELS = _reg.model_ids("grok", vision=True, always=(
@@ -157,6 +159,9 @@ _GROK_MODELS = _reg.model_ids("grok", vision=True, always=(
 # Grok models sold by Kie.ai (provider=Kie only); with Kie, the Gemini models
 # above are used as they are.
 _KIE_GROK_MODELS = _reg.model_ids("kie_grok", always=("grok-4-7", "grok-4-6", "grok-4-5", "grok-4-3"))
+
+# provider=OpenRouter only. Appended to the end of the model list: combos store the string, no saved workflow moves.
+_DEEPSEEK_MODELS = ["deepseek-v4.1-flash"]
 
 # Gemini 3 image token counts, from the media-resolution guide: 1120 at the
 # default, 280 at low - a factor of four on every keyframe. The same guide
@@ -273,7 +278,9 @@ class OnyxH3ContextIR:
                 # gemini_prompt.py apres la fusion des widgets grok/gemini. Le
                 # node verifie la coherence au run et le dit, plutot que de
                 # laisser partir un modele Grok vers l'endpoint Google.
-                "model": (_MODELS + _GROK_MODELS + _KIE_GROK_MODELS, {"default": "gemini-3.6-flash"}),
+                # (the Kie.ai spellings grok-4-7 / 4-6 / 4-5 / 4-3 are no longer listed: they read as xAI models and
+                #  were picked with an xAI key. provider=Kie takes grok-4.7 / 4.6 / 4.5 / 4.3 and the core converts.)
+                "model": (_MODELS + _GROK_MODELS + _DEEPSEEK_MODELS, {"default": "gemini-3.6-flash"}),
                 "guide_folder": ("STRING", {
                     "default": "", "multiline": False,
                     "tooltip": "Leave empty (default): the two official MiniMax guides are "
@@ -457,7 +464,7 @@ class OnyxH3ContextIR:
                 "kie_api_key": ("STRING", {
                     "default": "", "multiline": False,
                     "tooltip": "Kie.ai key, for provider=Kie: the Gemini models of the list, or "
-                               "grok-4-7 / 4-6 / 4-5 / 4-3, billed on your Kie.ai credits."}),
+                               "grok-4.7 / 4.6 / 4.5 / 4.3, billed on your Kie.ai credits."}),
                 # Seedance Recreate only. Appended after kie_api_key so saved workflows keep their values.
                 "video_analysis_fps": ("FLOAT", {
                     "default": 8.0, "min": 1.0, "max": 24.0, "step": 1.0,
@@ -503,6 +510,14 @@ class OnyxH3ContextIR:
                                "performer wears, carries and handles is written there once "
                                "(continuity.json) and every run reuses the same words.\n"
                                "Not connected: a single clip, nothing is kept between runs."}),
+                # Added LAST on purpose (positional widget values): saved workflows keep every value.
+                "openrouter_api_key": ("STRING", {
+                    "default": "", "multiline": False,
+                    "tooltip": "OpenRouter key, for provider=OpenRouter."}),
+                "openrouter_model": ("STRING", {
+                    "default": "", "multiline": False,
+                    "tooltip": "provider=OpenRouter: an OpenRouter model id (e.g. google/gemini-3.1-pro-preview, "
+                               "x-ai/grok-4.7, anthropic/claude-...). Empty = the model picked above."}),
             },
         }
 
@@ -531,7 +546,7 @@ class OnyxH3ContextIR:
             motion_from_video_only=False, keyframes_match_model=False,
             extra_prompt_rules=False, kie_api_key="", video_analysis_fps=8.0, seed=0,
             remove_observations=True, gemini_thinking_mode="high",
-            vfx_mode=_h3vfx.VFX_NONE, window=None):
+            vfx_mode=_h3vfx.VFX_NONE, window=None, openrouter_api_key="", openrouter_model=""):
         ensure_profile_ready()
 
         # ── H3 VFX mode: checks + inputs, before anything is sent ──────────
@@ -565,6 +580,14 @@ class OnyxH3ContextIR:
             kie["vfx_mode"] = vfx.mode       # new core only: lets pass B write an edit instruction
         if target_model == TARGET_H3_MOTION and isinstance(window, dict):
             kie["infinity"] = window         # new core only: block / montage + session folder
+        if provider == "OpenRouter":
+            if "_call_openrouter" not in ns:
+                raise RuntimeError(
+                    "[H3 Context-IR] The server core does not know provider=OpenRouter yet. Push "
+                    "h3_context_ir_core to the Worker (npx wrangler kv key put --binding=NODE_CODE "
+                    "\"h3_context_ir_core\" --path=protected_nodes/h3_context_ir_core.py --remote), then queue again.")
+            kie["openrouter_api_key"] = openrouter_api_key       # new core only; never sent for other providers
+            kie["openrouter_model"] = openrouter_model
         call_args = (
             OnyxH3ContextIR._grounding_cache, guides_text,
             intent, duration_seconds, aspect_ratio, target_model,

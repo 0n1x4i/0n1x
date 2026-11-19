@@ -279,15 +279,54 @@ class OnyxChromaSubsample:
 
 
 
+
+def phone_processing(*args, **kwargs):
+    return _onyx_core()['phone_processing'](*args, **kwargs)
+
+
+
+class OnyxPhoneProcessing:
+    """Phone photo processing look."""
+
+    DESCRIPTION = "Phone photo processing look."
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "noise": ("FLOAT", {"default": 0.35, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "smoothing": ("FLOAT", {"default": 0.45, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "color_smoothing": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.5, "step": 0.05}),
+                "crunch": ("FLOAT", {"default": 0.6, "min": 0.0, "max": 1.5, "step": 0.05}),
+                "zoom": ("FLOAT", {"default": 1.6, "min": 1.0, "max": 4.0, "step": 0.1}),
+                "jpeg_quality": ("INT", {"default": 78, "min": 0, "max": 100, "step": 1}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffff}),
+            },
+            "optional": {**_onyx_post.POST_INPUT},
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "apply"
+    CATEGORY = "Onyx/Post"
+
+    def apply(self, *args, **kwargs):
+        return _onyx_core()['OnyxPhoneProcessing'].apply(self, *args, **kwargs)
+
+
+
 NODE_CLASS_MAPPINGS = {
     "OnyxPhoneHDR": OnyxPhoneHDR,
     "OnyxHighlightClip": OnyxHighlightClip,
     "OnyxLensSmudge": OnyxLensSmudge,
     "OnyxChromaSubsample": OnyxChromaSubsample,
+    "OnyxPhoneProcessing": OnyxPhoneProcessing,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "OnyxPhoneHDR": "Onyx Phone HDR",
     "OnyxHighlightClip": "Onyx Highlight Clip",
     "OnyxLensSmudge": "Onyx Lens Smudge",
     "OnyxChromaSubsample": "Onyx Chroma Subsample",
+    "OnyxPhoneProcessing": "Onyx Phone Processing",
 }

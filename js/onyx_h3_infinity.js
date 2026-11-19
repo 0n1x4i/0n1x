@@ -18,6 +18,42 @@ api.addEventListener("executed", (e) => {
 app.registerExtension({
   name: "onyx.H3Infinity",
 
+  // Saved values are put back by position. Some ComfyUI versions save the seed's "control after generate" and
+  // some do not, so the values after the seed could land one widget off (redo_blocks in the control, a plan
+  // value in redo_blocks...). They are put back by name here, and anything that is not a valid value is reset.
+  beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData.name !== "OnyxH3InfinityPrepare") return;
+    const onConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function (info) {
+      const r = onConfigure?.apply(this, arguments);
+      try {
+        const CONTROL = ["fixed", "increment", "decrement", "randomize"];
+        const MODES = ["Mode A", "Mode B"];
+        const LEGACY = { "anchor tree": "Mode A", "chain": "Mode B" };
+        const w = (n) => this.widgets?.find((x) => x.name === n);
+        const v = Array.isArray(info?.widgets_values) ? info.widgets_values.slice() : null;
+        if (!v) return r;
+        if (v.length > 4 && !CONTROL.includes(v[4])) v.splice(4, 0, "randomize");
+        const set = (name, val) => { const x = w(name); if (x && val !== undefined) x.value = val; };
+        const control = this.widgets?.find((x) => x.name === "control_after_generate" || x.name === "control after generate")
+          || this.widgets?.[this.widgets.indexOf(w("seed")) + 1];
+        set("session_name", typeof v[0] === "string" ? v[0] : "");
+        if (typeof v[1] === "string" && /frames/.test(v[1])) set("block_length", v[1]);
+        if (Number.isFinite(v[2])) set("short_side", v[2]);
+        if (Number.isFinite(v[3])) set("seed", v[3]);
+        if (control && control !== w("seed")) control.value = CONTROL.includes(v[4]) ? v[4] : "randomize";
+        const isMode = (x) => MODES.includes(x) || x in LEGACY;
+        set("video_path", typeof v[5] === "string" && !isMode(v[5]) && v[5] !== "anchors" ? v[5] : "");
+        set("redo_blocks", typeof v[6] === "string" && !isMode(v[6]) ? v[6] : "");
+        const plan = v.slice(7).find((x) => isMode(x));
+        set("plan", plan ? (LEGACY[plan] || plan) : MODES[0]);
+      } catch (e) {
+        console.warn("Onyx: could not restore the Prepare values", e);
+      }
+      return r;
+    };
+  },
+
 
   nodeCreated(node) {
     if (node.comfyClass !== "OnyxH3InfinityPrepare") return;

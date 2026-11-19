@@ -453,6 +453,7 @@ class OnyxKrea2StoryDirector:
             image = _side_by_side(image, _to_pil(image_2))
 
         from . import pose_generator as pg
+        from . import runtime_keys as _rk
         core = pg._onyx_core()
         timeout = 300
 
@@ -461,10 +462,10 @@ class OnyxKrea2StoryDirector:
                 return core["_vertex_generate"](json_folder, model_id or "gemini-3.6-flash", system, user, image,
                                                 timeout)
             if backend == "Gemini API":
-                return core["_gemini_generate"](api_key or pg.RUNTIME_KEYS.get("Gemini API", ""), model_id, system, user,
+                return core["_gemini_generate"](api_key or _rk.get("Gemini API"), model_id, system, user,
                                                 image, timeout)
             if backend == "Grok API":
-                return core["_grok_generate"](api_key or pg.RUNTIME_KEYS.get("Grok API", ""), model_id, system, user,
+                return core["_grok_generate"](api_key or _rk.get("Grok API"), model_id, system, user,
                                               image, timeout)
             if backend == "Kie API":
                 return _kie_generate(api_key or pg.RUNTIME_KEYS.get("Kie API", ""), model_id, system, user, image,

@@ -84,6 +84,8 @@ STAGES = [
     {"key": "lens", "group": "phone", "short": "Lens", "cls": "OnyxLensCharacter", "title": "Lens character", "icon": "🔭",
      "info": "Real-lens signature: lateral / longitudinal chromatic aberration, optical vignette, optional "
              "focus blur with polygon bokeh (focus_mode flat + blur 0 = CA + vignette only)."},
+    {"key": "process", "group": "phone", "short": "Process", "cls": "OnyxPhoneProcessing", "title": "Phone processing", "icon": "📲",
+     "info": "The look of a phone photo taken in low light or with zoom."},
     {"key": "hdr", "group": "phone", "short": "HDR", "cls": "OnyxPhoneHDR", "title": "Phone HDR", "icon": "📱",
      "info": "The phone's smart HDR: lifted shadows, held highlights, local contrast, sharpening halos."},
     {"key": "grain", "group": "phone", "short": "Grain", "cls": "Onyx_Renoise", "title": "Grain & noise", "icon": "🌫️",
@@ -99,7 +101,7 @@ STAGES = [
 ]
 STAGE_KEYS = [s["key"] for s in STAGES]
 # New stages start switched off: the Crispy chain is unchanged until you turn them on.
-_DEFAULT_OFF = {"curves", "levels", "skintone", "dehaze", "clarity", "lut", "smudge", "clip", "hdr", "jpeg", "motion", "chroma"}
+_DEFAULT_OFF = {"curves", "levels", "skintone", "dehaze", "clarity", "lut", "smudge", "clip", "process", "hdr", "jpeg", "motion", "chroma"}
 # Extra node inputs a stage receives from the Post Studio's own optional inputs.
 _STAGE_INPUTS = {"skin": {"depth_map": "depth_map"},
                  "motion": {"motion_override": "preset_override"}}

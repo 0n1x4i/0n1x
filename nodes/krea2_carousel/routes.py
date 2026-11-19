@@ -152,14 +152,9 @@ if not getattr(PromptServer.instance, "_onyx_nf_routes_registered", False):
     async def runtime_key(request):
         try:
             data = await request.json()
-            from .pose_generator import RUNTIME_KEYS
-            backend = str(data.get("backend") or "")
-            if backend in ("Grok API", "Gemini API"):
-                value = str(data.get("api_key") or "").strip()[:500]
-                if value:
-                    RUNTIME_KEYS[backend] = value
-                else:
-                    RUNTIME_KEYS.pop(backend, None)
+            from . import runtime_keys
+            runtime_keys.remember(str(data.get("backend") or ""), str(data.get("api_key") or ""),
+                                  explicit=bool(data.get("explicit")))
             return web.json_response({"ok": True}, headers={"Cache-Control": "no-store"})
         except Exception as exc:
             return web.json_response({"error": str(exc)}, status=400)

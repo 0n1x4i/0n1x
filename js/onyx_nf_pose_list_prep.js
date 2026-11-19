@@ -33,10 +33,26 @@ function writeKey(name, value) {
 }
 // One-step genere les poses cote serveur, pendant le run : la cle doit donc y
 // etre aussi. Elle reste en memoire du process ComfyUI, jamais sur disque.
-function pushRuntimeKey(backend, value) {
-  if (!["Grok API", "Gemini API"].includes(backend)) return;
-  api.fetchApi("/onyx/nf/runtime_key", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ backend, api_key: value || "" }) }).catch(() => {});
+// explicit = the user edited the key field: only then does an empty value clear the saved key.
+function pushRuntimeKey(backend, value, explicit = false) {
+  if (!["Grok API", "Gemini API"].includes(backend)) return Promise.resolve();
+  if (!value && !explicit) return Promise.resolve();
+  return api.fetchApi("/onyx/nf/runtime_key", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ backend, api_key: value || "", explicit }) }).catch(() => {});
+}
+// Re-send the keys this browser holds after a server restart (the server only keeps them in memory
+// plus its saved copy) and right before every queue, so a run never starts without them.
+function pushAllKeys() {
+  return Promise.all([pushRuntimeKey("Grok API", readKey("onx2.krea.grok")),
+    pushRuntimeKey("Gemini API", readKey("onx2.krea.gemini"))]);
+}
+let keyResendHooked = false;
+function hookKeyResend() {
+  if (keyResendHooked) return;
+  keyResendHooked = true;
+  api.addEventListener("reconnected", () => { pushAllKeys(); });
+  const original = api.queuePrompt?.bind(api);
+  if (original) api.queuePrompt = async (...args) => { try { await pushAllKeys(); } catch (_) {} return original(...args); };
 }
 const DEFAULT_MODEL = "huihui-ai/Huihui-Qwen3-VL-4B-Instruct-abliterated";
 const DEFAULT_VIBE = "Natural Instagram carousel with varied body orientation and hand gestures. Every slide visibly changes the master's pose, especially hand placement. When a selfie is enabled, make it a first-person chest-up photo taken by one extended camera arm, with the free hand relaxed and the phone outside the frame. Output pose and framing only, without scenery or appearance descriptions.";
@@ -225,7 +241,7 @@ app.registerExtension({
       count.addEventListener("input", () => { state.count = Math.max(1, Math.min(8, Math.trunc(Number(count.value)) || 4)); invalidate("Count changed. Prepare the list again."); });
       selfie.addEventListener("change", () => { state.include_selfie = selfie.checked; invalidate("Selfie rule changed. Prepare the list again."); });
       unload.addEventListener("change", () => { state.unload_after = unload.checked; save(); });
-      key.addEventListener("input", () => { writeKey(keyName(), key.value); pushRuntimeKey(state.backend, key.value); if (state.backend === "Grok API") { grokIds = []; autoFetched = false; refreshControls(); } invalidate("Key changed. Check the model and prepare the list."); });
+      key.addEventListener("input", () => { writeKey(keyName(), key.value); pushRuntimeKey(state.backend, key.value, true); if (state.backend === "Grok API") { grokIds = []; autoFetched = false; refreshControls(); } invalidate("Key changed. Check the model and prepare the list."); });
       poses.addEventListener("input", () => { if (widgets.prepared_pose_list) widgets.prepared_pose_list.value = node.properties.pose_prep_signature === signature() ? poseLines(poses.value).join("\n") : ""; if (widgets.prepared_count) widgets.prepared_count.value = poseLines(poses.value).length || 1; updateQueue(); node.graph?.setDirtyCanvas(true, true); });
       modelsButton.addEventListener("click", async () => {
         if (modelsLoading) return;
@@ -252,7 +268,7 @@ app.registerExtension({
         finally { modelsLoading = false; updateQueue(); }
       });
       prepareButton.addEventListener("click", prepare);
-      pushRuntimeKey("Grok API", readKey("onx2.krea.grok")); pushRuntimeKey("Gemini API", readKey("onx2.krea.gemini"));
+      hookKeyResend(); pushAllKeys();
       const queueCarousel = async () => {
         if (!ready()) return;
         if (node.graph !== app.graph) { notify("Go back to this workflow to queue the prepared carousel.", "wait"); return; }
