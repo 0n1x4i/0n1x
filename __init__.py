@@ -53,8 +53,7 @@ from .nodes.onyx_rife_batched import OnyxRifeVfiBatched
 from .nodes.onyx_prompt_library import OnyxPromptSaver, OnyxPromptGallery
 from .nodes.onyx_video_chain import (OnyxVideoChainSegment, OnyxVideoChainJoin,
                                          OnyxVideoChainPrepare, OnyxVideoChainCommit)
-from .nodes.onyx_h3_infinity import (OnyxH3InfinityPrepare, OnyxH3InfinityGuides,
-                                     OnyxH3InfinityCommit)
+# H3 Infinity moved to the private onyx_dev pack (2026-11-24)
 from .nodes.save_image_no_metadata import OnyxSaveImageNoMetadataNode
 from .nodes.onyx_speed_hd_sampler import OnyxSpeedHDSampler
 from .nodes.onyx_hair_weave_fix import OnyxHairWeaveFix
@@ -163,6 +162,13 @@ except Exception as _e:
 
 WEB_DIRECTORY = "./js"
 
+# BFS Video Segment Picker: a single subject is selected automatically (see nodes/onyx_bfs_autopick.py).
+try:
+    from .nodes import onyx_bfs_autopick as _onyx_bfs_autopick
+    _onyx_bfs_autopick.register()
+except Exception as _e:
+    print(f"[Onyx] BFS auto-pick not loaded: {_e}")
+
 # Routes partagees : /onyx/registry (listes de modeles + prix), /onyx/opencv/*,
 # /onyx/costs/* — et rafraichissement du registre depuis le Worker en arriere-plan.
 try:
@@ -219,9 +225,6 @@ NODE_CLASS_MAPPINGS["OnyxVideoChainSegment"] = OnyxVideoChainSegment
 NODE_CLASS_MAPPINGS["OnyxVideoChainJoin"] = OnyxVideoChainJoin
 NODE_CLASS_MAPPINGS["OnyxVideoChainPrepare"] = OnyxVideoChainPrepare
 NODE_CLASS_MAPPINGS["OnyxVideoChainCommit"] = OnyxVideoChainCommit
-NODE_CLASS_MAPPINGS["OnyxH3InfinityPrepare"] = OnyxH3InfinityPrepare
-NODE_CLASS_MAPPINGS["OnyxH3InfinityGuides"] = OnyxH3InfinityGuides
-NODE_CLASS_MAPPINGS["OnyxH3InfinityCommit"] = OnyxH3InfinityCommit
 NODE_CLASS_MAPPINGS["OnyxAudioSwitch"] = OnyxAudioSwitch
 NODE_CLASS_MAPPINGS["OnyxLoraTrigger"] = OnyxLoraTrigger
 NODE_CLASS_MAPPINGS["OnyxLoraTriggerStack"] = OnyxLoraTriggerStack
@@ -315,9 +318,6 @@ NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainSegment"] = "Onyx Video Chain — Segm
 NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainJoin"] = "Onyx Video Chain — Join"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainPrepare"] = "Onyx Video Chain — Prepare"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxVideoChainCommit"] = "Onyx Video Chain — Commit"
-NODE_DISPLAY_NAME_MAPPINGS["OnyxH3InfinityPrepare"] = "Onyx H3 Infinity — Prepare"
-NODE_DISPLAY_NAME_MAPPINGS["OnyxH3InfinityGuides"] = "Onyx H3 Infinity — Apply"
-NODE_DISPLAY_NAME_MAPPINGS["OnyxH3InfinityCommit"] = "Onyx H3 Infinity — Commit"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxAudioSwitch"] = "Onyx Audio Switch"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxLoraTrigger"] = "Onyx LoRA Trigger"
 NODE_DISPLAY_NAME_MAPPINGS["OnyxLoraTriggerStack"] = "Onyx LoRA Trigger Stack"

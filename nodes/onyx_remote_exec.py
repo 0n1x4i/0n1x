@@ -60,6 +60,22 @@ def _ensure_synced(token: str) -> None:
         _SYNCED = True
 
 
+def _dev_source(name: str):
+    """Author's machine only: when <pack>/license-worker/.dev_local exists, the protected code is read from
+    <pack>/license-worker/protected_nodes/<name>.py instead of the server (to test a change before it is pushed).
+    Packs sent to members have no license-worker folder: for them this returns None and nothing changes."""
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "license-worker")
+    path = os.path.join(root, "protected_nodes", f"{name}.py")
+    if not (os.path.isfile(os.path.join(root, ".dev_local")) and os.path.isfile(path)):
+        return None
+    with open(path, "r", encoding="utf-8") as fh:
+        source = fh.read()
+    if not getattr(_dev_source, "_said", set()).__contains__(name):
+        _dev_source._said = getattr(_dev_source, "_said", set()) | {name}
+        print(f"🧪 [Onyx] dev mode: '{name}' is read from {path}")
+    return source
+
+
 def load_remote(name: str, extra_globals: dict = None) -> dict:
     """Fetch protected source `name` and exec() it into a fresh namespace.
 
@@ -76,6 +92,13 @@ def load_remote(name: str, extra_globals: dict = None) -> dict:
     wrapper itself is a real module) and hands it over as an already-bound
     name instead. nano_banana_aio.py is the first to need this.
     """
+    dev = _dev_source(name)
+    if dev is not None:
+        ns: dict = {"__name__": f"onyx_remote_{name}"}
+        if extra_globals:
+            ns.update(extra_globals)
+        exec(compile(dev, f"<onyx-remote:{name}>", "exec"), ns)
+        return ns
     cache = _read_cache()
     token = (cache.get("token") or "").strip()
     if not token:
@@ -145,6 +168,10 @@ _NETWORK_GRACE = 60 * 60   # a run (montage or block) can last 20+ min
 
 
 def _request(name: str, have_hash: str = None) -> dict:
+    dev = _dev_source(name)
+    if dev is not None:
+        digest = hashlib.sha256(dev.encode("utf-8")).hexdigest()[:16]
+        return {"valid": True, "unchanged": have_hash == digest, "source": dev, "hash": digest}
     cache = _read_cache()
     token = (cache.get("token") or "").strip()
     if not token:

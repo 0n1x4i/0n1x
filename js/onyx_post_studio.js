@@ -113,7 +113,9 @@ function injectStyle() {
 .ops-tog i:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#9a9aa8;transition:left .15s,background .15s}
 .ops-tog.on i{background:#5468c9}.ops-tog.on i:after{left:16px;background:#fff}
 .ops-chain{display:flex;flex-direction:column;gap:0}
-.ops-st{display:grid;grid-template-columns:26px 22px 1fr auto auto;gap:8px;align-items:center;padding:6px 9px;border:1px solid var(--ln);border-radius:10px;background:var(--p2)}
+.ops-mv{display:flex;flex-direction:column;gap:2px}.ops-mv .ops-btn{padding:0 6px;font-size:9px;line-height:13px;min-height:0}.ops-mv .ops-btn[disabled]{opacity:.25;pointer-events:none}
+.ops-st.drag{opacity:.4}.ops-st.over{border-color:var(--ac)}
+.ops-st{display:grid;grid-template-columns:auto 26px 22px 1fr auto auto;gap:8px;align-items:center;padding:6px 9px;border:1px solid var(--ln);border-radius:10px;background:var(--p2)}
 .ops-st.off{opacity:.5}
 .ops-st .n{width:24px;height:24px;border-radius:50%;background:var(--p3);color:var(--ac2);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11.5px}
 .ops-st .ic{font-size:17px;text-align:center}
@@ -199,7 +201,7 @@ function setupPostStudio(node) {
   const readState = () => {
     try {
       const s = JSON.parse(W("post_state")?.value || "{}") || {};
-      state = { stages: s.stages || {}, tab: s.tab || "chain", view: { ...state.view, ...(s.view || {}) }, current_preset: s.current_preset };
+      state = { stages: s.stages || {}, order: Array.isArray(s.order) ? s.order : null, tab: s.tab || "chain", view: { ...state.view, ...(s.view || {}) }, current_preset: s.current_preset };
       if (state.view.zoom == null) state.view.zoom = state.view.mode === "crop" ? 4 : 1;      // older "100%" view
     } catch { /* keep */ }
   };
@@ -207,6 +209,26 @@ function setupPostStudio(node) {
   readState();
 
   const stageDef = (k) => spec.stages.find((s) => s.key === k);
+  // The stages in the user's order (state.order); a stage missing from it keeps its default place.
+  function orderedStages() {
+    const keys = spec.stages.map((s) => s.key);
+    const order = (state.order || []).filter((k) => keys.includes(k));
+    keys.forEach((k, i) => {
+      if (order.includes(k)) return;
+      const prev = i ? keys[i - 1] : null;
+      order.splice(prev && order.includes(prev) ? order.indexOf(prev) + 1 : 0, 0, k);
+    });
+    return [...new Set(order)].map(stageDef);
+  }
+  function moveStage(key, to) {
+    const keys = orderedStages().map((s) => s.key);
+    const from = keys.indexOf(key);
+    if (from < 0 || to < 0 || to >= keys.length || to === from) return;
+    keys.splice(to, 0, keys.splice(from, 1)[0]);
+    const def = spec.stages.map((s) => s.key);
+    state.order = keys.every((k, i) => k === def[i]) ? null : keys;
+    state.current_preset = null; saveState(); render(); schedulePreview();
+  }
   const st = (k) => (state.stages[k] ||= { on: stageDef(k)?.default_on !== false, v: {} });
   const isOn = (k) => state.stages[k] ? state.stages[k].on !== false : stageDef(k)?.default_on !== false;
   const val = (k, p) => { const v = state.stages[k]?.v?.[p.name]; return v === undefined ? p.default : v; };
@@ -399,7 +421,7 @@ function setupPostStudio(node) {
     if (busy) { again = true; return; }
     busy = true; refreshBtn.disabled = true; fill(refreshBtn, h("span", { class: "ops-spin" }), "Rendering");
     try {
-      const r = await postJSON("/onyx/post_studio/preview", { node_id: String(node.id), state: { stages: state.stages }, mode: curZoom() > 1 ? "zoom" : "fit", zoom: curZoom(), cx: state.view.cx ?? 0.5, cy: state.view.cy ?? 0.5, size: PREVIEW_SIZE });
+      const r = await postJSON("/onyx/post_studio/preview", { node_id: String(node.id), state: { stages: state.stages, order: state.order }, mode: curZoom() > 1 ? "zoom" : "fit", zoom: curZoom(), cx: state.view.cx ?? 0.5, cy: state.view.cy ?? 0.5, size: PREVIEW_SIZE });
       if (!r.ok) { showEmpty(r.error || "Preview failed."); fill(timBox); return; }
       msg.style.display = "none"; cmp.classList.remove("empty");
       pendingView = { box: r.view_box || [0, 0, r.source_size[0], r.source_size[1]], size: r.source_size };
@@ -454,13 +476,13 @@ function setupPostStudio(node) {
           if (saveMode) {
             const name = await askText(root, `Name for preset ${i}`, pr?.name || `Preset ${i}`, "ops-btn");
             if (name === null) return;
-            const r = await postJSON("/onyx/post_studio/preset/save", { slot: i, name, state: { stages: state.stages } });
+            const r = await postJSON("/onyx/post_studio/preset/save", { slot: i, name, state: { stages: state.stages, order: state.order } });
             if (!r.ok) return toast(r.error, "error");
             spec.presets = r.presets; saveMode = false; state.current_preset = i; saveState(); renderPresets();
             return toast(`Saved to preset ${i}.`, "success");
           }
           if (!pr) return toast("Empty slot: click 💾 Save, then this slot.");
-          state.stages = structuredClone(pr.stages || {}); state.current_preset = i; saveState(); render(); schedulePreview();
+          state.stages = structuredClone(pr.stages || {}); state.order = Array.isArray(pr.order) ? pr.order : null; state.current_preset = i; saveState(); render(); schedulePreview();
           toast(`Preset ${i} “${pr.name}” loaded.`, "success");
         },
         oncontextmenu: async (e) => {
@@ -483,8 +505,8 @@ function setupPostStudio(node) {
     linkPill.style.display = linked ? "" : "none";
     const items = [h("div", { class: "ops-tab" + (state.tab === "chain" ? " on" : ""), onclick: () => setTab("chain") }, "⛓ Chain")];
     let grp = null;
-    spec.stages.forEach((s, i) => {
-      if (s.group !== grp) { grp = s.group; items.push(h("div", { class: "grp" }, GROUPS[grp] || grp)); }
+    orderedStages().forEach((s, i) => {
+      if (!state.order && s.group !== grp) { grp = s.group; items.push(h("div", { class: "grp" }, GROUPS[grp] || grp)); }
       items.push(h("div", { class: "ops-tab" + (state.tab === s.key ? " on" : ""), title: s.info, onclick: () => setTab(s.key) },
         h("span", { class: "dot" + (isOn(s.key) ? " on" : "") }), h("span", { class: "num" }, i + 1), `${s.icon} ${s.short || s.title}`));
     });
@@ -497,17 +519,30 @@ function setupPostStudio(node) {
     const p = pages.chain;
     const rows = [];
     let grp = null;
-    spec.stages.forEach((s, i) => {
-      if (s.group !== grp) { grp = s.group; rows.push(h("div", { class: "ops-ghd" }, GROUPS[grp] || grp)); }
+    const list = orderedStages();
+    list.forEach((s, i) => {
+      if (!state.order && s.group !== grp) { grp = s.group; rows.push(h("div", { class: "ops-ghd" }, GROUPS[grp] || grp)); }
       else if (i) rows.push(h("div", { class: "ops-arrow" }, "↓"));
-      rows.push(h("div", { class: "ops-st" + (isOn(s.key) ? "" : " off") },
+      const row = h("div", { class: "ops-st" + (isOn(s.key) ? "" : " off"), draggable: "true" },
+        h("div", { class: "ops-mv" },
+          h("button", { class: "ops-btn ghost", title: "Move up", disabled: i === 0 ? "" : null, onclick: () => moveStage(s.key, i - 1) }, "▲"),
+          h("button", { class: "ops-btn ghost", title: "Move down", disabled: i === list.length - 1 ? "" : null, onclick: () => moveStage(s.key, i + 1) }, "▼")),
         h("div", { class: "n" }, i + 1), h("div", { class: "ic" }, s.icon),
         h("div", {}, h("div", { class: "tt" }, s.title, s.available ? "" : " — not available"), h("div", { class: "sub" }, s.info), s.fork ? h("div", { class: "ops-fork", style: "margin-top:4px" }, "⑂ " + s.fork) : null),
         toggle("", isOn(s.key), (v) => { st(s.key).on = v; state.current_preset = null; saveState(); render(); schedulePreview(); }, "Stage on / off"),
-        h("button", { class: "ops-btn ghost", onclick: () => setTab(s.key) }, "Edit ›")));
+        h("button", { class: "ops-btn ghost", onclick: () => setTab(s.key) }, "Edit ›"));
+      row.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/onyx-stage", s.key); e.dataTransfer.effectAllowed = "move"; row.classList.add("drag"); });
+      row.addEventListener("dragend", () => row.classList.remove("drag"));
+      row.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("text/onyx-stage")) { e.preventDefault(); row.classList.add("over"); } });
+      row.addEventListener("dragleave", () => row.classList.remove("over"));
+      row.addEventListener("drop", (e) => { e.preventDefault(); row.classList.remove("over"); const k = e.dataTransfer.getData("text/onyx-stage"); if (k && k !== s.key) moveStage(k, i); });
+      rows.push(row);
     });
     fill(p,
-      h("div", { class: "ops-card" }, h("h4", {}, "The chain, in order"), h("div", { class: "ops-chain" }, rows),
+      h("div", { class: "ops-card" }, h("h4", {}, "The chain, in order", h("span", { class: "sp" }),
+          state.order ? h("button", { class: "ops-btn ghost", title: "Put the stages back in the default order", onclick: () => { state.order = null; state.current_preset = null; saveState(); render(); schedulePreview(); } }, "↺ Default order") : null),
+        h("div", { class: "ops-hint", style: "margin-bottom:6px" }, "Drag a stage, or use ▲ ▼, to change the order."),
+        h("div", { class: "ops-chain" }, rows),
         h("div", { class: "ops-hint", style: "margin-top:8px" }, "The 4K Crispy workflow's order: first the light (curves, levels, contrast), then the scene (colour, skin, grade, LUT), then what the phone does to it (lens, sensor clipping, sensor, HDR processing, grain, JPEG, shake), and last what the upload does to the file. Stages outside the default look start switched off.")),
       h("div", { class: "ops-card" }, h("h4", {}, "Start from a look", h("span", { class: "sp" }),
         h("button", { class: "ops-btn ghost", onclick: () => { if (confirm("Reset every stage to the default look?")) { state.stages = {}; state.current_preset = null; saveState(); render(); schedulePreview(); } } }, "↺ Reset all (default)")),

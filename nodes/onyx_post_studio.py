@@ -79,13 +79,13 @@ STAGES = [
      "info": "Fingerprint on the lens: milky veil, patchy glow and smear streaks around lights."},
     {"key": "clip", "group": "phone", "short": "Clip", "cls": "OnyxHighlightClip", "title": "Highlight clip", "icon": "💡",
      "info": "Lamps and windows burn out like on a sensor: per-channel clip, colour drift, fringe, bloom."},
+    {"key": "process", "group": "phone", "short": "Process", "cls": "OnyxPhoneProcessing", "title": "Phone processing", "icon": "📲",
+     "info": "The look of a phone photo taken in low light or with zoom."},
     {"key": "camera", "group": "phone", "short": "Camera", "cls": "Onyx_Camera_Look", "title": "Camera sensor", "icon": "📷",
      "info": "Phone sensor: demosaic softness, sensor noise, lens blur, JPEG."},
     {"key": "lens", "group": "phone", "short": "Lens", "cls": "OnyxLensCharacter", "title": "Lens character", "icon": "🔭",
      "info": "Real-lens signature: lateral / longitudinal chromatic aberration, optical vignette, optional "
              "focus blur with polygon bokeh (focus_mode flat + blur 0 = CA + vignette only)."},
-    {"key": "process", "group": "phone", "short": "Process", "cls": "OnyxPhoneProcessing", "title": "Phone processing", "icon": "📲",
-     "info": "The look of a phone photo taken in low light or with zoom."},
     {"key": "hdr", "group": "phone", "short": "HDR", "cls": "OnyxPhoneHDR", "title": "Phone HDR", "icon": "📱",
      "info": "The phone's smart HDR: lifted shadows, held highlights, local contrast, sharpening halos."},
     {"key": "grain", "group": "phone", "short": "Grain", "cls": "Onyx_Renoise", "title": "Grain & noise", "icon": "🌫️",
@@ -298,7 +298,8 @@ def save_preset(slot: int, name: str, state: dict) -> dict:
     with _lock:
         data = presets()
         data[str(int(slot))] = {"name": (name or f"Preset {slot}").strip()[:40],
-                                "stages": (state or {}).get("stages") or {}, "saved": time.time()}
+                                "stages": (state or {}).get("stages") or {},
+                                "order": (state or {}).get("order") or None, "saved": time.time()}
         _write_presets(data)
         return data
 
