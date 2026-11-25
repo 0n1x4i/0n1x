@@ -121,9 +121,6 @@ const ALL_NODES = new Set([
     "OnyxVideoChainJoin",
     "OnyxVideoChainPrepare",
     "OnyxVideoChainCommit",
-    "OnyxH3InfinityPrepare",
-    "OnyxH3InfinityGuides",
-    "OnyxH3InfinityCommit",
     "OnyxTemporalMaskSmooth",
     "OnyxSessionNode",
     "OnyxVisualPromptDirector",
@@ -512,6 +509,12 @@ function applyBase(node, preview) {
 
 // Shared namespace so other Onyx JS can reuse the palette and widget classes.
 window.Onyx = window.Onyx || {};
+// Other packs can give their nodes the Onyx look: window.Onyx.themeNodes(["ClassName"], isProtected).
+window.Onyx.themeNodes = (names, isProtected = false) => {
+    for (const n of names || []) { ALL_NODES.add(n); if (isProtected) PROTECTED_NODES.add(n); }
+};
+for (const [names, prot] of window.Onyx.pendingThemeNodes || []) window.Onyx.themeNodes(names, prot);
+window.Onyx.pendingThemeNodes = [];
 window.Onyx.glass = {
     palette: PALETTE,
     slotColors: SLOT_COLORS,

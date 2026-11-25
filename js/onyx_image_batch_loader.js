@@ -904,7 +904,7 @@ function setupBatchLoader(node, opts = {}) {
     // ── Server events ──────────────────────────────────────────────────────
     const wsHandler = ({ detail }) => {
         if (String(detail?.node_id) !== String(node.id)) return;
-        // A run queued again by the server for ONE item (H3 Infinity: the next run of a video) reports
+        // A run queued again by the server for ONE item (e.g. the next run of a long job) reports
         // index 0 of a list of 1. It says nothing about this list: the highlighted item stays.
         if (detail.total === 1 && data.order.length > 1) return;
         const i = detail.current_index ?? -1;

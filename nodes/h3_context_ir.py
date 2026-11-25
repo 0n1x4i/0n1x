@@ -503,13 +503,7 @@ class OnyxH3ContextIR:
                     "tooltip": _h3vfx.VFX_TOOLTIP}),
                 # A link, not a widget: it shifts no saved widget value.
                 "window": ("H3_RELAY_WINDOW", {
-                    "tooltip": "Motion Transfer only. Connect Onyx H3 Infinity — Prepare → window.\n"
-                               "It tells this node whether the run is a block or an anchor montage (a "
-                               "montage is looked at one frame per moment and is never described as one "
-                               "continuous scene) and where the session folder is: the list of what the "
-                               "performer wears, carries and handles is written there once "
-                               "(continuity.json) and every run reuses the same words.\n"
-                               "Not connected: a single clip, nothing is kept between runs."}),
+                    "tooltip": "Optional. Not connected: a single clip."}),
                 # Added LAST on purpose (positional widget values): saved workflows keep every value.
                 "openrouter_api_key": ("STRING", {
                     "default": "", "multiline": False,
@@ -579,7 +573,7 @@ class OnyxH3ContextIR:
         if vfx is not None:
             kie["vfx_mode"] = vfx.mode       # new core only: lets pass B write an edit instruction
         if target_model == TARGET_H3_MOTION and isinstance(window, dict):
-            kie["infinity"] = window         # new core only: block / montage + session folder
+            kie["infinity"] = window         # new core only
         if provider == "OpenRouter":
             if "_call_openrouter" not in ns:
                 raise RuntimeError(

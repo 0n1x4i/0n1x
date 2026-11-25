@@ -53,7 +53,6 @@ from .nodes.onyx_rife_batched import OnyxRifeVfiBatched
 from .nodes.onyx_prompt_library import OnyxPromptSaver, OnyxPromptGallery
 from .nodes.onyx_video_chain import (OnyxVideoChainSegment, OnyxVideoChainJoin,
                                          OnyxVideoChainPrepare, OnyxVideoChainCommit)
-# H3 Infinity moved to the private onyx_dev pack (2026-11-24)
 from .nodes.save_image_no_metadata import OnyxSaveImageNoMetadataNode
 from .nodes.onyx_speed_hd_sampler import OnyxSpeedHDSampler
 from .nodes.onyx_hair_weave_fix import OnyxHairWeaveFix
